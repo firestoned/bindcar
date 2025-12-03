@@ -1,0 +1,226 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: MIT
+
+//! BIND9 RNDC API Server
+//!
+//! A lightweight HTTP REST API server that manages BIND9 zones by:
+//! - Creating zone files in `/var/cache/bind/`
+//! - Executing local rndc commands to manage zones
+//! - Providing authenticated access via Kubernetes ServiceAccount tokens
+//!
+//! This server runs as a sidecar container alongside BIND9, sharing
+//! the zone file storage volume and rndc configuration.
+
+use anyhow::Context;
+use axum::{
+    extract::State,
+    http::StatusCode,
+    middleware,
+    response::{IntoResponse, Response},
+    routing::{delete, get, post},
+    Json, Router,
+};
+use serde::Serialize;
+use std::sync::Arc;
+use tower_http::trace::TraceLayer;
+use tracing::{error, info, warn};
+
+mod auth;
+mod rndc;
+mod zones;
+
+use auth::authenticate;
+use rndc::RndcExecutor;
+
+/// Server configuration
+const DEFAULT_BIND_ZONE_DIR: &str = "/var/cache/bind";
+const DEFAULT_API_PORT: u16 = 8080;
+
+/// Application state shared across handlers
+#[derive(Clone)]
+struct AppState {
+    /// RNDC command executor
+    rndc: Arc<RndcExecutor>,
+    /// Zone file directory
+    zone_dir: String,
+}
+
+/// Health check response
+#[derive(Serialize)]
+struct HealthResponse {
+    status: String,
+    version: String,
+}
+
+/// Readiness check response
+#[derive(Serialize)]
+struct ReadyResponse {
+    ready: bool,
+    checks: Vec<String>,
+}
+
+/// Error response
+#[derive(Serialize)]
+struct ErrorResponse {
+    error: String,
+    details: Option<String>,
+}
+
+/// API error type
+#[derive(Debug, thiserror::Error)]
+enum ApiError {
+    #[error("Zone file error: {0}")]
+    ZoneFileError(String),
+
+    #[error("RNDC command failed: {0}")]
+    RndcError(String),
+
+    #[error("Invalid request: {0}")]
+    InvalidRequest(String),
+
+    #[error("Zone not found: {0}")]
+    ZoneNotFound(String),
+
+    #[error("Internal server error: {0}")]
+    #[allow(dead_code)] // Reserved for future use
+    InternalError(String),
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let (status, error_message) = match &self {
+            ApiError::ZoneFileError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            ApiError::RndcError(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
+            ApiError::InvalidRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            ApiError::ZoneNotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
+            ApiError::InternalError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+        };
+
+        let body = Json(ErrorResponse {
+            error: error_message,
+            details: None,
+        });
+
+        (status, body).into_response()
+    }
+}
+
+/// Health check endpoint
+async fn health_check() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "healthy".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+}
+
+/// Readiness check endpoint
+async fn ready_check(State(state): State<AppState>) -> Json<ReadyResponse> {
+    let mut checks = Vec::new();
+    let mut ready = true;
+
+    // Check if zone directory is writable
+    match tokio::fs::metadata(&state.zone_dir).await {
+        Ok(metadata) if metadata.is_dir() => {
+            checks.push(format!("zone_dir_accessible: {}", state.zone_dir));
+        }
+        Ok(_) => {
+            ready = false;
+            checks.push(format!("zone_dir_not_directory: {}", state.zone_dir));
+        }
+        Err(e) => {
+            ready = false;
+            checks.push(format!("zone_dir_error: {}", e));
+        }
+    }
+
+    // Check if rndc is available
+    match state.rndc.status().await {
+        Ok(_) => {
+            checks.push("rndc_available: true".to_string());
+        }
+        Err(e) => {
+            warn!("RNDC not ready: {}", e);
+            ready = false;
+            checks.push(format!("rndc_error: {}", e));
+        }
+    }
+
+    Json(ReadyResponse { ready, checks })
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Initialize tracing
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .json()
+        .init();
+
+    info!(
+        "Starting BIND9 RNDC API server v{}",
+        env!("CARGO_PKG_VERSION")
+    );
+
+    // Get configuration from environment
+    let zone_dir =
+        std::env::var("BIND_ZONE_DIR").unwrap_or_else(|_| DEFAULT_BIND_ZONE_DIR.to_string());
+    let api_port = std::env::var("API_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(DEFAULT_API_PORT);
+
+    info!("Zone directory: {}", zone_dir);
+    info!("API port: {}", api_port);
+
+    // Verify zone directory exists
+    if !tokio::fs::metadata(&zone_dir).await?.is_dir() {
+        error!("Zone directory does not exist: {}", zone_dir);
+        return Err(anyhow::anyhow!("Zone directory not found"));
+    }
+
+    // Create RNDC executor
+    let rndc = Arc::new(RndcExecutor::new());
+
+    // Create application state
+    let state = AppState {
+        rndc,
+        zone_dir: zone_dir.clone(),
+    };
+
+    // Build API routes
+    let api_routes = Router::new()
+        .route("/zones", post(zones::create_zone))
+        .route("/zones/:name", delete(zones::delete_zone))
+        .route("/zones/:name/reload", post(zones::reload_zone))
+        .route("/zones/:name/status", get(zones::zone_status))
+        .route("/zones/:name/freeze", post(zones::freeze_zone))
+        .route("/zones/:name/thaw", post(zones::thaw_zone))
+        .route("/zones/:name/notify", post(zones::notify_zone))
+        .route("/server/status", get(zones::server_status))
+        .with_state(state.clone())
+        .layer(middleware::from_fn(authenticate));
+
+    // Build main router
+    let app = Router::new()
+        .route("/api/v1/health", get(health_check))
+        .route("/api/v1/ready", get(ready_check))
+        .nest("/api/v1", api_routes)
+        .with_state(state)
+        .layer(TraceLayer::new_for_http());
+
+    // Start server
+    let addr = format!("0.0.0.0:{}", api_port);
+
+    info!("BIND9 RNDC API server listening on {}", addr);
+
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+
+    axum::serve(listener, app.into_make_service())
+        .await
+        .context("Server error")?;
+
+    Ok(())
+}

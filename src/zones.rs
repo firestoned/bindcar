@@ -1,0 +1,637 @@
+// Copyright (c) 2025 Erick Bourgeois, firestoned
+// SPDX-License-Identifier: MIT
+
+//! Zone management API handlers
+//!
+//! This module implements HTTP handlers for all zone-related operations:
+//! - Creating zones (with zone file creation)
+//! - Deleting zones
+//! - Reloading zones
+//! - Getting zone status
+//! - Freezing/thawing zones
+//! - Notifying secondaries
+
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    Json,
+};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use tracing::{error, info};
+
+use crate::{ApiError, AppState};
+
+/// SOA (Start of Authority) record configuration
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoaRecord {
+    /// Primary nameserver (e.g., "ns1.example.com.")
+    pub primary_ns: String,
+
+    /// Admin email (e.g., "admin.example.com.")
+    pub admin_email: String,
+
+    /// Serial number (e.g., 2025010101)
+    pub serial: u32,
+
+    /// Refresh interval in seconds (default: 3600)
+    #[serde(default = "default_refresh")]
+    pub refresh: u32,
+
+    /// Retry interval in seconds (default: 600)
+    #[serde(default = "default_retry")]
+    pub retry: u32,
+
+    /// Expire time in seconds (default: 604800)
+    #[serde(default = "default_expire")]
+    pub expire: u32,
+
+    /// Negative TTL in seconds (default: 86400)
+    #[serde(default = "default_negative_ttl")]
+    pub negative_ttl: u32,
+}
+
+fn default_refresh() -> u32 {
+    3600
+}
+
+fn default_retry() -> u32 {
+    600
+}
+
+fn default_expire() -> u32 {
+    604_800
+}
+
+fn default_negative_ttl() -> u32 {
+    86400
+}
+
+/// DNS record entry
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsRecord {
+    /// Record name (e.g., "www", "@")
+    pub name: String,
+
+    /// Record type (e.g., "A", "AAAA", "CNAME", "MX", "TXT")
+    #[serde(rename = "type")]
+    pub record_type: String,
+
+    /// Record value (e.g., "192.0.2.1", "example.com.")
+    pub value: String,
+
+    /// Optional TTL (uses zone default if not specified)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl: Option<u32>,
+
+    /// Optional priority (for MX, SRV records)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<u16>,
+}
+
+/// Structured zone configuration
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ZoneConfig {
+    /// Default TTL for the zone (e.g., 3600)
+    pub ttl: u32,
+
+    /// SOA record
+    pub soa: SoaRecord,
+
+    /// Name servers for the zone
+    pub name_servers: Vec<String>,
+
+    /// DNS records in the zone
+    #[serde(default)]
+    pub records: Vec<DnsRecord>,
+}
+
+impl ZoneConfig {
+    /// Generate BIND9 zone file content from structured configuration
+    pub fn to_zone_file(&self) -> String {
+        let mut zone_file = String::new();
+
+        // TTL directive
+        zone_file.push_str(&format!("$TTL {}\n\n", self.ttl));
+
+        // SOA record
+        zone_file.push_str(&format!(
+            "@ IN SOA {} {} (\n",
+            self.soa.primary_ns, self.soa.admin_email
+        ));
+        zone_file.push_str(&format!("    {}  ; Serial\n", self.soa.serial));
+        zone_file.push_str(&format!("    {}  ; Refresh\n", self.soa.refresh));
+        zone_file.push_str(&format!("    {}  ; Retry\n", self.soa.retry));
+        zone_file.push_str(&format!("    {}  ; Expire\n", self.soa.expire));
+        zone_file.push_str(&format!(
+            "    {} ); Negative TTL\n\n",
+            self.soa.negative_ttl
+        ));
+
+        // Name servers
+        for ns in &self.name_servers {
+            zone_file.push_str(&format!("@ IN NS {}\n", ns));
+        }
+
+        if !self.name_servers.is_empty() {
+            zone_file.push('\n');
+        }
+
+        // DNS records
+        for record in &self.records {
+            let ttl_str = if let Some(ttl) = record.ttl {
+                format!("{} ", ttl)
+            } else {
+                String::new()
+            };
+
+            let priority_str = if let Some(priority) = record.priority {
+                format!("{} ", priority)
+            } else {
+                String::new()
+            };
+
+            zone_file.push_str(&format!(
+                "{} {}IN {} {}{}\n",
+                record.name, ttl_str, record.record_type, priority_str, record.value
+            ));
+        }
+
+        zone_file
+    }
+}
+
+/// Request to create a new zone
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateZoneRequest {
+    /// Zone name (e.g., "example.com")
+    pub zone_name: String,
+
+    /// Zone type ("master" or "slave")
+    pub zone_type: String,
+
+    /// Structured zone configuration
+    pub zone_config: ZoneConfig,
+
+    /// Optional: TSIG key name for allow-update
+    pub update_key_name: Option<String>,
+}
+
+/// Response from zone operations
+#[derive(Debug, Serialize)]
+pub struct ZoneResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
+}
+
+/// Server status response
+#[derive(Debug, Serialize)]
+pub struct ServerStatusResponse {
+    pub status: String,
+}
+
+/// Create a new zone
+///
+/// POST /api/v1/zones
+///
+/// This endpoint:
+/// 1. Generates zone file from structured configuration
+/// 2. Writes the zone file to disk
+/// 3. Executes `rndc addzone` to add the zone to BIND9
+///
+/// # Request Body
+/// ```json
+/// {
+///   "zoneName": "example.com",
+///   "zoneType": "master",
+///   "zoneConfig": {
+///     "ttl": 3600,
+///     "soa": {
+///       "primaryNs": "ns1.example.com.",
+///       "adminEmail": "admin.example.com.",
+///       "serial": 2025010101,
+///       "refresh": 3600,
+///       "retry": 600,
+///       "expire": 604800,
+///       "negativeTtl": 86400
+///     },
+///     "nameServers": ["ns1.example.com.", "ns2.example.com."],
+///     "records": [
+///       {
+///         "name": "www",
+///         "type": "A",
+///         "value": "192.0.2.1",
+///         "ttl": 300
+///       }
+///     ]
+///   },
+///   "updateKeyName": "bindy-operator"
+/// }
+/// ```
+pub async fn create_zone(
+    State(state): State<AppState>,
+    Json(request): Json<CreateZoneRequest>,
+) -> Result<(StatusCode, Json<ZoneResponse>), ApiError> {
+    info!("Creating zone: {}", request.zone_name);
+
+    // Validate zone name
+    if request.zone_name.is_empty() {
+        return Err(ApiError::InvalidRequest(
+            "Zone name cannot be empty".to_string(),
+        ));
+    }
+
+    // Validate zone type
+    if request.zone_type != "master" && request.zone_type != "slave" {
+        return Err(ApiError::InvalidRequest(format!(
+            "Invalid zone type: {}. Must be 'master' or 'slave'",
+            request.zone_type
+        )));
+    }
+
+    // Generate zone file content from structured configuration
+    let zone_content = request.zone_config.to_zone_file();
+
+    info!(
+        "Generated zone file content for {}: {} bytes",
+        request.zone_name,
+        zone_content.len()
+    );
+
+    // Create zone file path
+    let zone_file_name = format!("{}.zone", request.zone_name);
+    let zone_file_path = PathBuf::from(&state.zone_dir).join(&zone_file_name);
+
+    // Write zone file
+    tokio::fs::write(&zone_file_path, &zone_content)
+        .await
+        .map_err(|e| {
+            error!(
+                "Failed to write zone file {}: {}",
+                zone_file_path.display(),
+                e
+            );
+            ApiError::ZoneFileError(format!("Failed to write zone file: {}", e))
+        })?;
+
+    info!("Wrote zone file: {}", zone_file_path.display());
+
+    // Build zone configuration for rndc addzone
+    let zone_file_full_path = format!("{}/{}", state.zone_dir, zone_file_name);
+    let zone_config = if let Some(key_name) = &request.update_key_name {
+        format!(
+            r#"{{ type {}; file "{}"; allow-update {{ key "{}"; }}; }};"#,
+            request.zone_type, zone_file_full_path, key_name
+        )
+    } else {
+        format!(
+            r#"{{ type {}; file "{}"; }};"#,
+            request.zone_type, zone_file_full_path
+        )
+    };
+
+    // Execute rndc addzone
+    let output = state
+        .rndc
+        .addzone(&request.zone_name, &zone_config)
+        .await
+        .map_err(|e| {
+            error!("RNDC addzone failed for {}: {}", request.zone_name, e);
+            ApiError::RndcError(format!("Failed to add zone: {}", e))
+        })?;
+
+    info!("Zone {} created successfully", request.zone_name);
+
+    Ok((
+        StatusCode::CREATED,
+        Json(ZoneResponse {
+            success: true,
+            message: format!("Zone {} created successfully", request.zone_name),
+            details: Some(output),
+        }),
+    ))
+}
+
+/// Delete a zone
+///
+/// DELETE /api/v1/zones/:name
+pub async fn delete_zone(
+    State(state): State<AppState>,
+    Path(zone_name): Path<String>,
+) -> Result<Json<ZoneResponse>, ApiError> {
+    info!("Deleting zone: {}", zone_name);
+
+    // Execute rndc delzone
+    let output = state.rndc.delzone(&zone_name).await.map_err(|e| {
+        error!("RNDC delzone failed for {}: {}", zone_name, e);
+        ApiError::RndcError(format!("Failed to delete zone: {}", e))
+    })?;
+
+    // Optionally delete zone file
+    let zone_file_name = format!("{}.zone", zone_name);
+    let zone_file_path = PathBuf::from(&state.zone_dir).join(&zone_file_name);
+
+    if zone_file_path.exists() {
+        if let Err(e) = tokio::fs::remove_file(&zone_file_path).await {
+            error!(
+                "Failed to delete zone file {}: {}",
+                zone_file_path.display(),
+                e
+            );
+            // Don't fail the request if file deletion fails - zone is already removed from BIND9
+        } else {
+            info!("Deleted zone file: {}", zone_file_path.display());
+        }
+    }
+
+    info!("Zone {} deleted successfully", zone_name);
+
+    Ok(Json(ZoneResponse {
+        success: true,
+        message: format!("Zone {} deleted successfully", zone_name),
+        details: Some(output),
+    }))
+}
+
+/// Reload a zone
+///
+/// POST /api/v1/zones/:name/reload
+pub async fn reload_zone(
+    State(state): State<AppState>,
+    Path(zone_name): Path<String>,
+) -> Result<Json<ZoneResponse>, ApiError> {
+    info!("Reloading zone: {}", zone_name);
+
+    let output = state.rndc.reload(&zone_name).await.map_err(|e| {
+        error!("RNDC reload failed for {}: {}", zone_name, e);
+        ApiError::RndcError(format!("Failed to reload zone: {}", e))
+    })?;
+
+    info!("Zone {} reloaded successfully", zone_name);
+
+    Ok(Json(ZoneResponse {
+        success: true,
+        message: format!("Zone {} reloaded successfully", zone_name),
+        details: Some(output),
+    }))
+}
+
+/// Get zone status
+///
+/// GET /api/v1/zones/:name/status
+pub async fn zone_status(
+    State(state): State<AppState>,
+    Path(zone_name): Path<String>,
+) -> Result<Json<ZoneResponse>, ApiError> {
+    info!("Getting status for zone: {}", zone_name);
+
+    let output = state.rndc.zonestatus(&zone_name).await.map_err(|e| {
+        error!("RNDC zonestatus failed for {}: {}", zone_name, e);
+        if e.to_string().contains("not found") {
+            ApiError::ZoneNotFound(zone_name.clone())
+        } else {
+            ApiError::RndcError(format!("Failed to get zone status: {}", e))
+        }
+    })?;
+
+    Ok(Json(ZoneResponse {
+        success: true,
+        message: format!("Zone {} status retrieved", zone_name),
+        details: Some(output),
+    }))
+}
+
+/// Freeze a zone (disable dynamic updates)
+///
+/// POST /api/v1/zones/:name/freeze
+pub async fn freeze_zone(
+    State(state): State<AppState>,
+    Path(zone_name): Path<String>,
+) -> Result<Json<ZoneResponse>, ApiError> {
+    info!("Freezing zone: {}", zone_name);
+
+    let output = state.rndc.freeze(&zone_name).await.map_err(|e| {
+        error!("RNDC freeze failed for {}: {}", zone_name, e);
+        ApiError::RndcError(format!("Failed to freeze zone: {}", e))
+    })?;
+
+    info!("Zone {} frozen successfully", zone_name);
+
+    Ok(Json(ZoneResponse {
+        success: true,
+        message: format!("Zone {} frozen successfully", zone_name),
+        details: Some(output),
+    }))
+}
+
+/// Thaw a zone (enable dynamic updates)
+///
+/// POST /api/v1/zones/:name/thaw
+pub async fn thaw_zone(
+    State(state): State<AppState>,
+    Path(zone_name): Path<String>,
+) -> Result<Json<ZoneResponse>, ApiError> {
+    info!("Thawing zone: {}", zone_name);
+
+    let output = state.rndc.thaw(&zone_name).await.map_err(|e| {
+        error!("RNDC thaw failed for {}: {}", zone_name, e);
+        ApiError::RndcError(format!("Failed to thaw zone: {}", e))
+    })?;
+
+    info!("Zone {} thawed successfully", zone_name);
+
+    Ok(Json(ZoneResponse {
+        success: true,
+        message: format!("Zone {} thawed successfully", zone_name),
+        details: Some(output),
+    }))
+}
+
+/// Notify secondaries about zone changes
+///
+/// POST /api/v1/zones/:name/notify
+pub async fn notify_zone(
+    State(state): State<AppState>,
+    Path(zone_name): Path<String>,
+) -> Result<Json<ZoneResponse>, ApiError> {
+    info!("Notifying secondaries for zone: {}", zone_name);
+
+    let output = state.rndc.notify(&zone_name).await.map_err(|e| {
+        error!("RNDC notify failed for {}: {}", zone_name, e);
+        ApiError::RndcError(format!("Failed to notify zone: {}", e))
+    })?;
+
+    info!("Zone {} notify sent successfully", zone_name);
+
+    Ok(Json(ZoneResponse {
+        success: true,
+        message: format!("Notify sent for zone {}", zone_name),
+        details: Some(output),
+    }))
+}
+
+/// Get server status
+///
+/// GET /api/v1/server/status
+pub async fn server_status(
+    State(state): State<AppState>,
+) -> Result<Json<ServerStatusResponse>, ApiError> {
+    info!("Getting server status");
+
+    let output = state.rndc.status().await.map_err(|e| {
+        error!("RNDC status failed: {}", e);
+        ApiError::RndcError(format!("Failed to get server status: {}", e))
+    })?;
+
+    Ok(Json(ServerStatusResponse { status: output }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_zone_config_to_zone_file() {
+        let config = ZoneConfig {
+            ttl: 3600,
+            soa: SoaRecord {
+                primary_ns: "ns1.example.com.".to_string(),
+                admin_email: "admin.example.com.".to_string(),
+                serial: 2025010101,
+                refresh: 3600,
+                retry: 600,
+                expire: 604_800,
+                negative_ttl: 86400,
+            },
+            name_servers: vec![
+                "ns1.example.com.".to_string(),
+                "ns2.example.com.".to_string(),
+            ],
+            records: vec![
+                DnsRecord {
+                    name: "www".to_string(),
+                    record_type: "A".to_string(),
+                    value: "192.0.2.1".to_string(),
+                    ttl: Some(300),
+                    priority: None,
+                },
+                DnsRecord {
+                    name: "@".to_string(),
+                    record_type: "MX".to_string(),
+                    value: "mail.example.com.".to_string(),
+                    ttl: None,
+                    priority: Some(10),
+                },
+            ],
+        };
+
+        let zone_file = config.to_zone_file();
+
+        assert!(zone_file.contains("$TTL 3600"));
+        assert!(zone_file.contains("@ IN SOA ns1.example.com. admin.example.com."));
+        assert!(zone_file.contains("2025010101"));
+        assert!(zone_file.contains("@ IN NS ns1.example.com."));
+        assert!(zone_file.contains("@ IN NS ns2.example.com."));
+        assert!(zone_file.contains("www 300 IN A 192.0.2.1"));
+        assert!(zone_file.contains("@ IN MX 10 mail.example.com."));
+    }
+
+    #[test]
+    fn test_soa_record_with_defaults() {
+        let json = r#"{
+            "primaryNs": "ns1.example.com.",
+            "adminEmail": "admin.example.com.",
+            "serial": 2025010101
+        }"#;
+
+        let soa: SoaRecord = serde_json::from_str(json).unwrap();
+        assert_eq!(soa.primary_ns, "ns1.example.com.");
+        assert_eq!(soa.admin_email, "admin.example.com.");
+        assert_eq!(soa.serial, 2025010101);
+        assert_eq!(soa.refresh, 3600);
+        assert_eq!(soa.retry, 600);
+        assert_eq!(soa.expire, 604_800);
+        assert_eq!(soa.negative_ttl, 86400);
+    }
+
+    #[test]
+    fn test_create_zone_request_deserialization() {
+        let json = r#"{
+            "zoneName": "example.com",
+            "zoneType": "master",
+            "zoneConfig": {
+                "ttl": 3600,
+                "soa": {
+                    "primaryNs": "ns1.example.com.",
+                    "adminEmail": "admin.example.com.",
+                    "serial": 2025010101
+                },
+                "nameServers": ["ns1.example.com."],
+                "records": []
+            },
+            "updateKeyName": "test-key"
+        }"#;
+
+        let request: CreateZoneRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.zone_name, "example.com");
+        assert_eq!(request.zone_type, "master");
+        assert_eq!(request.zone_config.ttl, 3600);
+        assert_eq!(request.update_key_name, Some("test-key".to_string()));
+    }
+
+    #[test]
+    fn test_create_zone_request_without_update_key() {
+        let json = r#"{
+            "zoneName": "example.com",
+            "zoneType": "master",
+            "zoneConfig": {
+                "ttl": 3600,
+                "soa": {
+                    "primaryNs": "ns1.example.com.",
+                    "adminEmail": "admin.example.com.",
+                    "serial": 2025010101
+                },
+                "nameServers": ["ns1.example.com."]
+            }
+        }"#;
+
+        let request: CreateZoneRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.zone_name, "example.com");
+        assert!(request.update_key_name.is_none());
+    }
+
+    #[test]
+    fn test_dns_record_without_optional_fields() {
+        let json = r#"{
+            "name": "www",
+            "type": "A",
+            "value": "192.0.2.1"
+        }"#;
+
+        let record: DnsRecord = serde_json::from_str(json).unwrap();
+        assert_eq!(record.name, "www");
+        assert_eq!(record.record_type, "A");
+        assert_eq!(record.value, "192.0.2.1");
+        assert!(record.ttl.is_none());
+        assert!(record.priority.is_none());
+    }
+
+    #[test]
+    fn test_zone_response_serialization() {
+        let response = ZoneResponse {
+            success: true,
+            message: "Zone created".to_string(),
+            details: Some("Output".to_string()),
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"success\":true"));
+        assert!(json.contains("\"message\":\"Zone created\""));
+    }
+}
