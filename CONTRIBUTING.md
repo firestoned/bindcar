@@ -1,4 +1,4 @@
-# Contributing to bind9-rndc-api
+# Contributing to bindcar
 
 Thank you for your interest in contributing!
 
@@ -11,8 +11,8 @@ Thank you for your interest in contributing!
 
 2. Clone the repository:
    ```bash
-   git clone https://github.com/firestoned/bind9-rndc-api.git
-   cd bind9-rndc-api
+   git clone https://github.com/firestoned/bindcar.git
+   cd bindcar
    ```
 
 3. Build and test:

@@ -15,22 +15,66 @@ use anyhow::Context;
 use axum::{
     extract::State,
     http::StatusCode,
-    middleware,
+    middleware as axum_middleware,
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{get, post},
     Json, Router,
 };
 use serde::Serialize;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 mod auth;
+mod metrics;
+mod middleware;
 mod rndc;
 mod zones;
 
 use auth::authenticate;
 use rndc::RndcExecutor;
+
+/// OpenAPI documentation structure
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        zones::create_zone,
+        zones::delete_zone,
+        zones::reload_zone,
+        zones::zone_status,
+        zones::freeze_zone,
+        zones::thaw_zone,
+        zones::notify_zone,
+        zones::server_status,
+        zones::list_zones,
+        zones::get_zone,
+    ),
+    components(
+        schemas(
+            zones::CreateZoneRequest,
+            zones::ZoneResponse,
+            zones::ServerStatusResponse,
+            zones::ZoneInfo,
+            zones::ZoneListResponse,
+            zones::ZoneConfig,
+            zones::SoaRecord,
+            zones::DnsRecord,
+        )
+    ),
+    tags(
+        (name = "zones", description = "Zone management endpoints"),
+        (name = "server", description = "Server status endpoints")
+    ),
+    info(
+        title = "Bindcar API",
+        version = "0.1.0",
+        description = "HTTP REST API for managing BIND9 zones via RNDC",
+        license(name = "MIT")
+    )
+)]
+struct ApiDoc;
 
 /// Server configuration
 const DEFAULT_BIND_ZONE_DIR: &str = "/var/cache/bind";
@@ -113,6 +157,26 @@ async fn health_check() -> Json<HealthResponse> {
     })
 }
 
+/// Metrics endpoint for Prometheus scraping
+async fn metrics_handler() -> Response {
+    match metrics::gather_metrics() {
+        Ok(metrics_text) => (
+            StatusCode::OK,
+            [("Content-Type", "text/plain; version=0.0.4")],
+            metrics_text,
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to gather metrics: {}", e),
+                details: None,
+            }),
+        )
+            .into_response(),
+    }
+}
+
 /// Readiness check endpoint
 async fn ready_check(State(state): State<AppState>) -> Json<ReadyResponse> {
     let mut checks = Vec::new();
@@ -164,6 +228,9 @@ async fn main() -> anyhow::Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
+    // Initialize metrics
+    metrics::init_metrics();
+
     // Get configuration from environment
     let zone_dir =
         std::env::var("BIND_ZONE_DIR").unwrap_or_else(|_| DEFAULT_BIND_ZONE_DIR.to_string());
@@ -171,9 +238,23 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(DEFAULT_API_PORT);
+    let rndc_path = std::env::var("RNDC_PATH").ok();
+    let disable_auth = std::env::var("DISABLE_AUTH")
+        .ok()
+        .and_then(|v| v.parse::<bool>().ok())
+        .unwrap_or(false);
 
     info!("Zone directory: {}", zone_dir);
     info!("API port: {}", api_port);
+    if let Some(ref path) = rndc_path {
+        info!("RNDC path: {}", path);
+    }
+    if disable_auth {
+        warn!("⚠️  Authentication is DISABLED - API endpoints are unprotected!");
+        warn!("⚠️  This should ONLY be used in trusted environments (e.g., Linkerd service mesh)");
+    } else {
+        info!("Authentication is enabled");
+    }
 
     // Verify zone directory exists
     if !tokio::fs::metadata(&zone_dir).await?.is_dir() {
@@ -182,7 +263,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Create RNDC executor
-    let rndc = Arc::new(RndcExecutor::new());
+    let rndc = Arc::new(RndcExecutor::new(rndc_path));
 
     // Create application state
     let state = AppState {
@@ -192,29 +273,42 @@ async fn main() -> anyhow::Result<()> {
 
     // Build API routes
     let api_routes = Router::new()
-        .route("/zones", post(zones::create_zone))
-        .route("/zones/:name", delete(zones::delete_zone))
-        .route("/zones/:name/reload", post(zones::reload_zone))
-        .route("/zones/:name/status", get(zones::zone_status))
-        .route("/zones/:name/freeze", post(zones::freeze_zone))
-        .route("/zones/:name/thaw", post(zones::thaw_zone))
-        .route("/zones/:name/notify", post(zones::notify_zone))
+        .route("/zones", post(zones::create_zone).get(zones::list_zones))
+        .route(
+            "/zones/{name}",
+            get(zones::get_zone).delete(zones::delete_zone),
+        )
+        .route("/zones/{name}/reload", post(zones::reload_zone))
+        .route("/zones/{name}/status", get(zones::zone_status))
+        .route("/zones/{name}/freeze", post(zones::freeze_zone))
+        .route("/zones/{name}/thaw", post(zones::thaw_zone))
+        .route("/zones/{name}/notify", post(zones::notify_zone))
         .route("/server/status", get(zones::server_status))
-        .with_state(state.clone())
-        .layer(middleware::from_fn(authenticate));
+        .with_state(state.clone());
+
+    // Conditionally apply authentication middleware
+    let api_routes = if disable_auth {
+        api_routes
+    } else {
+        api_routes.layer(axum_middleware::from_fn(authenticate))
+    };
 
     // Build main router
     let app = Router::new()
+        .merge(SwaggerUi::new("/api/v1/docs").url("/api/v1/openapi.json", ApiDoc::openapi()))
         .route("/api/v1/health", get(health_check))
         .route("/api/v1/ready", get(ready_check))
+        .route("/metrics", get(metrics_handler))
         .nest("/api/v1", api_routes)
         .with_state(state)
+        .layer(axum_middleware::from_fn(middleware::track_metrics))
         .layer(TraceLayer::new_for_http());
 
     // Start server
     let addr = format!("0.0.0.0:{}", api_port);
 
     info!("BIND9 RNDC API server listening on {}", addr);
+    info!("Swagger UI available at http://{}/api/v1/docs", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
