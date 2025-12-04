@@ -13,7 +13,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 Verify installation:
 ```bash
 rustc --version
-# Should show: rustc 1.87.0 or later
+# Should show: rustc 1.89.0 or later
 ```
 
 ### Install Dependencies

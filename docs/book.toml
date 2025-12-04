@@ -23,7 +23,7 @@ additional-js = ["mermaid.min.js", "mermaid-init.js", "theme/page-toc.js"]
 no-section-label = false
 
 [output.html.fold]
-enable = false
+enable = true
 level = 0
 
 [output.html.playground]

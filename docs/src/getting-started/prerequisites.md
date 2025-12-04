@@ -46,7 +46,7 @@ If rndc is not configured, you'll need to set up the rndc key. See [RNDC Integra
 
 If building from source, you'll need:
 
-- Rust 1.87.0 or later
+- Rust 1.89.0 or later
 - Cargo (included with Rust)
 - Git
 - C compiler (gcc or clang) for some dependencies

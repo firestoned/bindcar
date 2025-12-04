@@ -1,0 +1,17 @@
+# Cross.rs configuration for ARM64 cross-compilation
+# https://github.com/cross-rs/cross
+
+[build]
+# Use the pre-built cross images
+pre-build = []
+
+[target.aarch64-unknown-linux-gnu]
+# Use the official cross image for ARM64
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:latest"
+
+# Pass through required environment variables
+[target.aarch64-unknown-linux-gnu.env]
+passthrough = [
+    "RUST_BACKTRACE",
+    "RUST_LOG",
+]
