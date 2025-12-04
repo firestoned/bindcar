@@ -1,0 +1,244 @@
+name: Release
+
+on:
+  release:
+    types: [created, published]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-and-test:
+    name: Build and Test - ${{ matrix.platform.name }}
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Linux x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: bindcar-linux-amd64
+            binary_name: bindcar
+          - name: Linux ARM64
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: bindcar-linux-arm64
+            binary_name: bindcar
+          - name: macOS x86_64 (Intel)
+            os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: bindcar-macos-amd64
+            binary_name: bindcar
+          - name: macOS ARM64 (Apple Silicon)
+            os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: bindcar-macos-arm64
+            binary_name: bindcar
+          - name: Windows x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: bindcar-windows-amd64
+            binary_name: bindcar.exe
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ matrix.platform.target }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.platform.target }}-cargo-build-target-
+
+      - name: Run tests (native targets only)
+        if: matrix.platform.target != 'aarch64-unknown-linux-gnu'
+        run: cargo test --target ${{ matrix.platform.target }} --verbose
+
+      - name: Build (release)
+        run: cargo build --release --target ${{ matrix.platform.target }} --verbose
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx
+
+      - name: Generate SBOM
+        run: |
+          cargo cyclonedx --format json --target ${{ matrix.platform.target }} \
+            --output-pattern target/${{ matrix.platform.target }}/release/sbom.json
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform.artifact_name }}
+          path: target/${{ matrix.platform.target }}/release/${{ matrix.platform.binary_name }}
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform.artifact_name }}-sbom
+          path: target/${{ matrix.platform.target }}/release/sbom.json
+
+  docker-release:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Get the tag name (e.g., v1.0.0 or 1.0.0)
+          TAG_NAME="${{ github.event.release.tag_name }}"
+          # Remove 'v' prefix if present
+          VERSION="${TAG_NAME#v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+            type=raw,value=${{ steps.version.outputs.tag_name }}
+
+      - name: Build and push Docker image
+        id: docker_build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+          sbom: true
+          provenance: true
+
+      - name: Generate Docker SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag_name }}
+          format: cyclonedx-json
+          output-file: docker-sbom.json
+
+      - name: Upload Docker SBOM as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-sbom
+          path: docker-sbom.json
+
+  upload-release-assets:
+    name: Upload Release Assets
+    runs-on: ubuntu-latest
+    needs: [build-and-test, docker-release]
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Create tarballs and checksums
+        run: |
+          cd artifacts
+
+          # Process each platform binary
+          for dir in bindcar-*; do
+            # Skip SBOM directories
+            if [[ "$dir" == *-sbom ]]; then
+              continue
+            fi
+
+            platform="$dir"
+            echo "Processing $platform..."
+            cd "$platform"
+
+            # Make binary executable (Unix-like systems)
+            if [ -f "bindcar" ]; then
+              chmod +x bindcar
+              tar czf "../${platform}.tar.gz" bindcar
+            # Windows
+            elif [ -f "bindcar.exe" ]; then
+              zip "../${platform}.zip" bindcar.exe
+            fi
+
+            cd ..
+          done
+
+          # Collect all SBOM files
+          mkdir -p sboms
+          for sbom_dir in *-sbom; do
+            if [ -d "$sbom_dir" ]; then
+              cp "$sbom_dir"/sbom.json "sboms/${sbom_dir}.json" 2>/dev/null || true
+            fi
+          done
+
+          # Copy Docker SBOM if it exists
+          if [ -f "docker-sbom/docker-sbom.json" ]; then
+            cp docker-sbom/docker-sbom.json sboms/
+          fi
+
+          # Generate SHA256 checksums
+          sha256sum *.tar.gz *.zip sboms/*.json > checksums.sha256 2>/dev/null || true
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/sboms/*.json
+            artifacts/checksums.sha256

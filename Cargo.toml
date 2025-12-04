@@ -1,11 +1,12 @@
 [package]
-name = "bind9-rndc-api"
+name = "bindcar"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.87.0"
 authors = ["Erick Bourgeois <firestoned@firestoned.io>"]
 license = "MIT"
 description = "HTTP REST API for managing BIND9 zones via rndc"
-repository = "https://github.com/firestoned/bindy"
+repository = "https://github.com/firestoned/bindcar"
 
 [dependencies]
 # HTTP server framework
@@ -28,8 +29,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 anyhow = "1.0"
 thiserror = "1.0"
 
-# Command execution
-tokio-process = "0.2"
+# OpenAPI / Swagger
+utoipa = { version = "5", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+
+# Metrics
+prometheus = "0.13"
+lazy_static = "1.4"
 
 [dev-dependencies]
 # Testing

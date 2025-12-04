@@ -16,3 +16,9 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Local development
+.tmp/
+
+/docs/target/
+/docs/book/

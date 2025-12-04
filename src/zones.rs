@@ -19,11 +19,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::{error, info};
+use utoipa::ToSchema;
 
-use crate::{ApiError, AppState};
+use crate::{metrics, ApiError, AppState};
 
 /// SOA (Start of Authority) record configuration
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SoaRecord {
     /// Primary nameserver (e.g., "ns1.example.com.")
@@ -69,7 +70,7 @@ fn default_negative_ttl() -> u32 {
 }
 
 /// DNS record entry
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DnsRecord {
     /// Record name (e.g., "www", "@")
@@ -92,7 +93,7 @@ pub struct DnsRecord {
 }
 
 /// Structured zone configuration
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ZoneConfig {
     /// Default TTL for the zone (e.g., 3600)
@@ -165,7 +166,7 @@ impl ZoneConfig {
 }
 
 /// Request to create a new zone
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateZoneRequest {
     /// Zone name (e.g., "example.com")
@@ -182,7 +183,7 @@ pub struct CreateZoneRequest {
 }
 
 /// Response from zone operations
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ZoneResponse {
     pub success: bool,
     pub message: String,
@@ -191,49 +192,48 @@ pub struct ZoneResponse {
 }
 
 /// Server status response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ServerStatusResponse {
     pub status: String,
 }
 
+/// Zone information
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ZoneInfo {
+    pub name: String,
+    pub zone_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub serial: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+}
+
+/// List of zones response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ZoneListResponse {
+    pub zones: Vec<String>,
+    pub count: usize,
+}
+
 /// Create a new zone
-///
-/// POST /api/v1/zones
 ///
 /// This endpoint:
 /// 1. Generates zone file from structured configuration
 /// 2. Writes the zone file to disk
 /// 3. Executes `rndc addzone` to add the zone to BIND9
-///
-/// # Request Body
-/// ```json
-/// {
-///   "zoneName": "example.com",
-///   "zoneType": "master",
-///   "zoneConfig": {
-///     "ttl": 3600,
-///     "soa": {
-///       "primaryNs": "ns1.example.com.",
-///       "adminEmail": "admin.example.com.",
-///       "serial": 2025010101,
-///       "refresh": 3600,
-///       "retry": 600,
-///       "expire": 604800,
-///       "negativeTtl": 86400
-///     },
-///     "nameServers": ["ns1.example.com.", "ns2.example.com."],
-///     "records": [
-///       {
-///         "name": "www",
-///         "type": "A",
-///         "value": "192.0.2.1",
-///         "ttl": 300
-///       }
-///     ]
-///   },
-///   "updateKeyName": "bindy-operator"
-/// }
-/// ```
+#[utoipa::path(
+    post,
+    path = "/api/v1/zones",
+    request_body = CreateZoneRequest,
+    responses(
+        (status = 201, description = "Zone created successfully", body = ZoneResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 502, description = "RNDC command failed"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "zones"
+)]
 pub async fn create_zone(
     State(state): State<AppState>,
     Json(request): Json<CreateZoneRequest>,
@@ -242,6 +242,7 @@ pub async fn create_zone(
 
     // Validate zone name
     if request.zone_name.is_empty() {
+        metrics::record_zone_operation("create", false);
         return Err(ApiError::InvalidRequest(
             "Zone name cannot be empty".to_string(),
         ));
@@ -249,6 +250,7 @@ pub async fn create_zone(
 
     // Validate zone type
     if request.zone_type != "master" && request.zone_type != "slave" {
+        metrics::record_zone_operation("create", false);
         return Err(ApiError::InvalidRequest(format!(
             "Invalid zone type: {}. Must be 'master' or 'slave'",
             request.zone_type
@@ -277,6 +279,7 @@ pub async fn create_zone(
                 zone_file_path.display(),
                 e
             );
+            metrics::record_zone_operation("create", false);
             ApiError::ZoneFileError(format!("Failed to write zone file: {}", e))
         })?;
 
@@ -303,10 +306,12 @@ pub async fn create_zone(
         .await
         .map_err(|e| {
             error!("RNDC addzone failed for {}: {}", request.zone_name, e);
+            metrics::record_zone_operation("create", false);
             ApiError::RndcError(format!("Failed to add zone: {}", e))
         })?;
 
     info!("Zone {} created successfully", request.zone_name);
+    metrics::record_zone_operation("create", true);
 
     Ok((
         StatusCode::CREATED,
@@ -319,8 +324,18 @@ pub async fn create_zone(
 }
 
 /// Delete a zone
-///
-/// DELETE /api/v1/zones/:name
+#[utoipa::path(
+    delete,
+    path = "/api/v1/zones/{name}",
+    params(
+        ("name" = String, Path, description = "Zone name to delete")
+    ),
+    responses(
+        (status = 200, description = "Zone deleted successfully", body = ZoneResponse),
+        (status = 502, description = "RNDC command failed")
+    ),
+    tag = "zones"
+)]
 pub async fn delete_zone(
     State(state): State<AppState>,
     Path(zone_name): Path<String>,
@@ -330,6 +345,7 @@ pub async fn delete_zone(
     // Execute rndc delzone
     let output = state.rndc.delzone(&zone_name).await.map_err(|e| {
         error!("RNDC delzone failed for {}: {}", zone_name, e);
+        metrics::record_zone_operation("delete", false);
         ApiError::RndcError(format!("Failed to delete zone: {}", e))
     })?;
 
@@ -351,6 +367,7 @@ pub async fn delete_zone(
     }
 
     info!("Zone {} deleted successfully", zone_name);
+    metrics::record_zone_operation("delete", true);
 
     Ok(Json(ZoneResponse {
         success: true,
@@ -360,8 +377,18 @@ pub async fn delete_zone(
 }
 
 /// Reload a zone
-///
-/// POST /api/v1/zones/:name/reload
+#[utoipa::path(
+    post,
+    path = "/api/v1/zones/{name}/reload",
+    params(
+        ("name" = String, Path, description = "Zone name to reload")
+    ),
+    responses(
+        (status = 200, description = "Zone reloaded successfully", body = ZoneResponse),
+        (status = 502, description = "RNDC command failed")
+    ),
+    tag = "zones"
+)]
 pub async fn reload_zone(
     State(state): State<AppState>,
     Path(zone_name): Path<String>,
@@ -370,10 +397,12 @@ pub async fn reload_zone(
 
     let output = state.rndc.reload(&zone_name).await.map_err(|e| {
         error!("RNDC reload failed for {}: {}", zone_name, e);
+        metrics::record_zone_operation("reload", false);
         ApiError::RndcError(format!("Failed to reload zone: {}", e))
     })?;
 
     info!("Zone {} reloaded successfully", zone_name);
+    metrics::record_zone_operation("reload", true);
 
     Ok(Json(ZoneResponse {
         success: true,
@@ -383,8 +412,19 @@ pub async fn reload_zone(
 }
 
 /// Get zone status
-///
-/// GET /api/v1/zones/:name/status
+#[utoipa::path(
+    get,
+    path = "/api/v1/zones/{name}/status",
+    params(
+        ("name" = String, Path, description = "Zone name")
+    ),
+    responses(
+        (status = 200, description = "Zone status retrieved", body = ZoneResponse),
+        (status = 404, description = "Zone not found"),
+        (status = 502, description = "RNDC command failed")
+    ),
+    tag = "zones"
+)]
 pub async fn zone_status(
     State(state): State<AppState>,
     Path(zone_name): Path<String>,
@@ -408,8 +448,18 @@ pub async fn zone_status(
 }
 
 /// Freeze a zone (disable dynamic updates)
-///
-/// POST /api/v1/zones/:name/freeze
+#[utoipa::path(
+    post,
+    path = "/api/v1/zones/{name}/freeze",
+    params(
+        ("name" = String, Path, description = "Zone name to freeze")
+    ),
+    responses(
+        (status = 200, description = "Zone frozen successfully", body = ZoneResponse),
+        (status = 502, description = "RNDC command failed")
+    ),
+    tag = "zones"
+)]
 pub async fn freeze_zone(
     State(state): State<AppState>,
     Path(zone_name): Path<String>,
@@ -418,10 +468,12 @@ pub async fn freeze_zone(
 
     let output = state.rndc.freeze(&zone_name).await.map_err(|e| {
         error!("RNDC freeze failed for {}: {}", zone_name, e);
+        metrics::record_zone_operation("freeze", false);
         ApiError::RndcError(format!("Failed to freeze zone: {}", e))
     })?;
 
     info!("Zone {} frozen successfully", zone_name);
+    metrics::record_zone_operation("freeze", true);
 
     Ok(Json(ZoneResponse {
         success: true,
@@ -431,8 +483,18 @@ pub async fn freeze_zone(
 }
 
 /// Thaw a zone (enable dynamic updates)
-///
-/// POST /api/v1/zones/:name/thaw
+#[utoipa::path(
+    post,
+    path = "/api/v1/zones/{name}/thaw",
+    params(
+        ("name" = String, Path, description = "Zone name to thaw")
+    ),
+    responses(
+        (status = 200, description = "Zone thawed successfully", body = ZoneResponse),
+        (status = 502, description = "RNDC command failed")
+    ),
+    tag = "zones"
+)]
 pub async fn thaw_zone(
     State(state): State<AppState>,
     Path(zone_name): Path<String>,
@@ -441,10 +503,12 @@ pub async fn thaw_zone(
 
     let output = state.rndc.thaw(&zone_name).await.map_err(|e| {
         error!("RNDC thaw failed for {}: {}", zone_name, e);
+        metrics::record_zone_operation("thaw", false);
         ApiError::RndcError(format!("Failed to thaw zone: {}", e))
     })?;
 
     info!("Zone {} thawed successfully", zone_name);
+    metrics::record_zone_operation("thaw", true);
 
     Ok(Json(ZoneResponse {
         success: true,
@@ -454,8 +518,18 @@ pub async fn thaw_zone(
 }
 
 /// Notify secondaries about zone changes
-///
-/// POST /api/v1/zones/:name/notify
+#[utoipa::path(
+    post,
+    path = "/api/v1/zones/{name}/notify",
+    params(
+        ("name" = String, Path, description = "Zone name")
+    ),
+    responses(
+        (status = 200, description = "Notify sent successfully", body = ZoneResponse),
+        (status = 502, description = "RNDC command failed")
+    ),
+    tag = "zones"
+)]
 pub async fn notify_zone(
     State(state): State<AppState>,
     Path(zone_name): Path<String>,
@@ -464,10 +538,12 @@ pub async fn notify_zone(
 
     let output = state.rndc.notify(&zone_name).await.map_err(|e| {
         error!("RNDC notify failed for {}: {}", zone_name, e);
+        metrics::record_zone_operation("notify", false);
         ApiError::RndcError(format!("Failed to notify zone: {}", e))
     })?;
 
     info!("Zone {} notify sent successfully", zone_name);
+    metrics::record_zone_operation("notify", true);
 
     Ok(Json(ZoneResponse {
         success: true,
@@ -477,8 +553,15 @@ pub async fn notify_zone(
 }
 
 /// Get server status
-///
-/// GET /api/v1/server/status
+#[utoipa::path(
+    get,
+    path = "/api/v1/server/status",
+    responses(
+        (status = 200, description = "Server status retrieved", body = ServerStatusResponse),
+        (status = 502, description = "RNDC command failed")
+    ),
+    tag = "server"
+)]
 pub async fn server_status(
     State(state): State<AppState>,
 ) -> Result<Json<ServerStatusResponse>, ApiError> {
@@ -490,6 +573,111 @@ pub async fn server_status(
     })?;
 
     Ok(Json(ServerStatusResponse { status: output }))
+}
+
+/// List all zones
+#[utoipa::path(
+    get,
+    path = "/api/v1/zones",
+    responses(
+        (status = 200, description = "List of zones", body = ZoneListResponse),
+        (status = 500, description = "Failed to read zone directory")
+    ),
+    tag = "zones"
+)]
+pub async fn list_zones(State(state): State<AppState>) -> Result<Json<ZoneListResponse>, ApiError> {
+    info!("Listing all zones");
+
+    // Get zone files from directory
+    let mut zones = Vec::new();
+    let mut entries = tokio::fs::read_dir(&state.zone_dir).await.map_err(|e| {
+        error!("Failed to read zone directory: {}", e);
+        ApiError::InternalError(format!("Failed to read zone directory: {}", e))
+    })?;
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if let Ok(file_name) = entry.file_name().into_string() {
+            if file_name.ends_with(".zone") {
+                // Extract zone name from filename (remove .zone extension)
+                if let Some(zone_name) = file_name.strip_suffix(".zone") {
+                    zones.push(zone_name.to_string());
+                }
+            }
+        }
+    }
+
+    zones.sort();
+    let count = zones.len();
+
+    info!("Found {} zones", count);
+    metrics::update_zones_count(count as i64);
+
+    Ok(Json(ZoneListResponse { zones, count }))
+}
+
+/// Get a specific zone
+#[utoipa::path(
+    get,
+    path = "/api/v1/zones/{name}",
+    params(
+        ("name" = String, Path, description = "Zone name")
+    ),
+    responses(
+        (status = 200, description = "Zone information", body = ZoneInfo),
+        (status = 404, description = "Zone not found"),
+        (status = 502, description = "RNDC command failed")
+    ),
+    tag = "zones"
+)]
+pub async fn get_zone(
+    State(state): State<AppState>,
+    Path(zone_name): Path<String>,
+) -> Result<Json<ZoneInfo>, ApiError> {
+    info!("Getting zone: {}", zone_name);
+
+    // Check if zone file exists
+    let zone_file_name = format!("{}.zone", zone_name);
+    let zone_file_path = PathBuf::from(&state.zone_dir).join(&zone_file_name);
+
+    if !zone_file_path.exists() {
+        return Err(ApiError::ZoneNotFound(zone_name.clone()));
+    }
+
+    // Get zone status from BIND9
+    let status_output = state.rndc.zonestatus(&zone_name).await.map_err(|e| {
+        error!("RNDC zonestatus failed for {}: {}", zone_name, e);
+        if e.to_string().contains("not found") {
+            ApiError::ZoneNotFound(zone_name.clone())
+        } else {
+            ApiError::RndcError(format!("Failed to get zone status: {}", e))
+        }
+    })?;
+
+    // Parse zone type and serial from status output
+    let mut zone_type = "unknown".to_string();
+    let mut serial = None;
+
+    for line in status_output.lines() {
+        if line.contains("type:") {
+            if let Some(type_str) = line.split("type:").nth(1) {
+                zone_type = type_str.trim().to_string();
+            }
+        }
+        if line.contains("serial:") {
+            if let Some(serial_str) = line.split("serial:").nth(1) {
+                if let Ok(s) = serial_str.trim().parse::<u32>() {
+                    serial = Some(s);
+                }
+            }
+        }
+    }
+
+    Ok(Json(ZoneInfo {
+        name: zone_name,
+        zone_type,
+        serial,
+        file_path: Some(zone_file_path.display().to_string()),
+    }))
 }
 
 #[cfg(test)]

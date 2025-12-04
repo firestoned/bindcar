@@ -103,7 +103,6 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
         middleware,
-        response::Response,
         routing::get,
         Router,
     };

@@ -3,65 +3,66 @@
 
 //! RNDC command execution
 //!
-//! This module executes rndc commands locally using the shell.
-//! The rndc configuration and key files are mounted into the container
-//! at `/etc/bind/rndc.conf` and `/etc/bind/rndc.key`.
+//! This module executes rndc commands using the system's rndc binary.
+//! The rndc binary must be configured with appropriate keys in /etc/bind/rndc.conf
 
 use anyhow::{Context, Result};
+use std::time::Instant;
 use tokio::process::Command;
 use tracing::{debug, error};
 
-/// Path to rndc binary
-const RNDC_BIN: &str = "/usr/sbin/rndc";
+use crate::metrics;
 
 /// RNDC command executor
-pub struct RndcExecutor;
+pub struct RndcExecutor {
+    rndc_path: String,
+}
 
 impl RndcExecutor {
     /// Create a new RNDC executor
-    pub fn new() -> Self {
-        Self
+    ///
+    /// # Arguments
+    /// * `rndc_path` - Path to the rndc binary (default: "/usr/sbin/rndc")
+    pub fn new(rndc_path: Option<String>) -> Self {
+        Self {
+            rndc_path: rndc_path.unwrap_or_else(|| "/usr/sbin/rndc".to_string()),
+        }
     }
 
     /// Execute an rndc command
     ///
     /// # Arguments
-    /// * `args` - Command arguments (e.g., ["status"], ["addzone", "example.com", "{ ... }"])
+    /// * `args` - Command arguments (e.g., &["status"], &["addzone", "example.com", "{ ... }"])
     ///
     /// # Returns
     /// The stdout output from rndc on success
     ///
     /// # Errors
-    /// Returns an error if the rndc command fails or returns non-zero exit code
-    pub async fn execute(&self, args: &[&str]) -> Result<String> {
-        debug!("Executing rndc command: {:?}", args);
+    /// Returns an error if the rndc command fails
+    async fn execute(&self, args: &[&str]) -> Result<String> {
+        debug!("Executing rndc command: {} {:?}", self.rndc_path, args);
 
-        let output = Command::new(RNDC_BIN)
+        let start = Instant::now();
+        let command_name = args.first().unwrap_or(&"unknown");
+
+        let output = Command::new(&self.rndc_path)
             .args(args)
             .output()
             .await
             .context("Failed to execute rndc command")?;
 
+        let duration = start.elapsed().as_secs_f64();
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            error!(
-                "RNDC command failed: {:?}\nstdout: {}\nstderr: {}",
-                args, stdout, stderr
-            );
-            return Err(anyhow::anyhow!(
-                "RNDC command failed: {}",
-                if !stderr.is_empty() {
-                    stderr.as_ref()
-                } else {
-                    stdout.as_ref()
-                }
-            ));
+            error!("RNDC command failed: {}", stderr);
+            metrics::record_rndc_command(command_name, false, duration);
+            return Err(anyhow::anyhow!("RNDC command failed: {}", stderr));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         debug!("RNDC command output: {}", stdout);
-
+        metrics::record_rndc_command(command_name, true, duration);
         Ok(stdout)
     }
 
@@ -110,9 +111,11 @@ impl RndcExecutor {
     }
 }
 
-impl Default for RndcExecutor {
-    fn default() -> Self {
-        Self::new()
+impl Clone for RndcExecutor {
+    fn clone(&self) -> Self {
+        Self {
+            rndc_path: self.rndc_path.clone(),
+        }
     }
 }
 
@@ -122,15 +125,18 @@ mod tests {
 
     #[test]
     fn test_rndc_executor_creation() {
-        let executor = RndcExecutor::new();
-        // Verify executor can be created
-        assert!(std::mem::size_of_val(&executor) == 0); // Zero-sized type
+        let executor = RndcExecutor::new(None);
+        assert_eq!(executor.rndc_path, "/usr/sbin/rndc");
+
+        let executor_custom = RndcExecutor::new(Some("/custom/path/rndc".to_string()));
+        assert_eq!(executor_custom.rndc_path, "/custom/path/rndc");
     }
 
     #[test]
-    fn test_rndc_executor_default() {
-        let executor = RndcExecutor::default();
-        assert!(std::mem::size_of_val(&executor) == 0);
+    fn test_rndc_executor_clone() {
+        let executor = RndcExecutor::new(Some("/custom/path/rndc".to_string()));
+        let cloned = executor.clone();
+        assert_eq!(cloned.rndc_path, "/custom/path/rndc");
     }
 
     // Note: Integration tests that actually execute rndc commands require
