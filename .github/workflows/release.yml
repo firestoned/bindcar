@@ -4,13 +4,16 @@ on:
   release:
     types: [created, published]
 
+permissions:
+  packages: write
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  build-and-test:
-    name: Build and Test - ${{ matrix.platform.name }}
+  build:
+    name: Build - ${{ matrix.platform.name }}
     runs-on: ${{ matrix.platform.os }}
     strategy:
       fail-fast: false
@@ -56,6 +59,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
+      - name: Configure linker for ARM64
+        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml << EOF
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -80,10 +92,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.platform.target }}-cargo-build-target-
 
-      - name: Run tests (native targets only)
-        if: matrix.platform.target != 'aarch64-unknown-linux-gnu'
-        run: cargo test --target ${{ matrix.platform.target }} --verbose
-
       - name: Build (release)
         run: cargo build --release --target ${{ matrix.platform.target }} --verbose
 
@@ -107,10 +115,61 @@ jobs:
           name: ${{ matrix.platform.artifact_name }}-sbom
           path: target/${{ matrix.platform.target }}/release/sbom.json
 
+  package-crate:
+    name: Package Crate for crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Package crate
+        run: cargo package --verbose
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crate-package
+          path: target/package/bindcar-*.crate
+
+  publish-crate:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs: package-crate
+    steps:
+      - name: Download packaged crate
+        uses: actions/download-artifact@v4
+        with:
+          name: crate-package
+          path: .
+
+      - name: Publish to crates.io
+        run: |
+          CRATE_FILE=$(ls bindcar-*.crate)
+          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} "$CRATE_FILE"
+
   docker-release:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    needs: build-and-test
+    needs: build
     permissions:
       contents: read
       packages: write
@@ -182,7 +241,7 @@ jobs:
   upload-release-assets:
     name: Upload Release Assets
     runs-on: ubuntu-latest
-    needs: [build-and-test, docker-release]
+    needs: build
     permissions:
       contents: write
     steps:

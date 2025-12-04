@@ -4,7 +4,7 @@ Set up your development environment for contributing to bindcar.
 
 ## Prerequisites
 
-- Rust 1.87.0 or later
+- Rust 1.89.0 or later
 - Git
 - Docker (optional, for testing)
 - mdBook (for documentation)
