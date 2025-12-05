@@ -148,3 +148,17 @@ pub use zones::{DnsRecord, SoaRecord, ZoneConfig};
 pub use zones::{
     CreateZoneRequest, ServerStatusResponse, ZoneInfo, ZoneListResponse, ZoneResponse,
 };
+
+// Test modules
+#[cfg(test)]
+mod auth_test;
+#[cfg(test)]
+mod metrics_test;
+#[cfg(test)]
+mod middleware_test;
+#[cfg(test)]
+mod rndc_test;
+#[cfg(test)]
+mod types_test;
+#[cfg(test)]
+mod zones_test;

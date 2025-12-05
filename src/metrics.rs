@@ -133,3 +133,4 @@ pub fn record_rndc_command(command: &str, success: bool, duration: f64) {
 pub fn update_zones_count(count: i64) {
     ZONES_MANAGED_TOTAL.set(count as f64);
 }
+

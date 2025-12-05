@@ -1,5 +1,8 @@
 # bindcar
 
+[![codecov](https://codecov.io/gh/firestoned/bindcar/branch/main/graph/badge.svg)](https://codecov.io/gh/firestoned/bindcar)
+[![Build Status](https://github.com/firestoned/bindcar/workflows/CI/badge.svg)](https://github.com/firestoned/bindcar/actions)
+
 A lightweight HTTP REST API server for managing BIND9 zones via rndc commands.
 
 ## Overview
