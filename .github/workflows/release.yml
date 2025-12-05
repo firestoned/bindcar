@@ -2,7 +2,8 @@ name: Release
 
 on:
   release:
-    types: [created, published]
+    types:
+      - published
 
 permissions:
   packages: write
@@ -29,21 +30,6 @@ jobs:
             target: aarch64-unknown-linux-gnu
             artifact_name: bindcar-linux-arm64
             binary_name: bindcar
-          - name: macOS x86_64 (Intel)
-            os: macos-latest
-            target: x86_64-apple-darwin
-            artifact_name: bindcar-macos-amd64
-            binary_name: bindcar
-          - name: macOS ARM64 (Apple Silicon)
-            os: macos-latest
-            target: aarch64-apple-darwin
-            artifact_name: bindcar-macos-arm64
-            binary_name: bindcar
-          - name: Windows x86_64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: bindcar-windows-amd64
-            binary_name: bindcar.exe
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -53,20 +39,27 @@ jobs:
         with:
           targets: ${{ matrix.platform.target }}
 
-      - name: Install cross-compilation tools (Linux ARM64)
+      - name: Cache cross binary
         if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+        id: cache-cross
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cross
+          key: ${{ runner.os }}-cross-v0.2.5
+          restore-keys: |
+            ${{ runner.os }}-cross-
 
-      - name: Configure linker for ARM64
+      - name: Install cross for ARM64 builds
+        if: matrix.platform.target == 'aarch64-unknown-linux-gnu' && steps.cache-cross.outputs.cache-hit != 'true'
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5
+          cross --version
+
+      - name: Verify Docker for cross (ARM64)
         if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
         run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml << EOF
-          [target.aarch64-unknown-linux-gnu]
-          linker = "aarch64-linux-gnu-gcc"
-          EOF
+          docker --version
+          docker info
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -92,16 +85,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.platform.target }}-cargo-build-target-
 
-      - name: Build (release)
+      - name: Build (release) - x86_64
+        if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
         run: cargo build --release --target ${{ matrix.platform.target }} --verbose
+
+      - name: Build (release) - ARM64 with cross
+        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
+        run: cross build --release --target ${{ matrix.platform.target }} --verbose
 
       - name: Install cargo-cyclonedx
         run: cargo install cargo-cyclonedx
 
       - name: Generate SBOM
         run: |
-          cargo cyclonedx --format json --target ${{ matrix.platform.target }} \
-            --output-pattern target/${{ matrix.platform.target }}/release/sbom.json
+          cargo cyclonedx --format json --target ${{ matrix.platform.target }} --override-filename sbom
+          mv sbom.cdx.json target/${{ matrix.platform.target }}/release/sbom.json
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -221,7 +219,7 @@ jobs:
             VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           sbom: true
           provenance: true
 
@@ -265,13 +263,10 @@ jobs:
             echo "Processing $platform..."
             cd "$platform"
 
-            # Make binary executable (Unix-like systems)
+            # Make binary executable and create tarball
             if [ -f "bindcar" ]; then
               chmod +x bindcar
               tar czf "../${platform}.tar.gz" bindcar
-            # Windows
-            elif [ -f "bindcar.exe" ]; then
-              zip "../${platform}.zip" bindcar.exe
             fi
 
             cd ..
@@ -291,13 +286,12 @@ jobs:
           fi
 
           # Generate SHA256 checksums
-          sha256sum *.tar.gz *.zip sboms/*.json > checksums.sha256 2>/dev/null || true
+          sha256sum *.tar.gz sboms/*.json > checksums.sha256 2>/dev/null || true
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v1
         with:
           files: |
             artifacts/*.tar.gz
-            artifacts/*.zip
             artifacts/sboms/*.json
             artifacts/checksums.sha256
