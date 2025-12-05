@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use tracing::{error, info};
 use utoipa::ToSchema;
 
-use crate::{metrics, ApiError, AppState};
+use crate::{metrics, types::{ApiError, AppState}};
 
 /// SOA (Start of Authority) record configuration
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
@@ -166,7 +166,7 @@ impl ZoneConfig {
 }
 
 /// Request to create a new zone
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateZoneRequest {
     /// Zone name (e.g., "example.com")
@@ -183,7 +183,7 @@ pub struct CreateZoneRequest {
 }
 
 /// Response from zone operations
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ZoneResponse {
     pub success: bool,
     pub message: String,
@@ -192,13 +192,13 @@ pub struct ZoneResponse {
 }
 
 /// Server status response
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ServerStatusResponse {
     pub status: String,
 }
 
 /// Zone information
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ZoneInfo {
     pub name: String,
@@ -210,7 +210,7 @@ pub struct ZoneInfo {
 }
 
 /// List of zones response
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ZoneListResponse {
     pub zones: Vec<String>,
     pub count: usize,

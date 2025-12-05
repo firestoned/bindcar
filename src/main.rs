@@ -27,14 +27,14 @@ use tracing::{error, info, warn};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-mod auth;
-mod metrics;
-mod middleware;
-mod rndc;
-mod zones;
-
-use auth::authenticate;
-use rndc::RndcExecutor;
+// Import from the library
+use bindcar::{
+    auth::authenticate,
+    metrics, middleware,
+    rndc::RndcExecutor,
+    types::{AppState, ErrorResponse},
+    zones,
+};
 
 /// OpenAPI documentation structure
 #[derive(OpenApi)]
@@ -80,15 +80,6 @@ struct ApiDoc;
 const DEFAULT_BIND_ZONE_DIR: &str = "/var/cache/bind";
 const DEFAULT_API_PORT: u16 = 8080;
 
-/// Application state shared across handlers
-#[derive(Clone)]
-struct AppState {
-    /// RNDC command executor
-    rndc: Arc<RndcExecutor>,
-    /// Zone file directory
-    zone_dir: String,
-}
-
 /// Health check response
 #[derive(Serialize)]
 struct HealthResponse {
@@ -101,52 +92,6 @@ struct HealthResponse {
 struct ReadyResponse {
     ready: bool,
     checks: Vec<String>,
-}
-
-/// Error response
-#[derive(Serialize)]
-struct ErrorResponse {
-    error: String,
-    details: Option<String>,
-}
-
-/// API error type
-#[derive(Debug, thiserror::Error)]
-enum ApiError {
-    #[error("Zone file error: {0}")]
-    ZoneFileError(String),
-
-    #[error("RNDC command failed: {0}")]
-    RndcError(String),
-
-    #[error("Invalid request: {0}")]
-    InvalidRequest(String),
-
-    #[error("Zone not found: {0}")]
-    ZoneNotFound(String),
-
-    #[error("Internal server error: {0}")]
-    #[allow(dead_code)] // Reserved for future use
-    InternalError(String),
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        let (status, error_message) = match &self {
-            ApiError::ZoneFileError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-            ApiError::RndcError(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
-            ApiError::InvalidRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
-            ApiError::ZoneNotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
-            ApiError::InternalError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-        };
-
-        let body = Json(ErrorResponse {
-            error: error_message,
-            details: None,
-        });
-
-        (status, body).into_response()
-    }
 }
 
 /// Health check endpoint

@@ -7,6 +7,19 @@ authors = ["Erick Bourgeois <firestoned@firestoned.io>"]
 license = "MIT"
 description = "HTTP REST API for managing BIND9 zones via rndc"
 repository = "https://github.com/firestoned/bindcar"
+keywords = ["dns", "bind9", "rndc", "api", "kubernetes"]
+categories = ["api-bindings", "network-programming", "web-programming::http-server"]
+readme = "README.md"
+
+# Library configuration
+[lib]
+name = "bindcar"
+path = "src/lib.rs"
+
+# Binary configuration
+[[bin]]
+name = "bindcar"
+path = "src/main.rs"
 
 [dependencies]
 # HTTP server framework
