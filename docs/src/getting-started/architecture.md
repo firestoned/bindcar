@@ -6,11 +6,11 @@ bindcar is a lightweight HTTP REST API that provides programmatic control over B
 
 ```mermaid
 graph TB
-    Client[API Client] -->|HTTP/JSON| API[bindcar API]
-    API -->|RNDC Commands| BIND9[BIND9 Server]
-    API -->|Read/Write| ZoneFiles[Zone Files]
+    Client["API Client"] -->|HTTP/JSON| API["bindcar API"]
+    API -->|RNDC Commands| BIND9["BIND9 Server"]
+    API -->|Read/Write| ZoneFiles["Zone Files"]
     BIND9 -->|Read| ZoneFiles
-    
+
     style API fill:#e1f5ff
     style BIND9 fill:#e1ffe1
     style ZoneFiles fill:#fff4e1
@@ -109,7 +109,7 @@ sequenceDiagram
     participant FS as File System
     participant RNDC
     participant BIND9
-    
+
     Client->>API: POST /api/v1/zones
     API->>API: Validate zone config
     API->>FS: Write zone file
@@ -130,7 +130,7 @@ sequenceDiagram
     participant RNDC
     participant BIND9
     participant FS as File System
-    
+
     Client->>API: DELETE /api/v1/zones/example.com
     API->>RNDC: delzone example.com
     RNDC->>BIND9: Remove zone dynamically
