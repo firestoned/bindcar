@@ -13,9 +13,26 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  extract-version:
+    name: Extract Version from Tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag_name: ${{ steps.version.outputs.tag_name }}
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG_NAME="${{ github.event.release.tag_name }}"
+          VERSION="${TAG_NAME#v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "Extracted version: ${VERSION} from tag: ${TAG_NAME}"
+
   build:
     name: Build - ${{ matrix.platform.name }}
     runs-on: ${{ matrix.platform.os }}
+    needs: extract-version
     strategy:
       fail-fast: false
       matrix:
@@ -33,6 +50,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Update Cargo.toml version
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ needs.extract-version.outputs.version }}"/' Cargo.toml
+          echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
+          grep '^version = ' Cargo.toml
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -116,9 +139,16 @@ jobs:
   package-crate:
     name: Package Crate for crates.io
     runs-on: ubuntu-latest
+    needs: extract-version
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Update Cargo.toml version
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ needs.extract-version.outputs.version }}"/' Cargo.toml
+          echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
+          grep '^version = ' Cargo.toml
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -151,10 +181,16 @@ jobs:
   publish-crate:
     name: Publish to crates.io
     runs-on: ubuntu-latest
-    needs: package-crate
+    needs: [extract-version, package-crate]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Update Cargo.toml version
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ needs.extract-version.outputs.version }}"/' Cargo.toml
+          echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
+          grep '^version = ' Cargo.toml
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -165,13 +201,19 @@ jobs:
   docker-release:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    needs: build
+    needs: [extract-version, build]
     permissions:
       contents: write
       packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Update Cargo.toml version
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ needs.extract-version.outputs.version }}"/' Cargo.toml
+          echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
+          grep '^version = ' Cargo.toml
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -183,27 +225,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from tag
-        id: version
-        run: |
-          # Get the tag name (e.g., v1.0.0 or 1.0.0)
-          TAG_NAME="${{ github.event.release.tag_name }}"
-          # Remove 'v' prefix if present
-          VERSION="${TAG_NAME#v}"
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}},value=${{ steps.version.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }}
-            type=semver,pattern={{major}},value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{version}},value=${{ needs.extract-version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.extract-version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.extract-version.outputs.version }}
             type=raw,value=latest
-            type=raw,value=${{ steps.version.outputs.tag_name }}
+            type=raw,value=${{ needs.extract-version.outputs.tag_name }}
 
       - name: Build and push Docker image
         id: docker_build
@@ -214,7 +246,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=${{ needs.extract-version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
@@ -224,7 +256,7 @@ jobs:
       - name: Generate Docker SBOM
         uses: anchore/sbom-action@v0
         with:
-          image: ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag_name }}
+          image: ghcr.io/${{ github.repository }}:${{ needs.extract-version.outputs.tag_name }}
           format: cyclonedx-json
           output-file: docker-sbom.json
 
