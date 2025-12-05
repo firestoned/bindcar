@@ -99,7 +99,7 @@ jobs:
       - name: Generate SBOM
         run: |
           cargo cyclonedx --format json --target ${{ matrix.platform.target }} --override-filename sbom
-          mv sbom.cdx.json target/${{ matrix.platform.target }}/release/sbom.json
+          mv sbom.json target/${{ matrix.platform.target }}/release/sbom.json
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
