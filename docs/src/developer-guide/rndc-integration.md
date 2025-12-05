@@ -57,6 +57,38 @@ async fn execute_rndc(args: &[&str]) -> Result<String, String> {
 
 ## RNDC Commands Used
 
+```mermaid
+graph TD
+    Root[RNDC Commands] --> Lifecycle[Zone Lifecycle]
+    Root --> State[Zone State]
+    Root --> Server[Server Operations]
+
+    Lifecycle --> addzone[addzone]
+    Lifecycle --> delzone[delzone]
+    Lifecycle --> reload[reload]
+
+    addzone --> adddesc["Create new zone<br/>Add to BIND9 config"]
+    delzone --> deldesc["Remove zone<br/>Delete from BIND9"]
+    reload --> reloaddesc["Reload zone data<br/>Update records"]
+
+    State --> freeze[freeze]
+    State --> thaw[thaw]
+
+    freeze --> freezedesc["Pause updates<br/>Manual editing"]
+    thaw --> thawdesc["Resume updates<br/>Re-enable dynamic"]
+
+    Server --> status[status]
+    Server --> notify[notify]
+
+    status --> statusdesc["Server info<br/>Zone count"]
+    notify --> notifydesc["Trigger transfer<br/>Update secondaries"]
+
+    style Root fill:#e1f5ff
+    style Lifecycle fill:#c8e6c9
+    style State fill:#fff3e0
+    style Server fill:#f3e5f5
+```
+
 ### addzone
 
 Add a new zone to BIND9 dynamically:
@@ -153,14 +185,44 @@ rndc notify example.com
 
 ## Zone File Management
 
-### File Creation
+### File Creation Workflow
 
 When a zone is created via API:
 
-1. **Validate Request** - Check zone name, SOA record, etc.
-2. **Generate Zone File** - Create BIND9 format zone file
-3. **Write to Disk** - Save to `BIND_ZONE_DIR`
+```mermaid
+flowchart TD
+    Start[POST /api/v1/zones] --> Validate{Validate Request}
+
+    Validate -->|Invalid| Error400[400 Bad Request]
+    Validate -->|Valid| GenFile[Generate Zone File]
+
+    GenFile --> CheckExists{Check if<br/>file exists}
+    CheckExists -->|Exists| Error409[409 Conflict]
+    CheckExists -->|Not exists| WriteFile[Write Zone File<br/>to Disk]
+
+    WriteFile --> WriteSuccess{Write<br/>Success?}
+    WriteSuccess -->|Fail| Error500[500 Internal Error]
+    WriteSuccess -->|Success| ExecRNDC[Execute RNDC<br/>addzone command]
+
+    ExecRNDC --> RNDCSuccess{RNDC<br/>Success?}
+    RNDCSuccess -->|Fail| Cleanup[Delete zone file]
+    Cleanup --> Error502[502 Bad Gateway]
+    RNDCSuccess -->|Success| Success201[201 Created]
+
+    style Error400 fill:#ffe1e1
+    style Error409 fill:#ffe1e1
+    style Error500 fill:#ffe1e1
+    style Error502 fill:#ffe1e1
+    style Success201 fill:#e1ffe1
+```
+
+### File Creation Steps
+
+1. **Validate Request** - Check zone name, SOA record, NS records, etc.
+2. **Generate Zone File** - Create BIND9 format zone file content
+3. **Write to Disk** - Save to `BIND_ZONE_DIR/db.{zone_name}`
 4. **Execute addzone** - Register zone with BIND9 via RNDC
+5. **Cleanup on Failure** - Remove zone file if RNDC command fails
 
 Example zone file generation:
 

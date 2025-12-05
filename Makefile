@@ -63,8 +63,8 @@ docs: ## Build all documentation (mdBook + rustdoc + OpenAPI)
 	@command -v mdbook >/dev/null 2>&1 || { echo "Error: mdbook not found. Install with: cargo install mdbook"; exit 1; }
 	@echo "Building rustdoc API documentation..."
 	@cargo doc --no-deps --all-features
-	@echo "Building mdBook documentation..."
-	@cd docs && mdbook build
+	@echo "Install mermaid assets and build mdBook documentation..."
+	@cd docs && mdbook-mermaid install && mdbook build
 	@echo "Copying rustdoc into documentation..."
 	@mkdir -p docs/target/rustdoc
 	@cp -r target/doc/* docs/target/rustdoc/

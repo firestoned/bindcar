@@ -49,8 +49,3 @@ heading-split-level = 0
 
 [preprocessor.mermaid]
 command = "mdbook-mermaid"
-
-[output.html.mermaid]
-command = "mdbook-mermaid"
-renderer = ["html"]
-optional = true
