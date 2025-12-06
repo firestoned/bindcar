@@ -2,7 +2,7 @@
 name = "bindcar"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.89.0"
+rust-version = "1.75"
 authors = ["Erick Bourgeois <firestoned@firestoned.io>"]
 license = "MIT"
 description = "HTTP REST API for managing BIND9 zones via rndc"
@@ -32,7 +32,6 @@ tokio = { version = "1", features = ["full"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 
 # Logging
 tracing = "0.1"
@@ -52,10 +51,8 @@ lazy_static = "1.4"
 
 [dev-dependencies]
 # Testing
-reqwest = { version = "0.12", features = ["json"] }
-tokio-test = "0.4"
-tower = { version = "0.4", features = ["util"] }
-http-body-util = "0.1"
+serde_json = "1.0"
+tower = { version = "0.5", features = ["util"] }
 
 [profile.release]
 opt-level = 3

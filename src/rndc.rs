@@ -15,7 +15,7 @@ use crate::metrics;
 
 /// RNDC command executor
 pub struct RndcExecutor {
-    rndc_path: String,
+    pub(crate) rndc_path: String,
 }
 
 impl RndcExecutor {

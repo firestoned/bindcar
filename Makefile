@@ -127,3 +127,26 @@ docs-clean: ## Clean documentation build artifacts
 docs-watch: ## Watch and rebuild mdBook documentation on changes
 	@command -v mdbook >/dev/null 2>&1 || { echo "Installing mdbook..."; cargo install mdbook; }
 	cd docs && mdbook serve
+
+#
+# Code Coverage
+#
+
+.PHONY: coverage
+coverage: ## Generate code coverage report
+	@command -v cargo-tarpaulin >/dev/null 2>&1 || { echo "Installing cargo-tarpaulin..."; cargo install cargo-tarpaulin; }
+	@echo "Generating coverage report..."
+	cargo tarpaulin --lib --out Html --out Lcov --output-dir coverage
+	@echo "Coverage report generated in coverage/"
+	@echo "  - HTML: coverage/index.html"
+	@echo "  - LCOV: coverage/lcov.info"
+
+.PHONY: coverage-open
+coverage-open: coverage ## Generate and open coverage report in browser
+	@command -v open >/dev/null 2>&1 && open coverage/index.html || \
+	command -v xdg-open >/dev/null 2>&1 && xdg-open coverage/index.html || \
+	echo "Coverage report available at coverage/index.html"
+
+.PHONY: coverage-clean
+coverage-clean: ## Clean coverage artifacts
+	rm -rf coverage/ cobertura.xml

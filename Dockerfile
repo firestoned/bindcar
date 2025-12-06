@@ -5,7 +5,7 @@
 # This container runs alongside BIND9 and provides an HTTP API for zone management
 
 # Build stage
-FROM rust:1.89.0 AS builder
+FROM rust:latest AS builder
 
 # Set build target based on architecture
 ARG TARGETPLATFORM
