@@ -28,7 +28,11 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     let executor = RndcExecutor::new(None);
+//!     let executor = RndcExecutor::new(
+//!         "127.0.0.1:953".to_string(),
+//!         "sha256".to_string(),
+//!         "dGVzdC1zZWNyZXQtaGVyZQ==".to_string(), // base64 encoded secret
+//!     )?;
 //!
 //!     // Execute RNDC commands
 //!     let status = executor.status().await?;
@@ -148,6 +152,9 @@ pub use zones::{DnsRecord, SoaRecord, ZoneConfig};
 pub use zones::{
     CreateZoneRequest, ServerStatusResponse, ZoneInfo, ZoneListResponse, ZoneResponse,
 };
+
+// RNDC configuration
+pub use rndc::{parse_rndc_conf, RndcConfig};
 
 // Test modules
 #[cfg(test)]

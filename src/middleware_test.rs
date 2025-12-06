@@ -28,10 +28,7 @@ async fn test_track_metrics_success() {
         .route("/test", get(test_handler))
         .layer(middleware::from_fn(track_metrics));
 
-    let request = Request::builder()
-        .uri("/test")
-        .body(Body::empty())
-        .unwrap();
+    let request = Request::builder().uri("/test").body(Body::empty()).unwrap();
 
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -90,10 +87,7 @@ async fn test_track_metrics_duration() {
         .route("/test", get(test_handler))
         .layer(middleware::from_fn(track_metrics));
 
-    let request = Request::builder()
-        .uri("/test")
-        .body(Body::empty())
-        .unwrap();
+    let request = Request::builder().uri("/test").body(Body::empty()).unwrap();
 
     let _ = app.oneshot(request).await.unwrap();
 

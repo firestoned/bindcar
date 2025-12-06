@@ -137,8 +137,8 @@ mod k8s_token_review_tests {
         assert!(result.is_err());
         let error = result.unwrap_err();
         assert!(
-            error.contains("Failed to create Kubernetes client") ||
-            error.contains("Failed to validate token")
+            error.contains("Failed to create Kubernetes client")
+                || error.contains("Failed to validate token")
         );
     }
 

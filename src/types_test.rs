@@ -11,7 +11,14 @@ use std::sync::Arc;
 
 #[test]
 fn test_app_state_clone() {
-    let rndc = Arc::new(RndcExecutor::new(None));
+    let rndc = Arc::new(
+        RndcExecutor::new(
+            "127.0.0.1:953".to_string(),
+            "sha256".to_string(),
+            "dGVzdC1zZWNyZXQtaGVyZQ==".to_string(),
+        )
+        .expect("Failed to create RndcExecutor"),
+    );
     let state = AppState {
         rndc: rndc.clone(),
         zone_dir: "/test/dir".to_string(),
@@ -48,10 +55,7 @@ fn test_error_response_without_details() {
 #[test]
 fn test_api_error_zone_file_error() {
     let error = ApiError::ZoneFileError("Failed to write file".to_string());
-    assert_eq!(
-        error.to_string(),
-        "Zone file error: Failed to write file"
-    );
+    assert_eq!(error.to_string(), "Zone file error: Failed to write file");
 
     let response = error.into_response();
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -60,7 +64,10 @@ fn test_api_error_zone_file_error() {
 #[test]
 fn test_api_error_rndc_error() {
     let error = ApiError::RndcError("RNDC command failed".to_string());
-    assert_eq!(error.to_string(), "RNDC command failed: RNDC command failed");
+    assert_eq!(
+        error.to_string(),
+        "RNDC command failed: RNDC command failed"
+    );
 
     let response = error.into_response();
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
