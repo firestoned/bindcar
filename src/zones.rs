@@ -21,7 +21,10 @@ use std::path::PathBuf;
 use tracing::{error, info};
 use utoipa::ToSchema;
 
-use crate::{metrics, types::{ApiError, AppState}};
+use crate::{
+    metrics,
+    types::{ApiError, AppState},
+};
 
 /// SOA (Start of Authority) record configuration
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]

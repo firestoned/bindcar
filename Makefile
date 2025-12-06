@@ -41,6 +41,10 @@ docker-push: ## Push Docker image to registry
 	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 	docker push $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 
+docker-push-kind: docker-build ## Push Docker image to local kind
+	docker tag $(REGISTRY)/$(IMAGE_NAME):$(TAG) $(IMAGE_NAME):$(TAG)
+	kind load docker-image $(IMAGE_NAME):$(TAG) --name $(KIND_CLUSTER)
+
 .PHONY: docker-buildx
 docker-buildx: ## Build multi-arch Docker image
 	docker buildx build --platform $(PLATFORMS) -t $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG) --push .
