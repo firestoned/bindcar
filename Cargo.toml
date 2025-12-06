@@ -49,10 +49,21 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 prometheus = "0.14"
 lazy_static = "1.4"
 
+# Kubernetes client (optional, for token validation)
+kube = { version = "0.97", features = ["client", "rustls-tls"], optional = true }
+k8s-openapi = { version = "0.23", default-features = false, optional = true }
+
+[features]
+default = []
+k8s-token-review = ["kube", "k8s-openapi"]
+
 [dev-dependencies]
 # Testing
 serde_json = "1.0"
 tower = { version = "0.5", features = ["util"] }
+
+# Enable k8s-openapi version for tests and examples
+k8s-openapi = { version = "0.23", features = ["v1_30"] }
 
 [profile.release]
 opt-level = 3

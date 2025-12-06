@@ -4,13 +4,18 @@
 //! Authentication middleware for Kubernetes ServiceAccount tokens
 //!
 //! This module validates that incoming requests include a valid ServiceAccount token
-//! in the Authorization header. In a production environment, this should validate
-//! the token against the Kubernetes API server.
+//! in the Authorization header.
 //!
-//! For now, we implement a simple token presence check. Future enhancements:
-//! - Validate token signature with Kubernetes API
-//! - Check token expiration
-//! - Verify service account permissions
+//! ## Token Validation Modes
+//!
+//! ### Basic Mode (default)
+//! - Checks for token presence and format
+//! - Suitable for trusted environments or when using external auth (API gateway, service mesh)
+//!
+//! ### Kubernetes TokenReview Mode (feature: `k8s-token-review`)
+//! - Validates tokens against Kubernetes TokenReview API
+//! - Verifies token authenticity and expiration
+//! - Requires in-cluster configuration or kubeconfig
 
 use axum::{
     extract::Request,
@@ -21,6 +26,13 @@ use axum::{
 };
 use serde::Serialize;
 use tracing::{debug, warn};
+
+#[cfg(feature = "k8s-token-review")]
+use k8s_openapi::api::authentication::v1::TokenReview;
+#[cfg(feature = "k8s-token-review")]
+use kube::{Api, Client};
+#[cfg(feature = "k8s-token-review")]
+use tracing::error;
 
 /// Error response for authentication failures
 #[derive(Serialize)]
@@ -84,14 +96,86 @@ pub async fn authenticate(
         ));
     }
 
-    // TODO: Validate token with Kubernetes API
-    // For now, we just check that a token is present
-    // In production, you should:
-    // 1. Use the TokenReview API to validate the token
-    // 2. Check that the service account has appropriate permissions
-    // 3. Verify token is not expired
+    // Validate token with Kubernetes TokenReview API if feature is enabled
+    #[cfg(feature = "k8s-token-review")]
+    {
+        if let Err(e) = validate_token_with_k8s(token).await {
+            warn!("Token validation failed: {}", e);
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(AuthError {
+                    error: format!("Token validation failed: {}", e),
+                }),
+            ));
+        }
+        debug!("Token validated with Kubernetes TokenReview API");
+    }
 
-    debug!("Request authenticated (token present)");
+    #[cfg(not(feature = "k8s-token-review"))]
+    {
+        debug!("Token validation: basic mode (presence check only)");
+    }
 
     Ok(next.run(request).await)
+}
+
+/// Validate a token using Kubernetes TokenReview API
+///
+/// This function sends the token to the Kubernetes API server for validation.
+/// It verifies that the token is authentic, not expired, and belongs to a valid
+/// service account.
+///
+/// # Arguments
+/// * `token` - The bearer token to validate
+///
+/// # Returns
+/// * `Ok(())` if the token is valid
+/// * `Err(String)` if validation fails
+#[cfg(feature = "k8s-token-review")]
+async fn validate_token_with_k8s(token: &str) -> Result<(), String> {
+    // Create Kubernetes client
+    let client = Client::try_default()
+        .await
+        .map_err(|e| format!("Failed to create Kubernetes client: {}", e))?;
+
+    // Create TokenReview API client
+    let token_reviews: Api<TokenReview> = Api::all(client);
+
+    // Build TokenReview request
+    let token_review = TokenReview {
+        metadata: Default::default(),
+        spec: k8s_openapi::api::authentication::v1::TokenReviewSpec {
+            token: Some(token.to_string()),
+            audiences: None,
+        },
+        status: None,
+    };
+
+    // Submit TokenReview request
+    let result = token_reviews
+        .create(&Default::default(), &token_review)
+        .await
+        .map_err(|e| {
+            error!("TokenReview API call failed: {}", e);
+            format!("Failed to validate token with Kubernetes API: {}", e)
+        })?;
+
+    // Check if token is authenticated
+    if let Some(status) = result.status {
+        if let Some(true) = status.authenticated {
+            debug!("Token authenticated successfully");
+            if let Some(user) = status.user {
+                debug!("Authenticated user: {:?}", user.username);
+            }
+            Ok(())
+        } else {
+            let error_msg = status
+                .error
+                .unwrap_or_else(|| "Token not authenticated".to_string());
+            warn!("Token authentication failed: {}", error_msg);
+            Err(error_msg)
+        }
+    } else {
+        Err("TokenReview status not available".to_string())
+    }
 }
