@@ -7,6 +7,7 @@
 //! request/response types without maintaining duplicate definitions.
 
 use bindcar::{CreateZoneRequest, DnsRecord, SoaRecord, ZoneConfig, ZoneResponse};
+use std::collections::HashMap;
 
 fn main() {
     // Example 1: Create a zone creation request
@@ -27,6 +28,7 @@ fn main() {
             "ns1.example.com.".to_string(),
             "ns2.example.com.".to_string(),
         ],
+        name_server_ips: HashMap::new(), // Can provide IPs for glue records
         records: vec![
             DnsRecord {
                 name: "@".to_string(),
@@ -84,6 +86,42 @@ fn main() {
     if let Some(details) = response.details {
         println!("  Details: {}", details);
     }
+
+    // Example 5: Zone with nameserver glue records
+    println!("\n=== Example 5: Zone with Nameserver Glue Records ===\n");
+
+    let mut ns_ips_glue = HashMap::new();
+    ns_ips_glue.insert("ns1.example.com.".to_string(), "192.0.2.10".to_string());
+    ns_ips_glue.insert("ns2.example.com.".to_string(), "192.0.2.11".to_string());
+
+    let zone_with_glue = ZoneConfig {
+        ttl: 3600,
+        soa: SoaRecord {
+            primary_ns: "ns1.example.com.".to_string(),
+            admin_email: "admin.example.com.".to_string(),
+            serial: 2025010101,
+            refresh: 3600,
+            retry: 600,
+            expire: 604800,
+            negative_ttl: 86400,
+        },
+        name_servers: vec![
+            "ns1.example.com.".to_string(),
+            "ns2.example.com.".to_string(),
+        ],
+        name_server_ips: ns_ips_glue, // Provide IPs for glue records
+        records: vec![
+            DnsRecord {
+                name: "@".to_string(),
+                record_type: "A".to_string(),
+                value: "192.0.2.1".to_string(),
+                ttl: None,
+                priority: None,
+            },
+        ],
+    };
+
+    println!("Zone file with glue records:\n{}", zone_with_glue.to_zone_file());
 
     println!("\n=== Integration Notes ===\n");
     println!("To use these types in bindy, add to Cargo.toml:");

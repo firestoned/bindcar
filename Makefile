@@ -8,6 +8,8 @@ IMAGE_NAME ?= bindcar
 IMAGE_TAG ?= latest
 REGISTRY ?= ghcr.io/firestoned
 PLATFORMS ?= linux/amd64,linux/arm64
+NAMESPACE ?= dns-system
+KIND_CLUSTER ?= bindy-test
 
 .PHONY: help
 help: ## Show this help
@@ -34,7 +36,7 @@ check: fmt clippy test ## Run all checks
 
 .PHONY: docker-build
 docker-build: ## Build Docker image
-	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	docker build -t $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG) .
 
 .PHONY: docker-push
 docker-push: ## Push Docker image to registry
@@ -42,8 +44,7 @@ docker-push: ## Push Docker image to registry
 	docker push $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 
 docker-push-kind: docker-build ## Push Docker image to local kind
-	docker tag $(REGISTRY)/$(IMAGE_NAME):$(TAG) $(IMAGE_NAME):$(TAG)
-	kind load docker-image $(IMAGE_NAME):$(TAG) --name $(KIND_CLUSTER)
+	kind load docker-image $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG) --name $(KIND_CLUSTER)
 
 .PHONY: docker-buildx
 docker-buildx: ## Build multi-arch Docker image

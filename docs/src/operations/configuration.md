@@ -91,13 +91,35 @@ API_PORT=8080
 
 Port for the HTTP API server to listen on.
 
-### RNDC Path
+### RNDC Configuration
+
+bindcar uses the native RNDC protocol to communicate with BIND9. Configuration can be provided via environment variables or automatically parsed from rndc.conf:
+
+**Option 1: Environment Variables**
 
 ```bash
-RNDC_PATH=/usr/sbin/rndc
+RNDC_SERVER=127.0.0.1:953
+RNDC_ALGORITHM=sha256
+RNDC_SECRET=dGVzdC1zZWNyZXQtaGVyZQ==
 ```
 
-Path to the rndc binary. Defaults to `/usr/sbin/rndc`.
+**Option 2: Using rndc.conf (automatic)**
+
+If `RNDC_SECRET` is not set, bindcar automatically parses `/etc/bind/rndc.conf` or `/etc/rndc.conf`.
+
+The configuration file can include separate key files using `include` directives:
+
+```conf
+# /etc/bind/rndc.conf
+include "/etc/bind/rndc.key";
+
+options {
+    default-key "rndc-key";
+    default-server 127.0.0.1;
+};
+```
+
+See [RNDC Integration](../developer-guide/rndc-integration.md) for more details.
 
 ## Logging Configuration
 

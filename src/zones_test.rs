@@ -4,6 +4,7 @@
 //! Unit tests for zones module
 
 use super::zones::*;
+use std::collections::HashMap;
 
 #[test]
 fn test_zone_config_to_zone_file() {
@@ -22,6 +23,7 @@ fn test_zone_config_to_zone_file() {
             "ns1.example.com.".to_string(),
             "ns2.example.com.".to_string(),
         ],
+        name_server_ips: HashMap::new(),
         records: vec![
             DnsRecord {
                 name: "www".to_string(),
@@ -70,6 +72,30 @@ fn test_soa_record_with_defaults() {
 }
 
 #[test]
+fn test_soa_record_default_serial() {
+    // Test that serial defaults to YYYYMMDD01 format when not provided
+    let json = r#"{
+        "primaryNs": "ns1.example.com.",
+        "adminEmail": "admin.example.com."
+    }"#;
+
+    let soa: SoaRecord = serde_json::from_str(json).unwrap();
+    assert_eq!(soa.primary_ns, "ns1.example.com.");
+    assert_eq!(soa.admin_email, "admin.example.com.");
+
+    // Serial should be in YYYYMMDD01 format (10 digits, ending in 01)
+    let serial_str = soa.serial.to_string();
+    assert_eq!(serial_str.len(), 10, "Serial should be 10 digits");
+    assert!(serial_str.ends_with("01"), "Serial should end with 01");
+
+    // Verify default values for other fields
+    assert_eq!(soa.refresh, 3600);
+    assert_eq!(soa.retry, 600);
+    assert_eq!(soa.expire, 604_800);
+    assert_eq!(soa.negative_ttl, 86400);
+}
+
+#[test]
 fn test_create_zone_request_deserialization() {
     let json = r#"{
         "zoneName": "example.com",
@@ -82,6 +108,9 @@ fn test_create_zone_request_deserialization() {
                 "serial": 2025010101
             },
             "nameServers": ["ns1.example.com."],
+            "nameServerIps": {
+                "ns1.example.com.": "192.0.2.1"
+            },
             "records": []
         },
         "updateKeyName": "test-key"
@@ -106,7 +135,8 @@ fn test_create_zone_request_without_update_key() {
                 "adminEmail": "admin.example.com.",
                 "serial": 2025010101
             },
-            "nameServers": ["ns1.example.com."]
+            "nameServers": ["ns1.example.com."],
+            "nameServerIps": {}
         }
     }"#;
 
@@ -160,6 +190,7 @@ fn test_zone_config_empty_name_servers() {
             negative_ttl: 86400,
         },
         name_servers: vec![],
+        name_server_ips: HashMap::new(),
         records: vec![],
     };
 
@@ -184,6 +215,7 @@ fn test_zone_config_special_characters_in_names() {
             negative_ttl: 86400,
         },
         name_servers: vec!["ns1.example.com.".to_string()],
+        name_server_ips: HashMap::new(),
         records: vec![DnsRecord {
             name: "_dmarc".to_string(),
             record_type: "TXT".to_string(),
@@ -212,6 +244,7 @@ fn test_zone_config_zero_ttl() {
             negative_ttl: 0,
         },
         name_servers: vec!["ns1.example.com.".to_string()],
+        name_server_ips: HashMap::new(),
         records: vec![],
     };
 
@@ -241,6 +274,7 @@ fn test_dns_record_mx_with_priority_zero() {
             negative_ttl: 86400,
         },
         name_servers: vec!["ns1.example.com.".to_string()],
+        name_server_ips: HashMap::new(),
         records: vec![record],
     };
 
@@ -262,6 +296,7 @@ fn test_multiple_records_same_name() {
             negative_ttl: 86400,
         },
         name_servers: vec!["ns1.example.com.".to_string()],
+        name_server_ips: HashMap::new(),
         records: vec![
             DnsRecord {
                 name: "@".to_string(),
@@ -283,4 +318,101 @@ fn test_multiple_records_same_name() {
     let zone_file = config.to_zone_file();
     assert!(zone_file.contains("@ IN A 192.0.2.1"));
     assert!(zone_file.contains("@ IN A 192.0.2.2"));
+}
+
+#[test]
+fn test_zone_config_with_nameserver_glue_records() {
+    let mut ns_ips = HashMap::new();
+    ns_ips.insert("ns1.example.com.".to_string(), "192.0.2.1".to_string());
+    ns_ips.insert("ns2.example.com.".to_string(), "192.0.2.2".to_string());
+
+    let config = ZoneConfig {
+        ttl: 3600,
+        soa: SoaRecord {
+            primary_ns: "ns1.example.com.".to_string(),
+            admin_email: "admin.example.com.".to_string(),
+            serial: 2025010101,
+            refresh: 3600,
+            retry: 600,
+            expire: 604_800,
+            negative_ttl: 86400,
+        },
+        name_servers: vec![
+            "ns1.example.com.".to_string(),
+            "ns2.example.com.".to_string(),
+        ],
+        name_server_ips: ns_ips,
+        records: vec![],
+    };
+
+    let zone_file = config.to_zone_file();
+
+    // Check that NS records are present
+    assert!(zone_file.contains("@ IN NS ns1.example.com."));
+    assert!(zone_file.contains("@ IN NS ns2.example.com."));
+
+    // Check that glue records (A records for nameservers) are present
+    assert!(zone_file.contains("ns1.example.com IN A 192.0.2.1"));
+    assert!(zone_file.contains("ns2.example.com IN A 192.0.2.2"));
+}
+
+#[test]
+fn test_zone_config_glue_records_serialization() {
+    let mut ns_ips = HashMap::new();
+    ns_ips.insert("ns1.example.com.".to_string(), "192.0.2.1".to_string());
+
+    let config = ZoneConfig {
+        ttl: 3600,
+        soa: SoaRecord {
+            primary_ns: "ns1.example.com.".to_string(),
+            admin_email: "admin.example.com.".to_string(),
+            serial: 2025010101,
+            refresh: 3600,
+            retry: 600,
+            expire: 604_800,
+            negative_ttl: 86400,
+        },
+        name_servers: vec!["ns1.example.com.".to_string()],
+        name_server_ips: ns_ips,
+        records: vec![],
+    };
+
+    // Test that it can be serialized to JSON
+    let json = serde_json::to_string(&config).unwrap();
+    assert!(json.contains("nameServerIps"));
+
+    // Test that it can be deserialized from JSON
+    let deserialized: ZoneConfig = serde_json::from_str(&json).unwrap();
+    assert!(!deserialized.name_server_ips.is_empty());
+    assert_eq!(
+        deserialized.name_server_ips.get("ns1.example.com."),
+        Some(&"192.0.2.1".to_string())
+    );
+}
+
+#[test]
+fn test_zone_config_without_nameserver_ips() {
+    let config = ZoneConfig {
+        ttl: 3600,
+        soa: SoaRecord {
+            primary_ns: "ns1.example.com.".to_string(),
+            admin_email: "admin.example.com.".to_string(),
+            serial: 2025010101,
+            refresh: 3600,
+            retry: 600,
+            expire: 604_800,
+            negative_ttl: 86400,
+        },
+        name_servers: vec!["ns1.example.com.".to_string()],
+        name_server_ips: HashMap::new(),
+        records: vec![],
+    };
+
+    let zone_file = config.to_zone_file();
+
+    // Should have NS records
+    assert!(zone_file.contains("@ IN NS ns1.example.com."));
+
+    // Should NOT have A records for nameservers when name_server_ips is empty
+    assert!(!zone_file.contains("ns1.example.com IN A"));
 }

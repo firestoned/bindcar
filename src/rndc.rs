@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 use rndc::RndcClient;
 use std::fs;
 use std::time::Instant;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::metrics;
 
@@ -36,18 +36,39 @@ impl RndcExecutor {
     ///
     /// # Arguments
     /// * `server` - RNDC server address (e.g., "127.0.0.1:953")
-    /// * `algorithm` - HMAC algorithm (e.g., "sha256", "md5", "sha1", "sha224", "sha384", "sha512")
+    /// * `algorithm` - HMAC algorithm, accepts both formats:
+    ///   - With prefix: "hmac-md5", "hmac-sha1", "hmac-sha224", "hmac-sha256", "hmac-sha384", "hmac-sha512"
+    ///   - Without prefix: "md5", "sha1", "sha224", "sha256", "sha384", "sha512"
     /// * `secret` - Base64-encoded RNDC secret key
     ///
     /// # Returns
     /// A new RndcExecutor instance
     pub fn new(server: String, algorithm: String, secret: String) -> Result<Self> {
-        debug!(
-            "Creating RNDC client for server {} with algorithm {}",
-            server, algorithm
-        );
+        // Trim whitespace from all parameters to handle environment variable issues
+        let server = server.trim();
+        let mut algorithm = algorithm.trim().to_string();
+        let secret = secret.trim();
 
-        let client = RndcClient::new(&server, &algorithm, &secret);
+        // The rndc crate v0.1.3 only accepts algorithms WITHOUT the "hmac-" prefix
+        // Strip it if present (rndc.conf files typically use "hmac-sha256" format)
+        if algorithm.starts_with("hmac-") {
+            algorithm = algorithm.trim_start_matches("hmac-").to_string();
+        }
+
+        debug!("Using algorithm: {} for server: {}", algorithm, server);
+
+        // Validate algorithm - rndc crate v0.1.3 only supports these values
+        let valid_algorithms = ["md5", "sha1", "sha224", "sha256", "sha384", "sha512"];
+
+        if !valid_algorithms.contains(&algorithm.as_str()) {
+            return Err(anyhow::anyhow!(
+                "Invalid algorithm '{}'. Valid algorithms (without 'hmac-' prefix): {:?}",
+                algorithm,
+                valid_algorithms
+            ));
+        }
+
+        let client = RndcClient::new(server, &algorithm, secret);
 
         Ok(Self { client })
     }
@@ -186,22 +207,28 @@ pub fn parse_rndc_conf(path: &str) -> Result<RndcConfig> {
 
     info!("Parsing rndc.conf from {}", path);
 
-    // Simple parser for rndc.conf format
-    // Format: key "name" { algorithm "hmac-sha256"; secret "base64string"; };
     let mut algorithm = None;
     let mut secret = None;
-    let mut server = "127.0.0.1:953".to_string(); // Default server
+    let mut server = "127.0.0.1:953".to_string();
     let mut default_key = None;
+    let mut include_files = Vec::new();
 
-    // Parse key blocks
+    // First pass: parse main config and collect include directives
     for line in content.lines() {
         let line = line.trim();
+
+        // Handle include directive (e.g., include "/etc/bind/rndc.key";)
+        if line.starts_with("include") {
+            if let Some(include_path) = extract_quoted_value(line) {
+                debug!("Found include directive: {}", include_path);
+                include_files.push(include_path);
+            }
+        }
 
         // Parse algorithm
         if line.contains("algorithm") {
             if let Some(algo) = extract_quoted_value(line) {
-                // Remove "hmac-" prefix if present for compatibility
-                algorithm = Some(algo.trim_start_matches("hmac-").to_string());
+                algorithm = Some(algo);
             }
         }
 
@@ -215,7 +242,6 @@ pub fn parse_rndc_conf(path: &str) -> Result<RndcConfig> {
         // Parse default-server from options block
         if line.contains("default-server") {
             if let Some(srv) = extract_value_after_whitespace(line) {
-                // Add default port if not specified
                 server = if srv.contains(':') {
                     srv
                 } else {
@@ -232,11 +258,53 @@ pub fn parse_rndc_conf(path: &str) -> Result<RndcConfig> {
         }
     }
 
-    let algorithm = algorithm.ok_or_else(|| anyhow::anyhow!("No algorithm found in {}", path))?;
-    let secret = secret.ok_or_else(|| anyhow::anyhow!("No secret found in {}", path))?;
+    // If we don't have algorithm/secret yet, try parsing included files
+    if algorithm.is_none() || secret.is_none() {
+        for include_path in &include_files {
+            info!("Parsing included file: {}", include_path);
+
+            match fs::read_to_string(include_path) {
+                Ok(include_content) => {
+                    for line in include_content.lines() {
+                        let line = line.trim();
+
+                        if algorithm.is_none() && line.contains("algorithm") {
+                            if let Some(algo) = extract_quoted_value(line) {
+                                debug!("Found algorithm in {}: {}", include_path, algo);
+                                algorithm = Some(algo);
+                            }
+                        }
+
+                        if secret.is_none() && line.contains("secret") {
+                            if let Some(sec) = extract_quoted_value(line) {
+                                debug!("Found secret in {}", include_path);
+                                secret = Some(sec);
+                            }
+                        }
+
+                        // Also check for key name in included file
+                        if default_key.is_none() && line.starts_with("key") {
+                            // Extract key name from: key "keyname" {
+                            if let Some(key_name) = extract_quoted_value(line) {
+                                default_key = Some(key_name);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to read included file {}: {}", include_path, e);
+                }
+            }
+        }
+    }
+
+    let algorithm = algorithm
+        .ok_or_else(|| anyhow::anyhow!("No algorithm found in {} or included files", path))?;
+    let secret =
+        secret.ok_or_else(|| anyhow::anyhow!("No secret found in {} or included files", path))?;
 
     info!(
-        "Parsed rndc.conf: server={}, algorithm={}, key={}",
+        "Parsed rndc configuration: server={}, algorithm={}, key={}",
         server,
         algorithm,
         default_key.unwrap_or_else(|| "unnamed".to_string())
