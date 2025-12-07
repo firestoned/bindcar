@@ -7,7 +7,7 @@ Detailed reference for zone configuration structure.
 ```json
 {
   "zoneName": "string",
-  "zoneType": "master|slave",
+  "zoneType": "primary|secondary",
   "zoneConfig": {
     "ttl": integer,
     "soa": { ... },
@@ -35,16 +35,16 @@ Detailed reference for zone configuration structure.
 
 - **Type**: String
 - **Required**: Yes
-- **Values**: `master` or `slave`
+- **Values**: `primary` or `secondary`
 
 ```json
 {
-  "zoneType": "master"
+  "zoneType": "primary"
 }
 ```
 
-Master zones are authoritative zones managed locally.
-Slave zones are transferred from a master server.
+Primary zones are authoritative zones managed locally.
+Secondary zones are transferred from a primary server.
 
 ## TTL (Time To Live)
 
@@ -152,7 +152,7 @@ Requires BIND9 to be configured with the named key.
 ```json
 {
   "zoneName": "example.com",
-  "zoneType": "master",
+  "zoneType": "primary",
   "zoneConfig": {
     "ttl": 3600,
     "soa": {

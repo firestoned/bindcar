@@ -100,7 +100,7 @@ Common fields:
   "target": "bindcar::zones",
   "message": "Creating zone",
   "zone": "example.com",
-  "zone_type": "master"
+  "zone_type": "primary"
 }
 ```
 

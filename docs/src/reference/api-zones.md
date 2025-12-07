@@ -16,7 +16,7 @@ Content-Type: application/json
 
 {
   "zoneName": "example.com",
-  "zoneType": "master",
+  "zoneType": "primary",
   "zoneConfig": {
     "ttl": 3600,
     "soa": {
@@ -69,7 +69,7 @@ curl -X POST http://localhost:8080/api/v1/zones \
   -H "Content-Type: application/json" \
   -d '{
     "zoneName": "example.com",
-    "zoneType": "master",
+    "zoneType": "primary",
     "zoneConfig": {
       "ttl": 3600,
       "soa": {
@@ -138,7 +138,7 @@ Authorization: Bearer <token>
 ```json
 {
   "name": "example.com",
-  "zoneType": "master",
+  "zoneType": "primary",
   "serial": 2025010101,
   "filePath": "/var/cache/bind/example.com.zone"
 }

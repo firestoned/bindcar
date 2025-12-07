@@ -99,7 +99,7 @@ fn test_soa_record_default_serial() {
 fn test_create_zone_request_deserialization() {
     let json = r#"{
         "zoneName": "example.com",
-        "zoneType": "master",
+        "zoneType": "primary",
         "zoneConfig": {
             "ttl": 3600,
             "soa": {
@@ -118,7 +118,7 @@ fn test_create_zone_request_deserialization() {
 
     let request: CreateZoneRequest = serde_json::from_str(json).unwrap();
     assert_eq!(request.zone_name, "example.com");
-    assert_eq!(request.zone_type, "master");
+    assert_eq!(request.zone_type, "primary");
     assert_eq!(request.zone_config.ttl, 3600);
     assert_eq!(request.update_key_name, Some("test-key".to_string()));
 }
@@ -127,7 +127,7 @@ fn test_create_zone_request_deserialization() {
 fn test_create_zone_request_without_update_key() {
     let json = r#"{
         "zoneName": "example.com",
-        "zoneType": "master",
+        "zoneType": "primary",
         "zoneConfig": {
             "ttl": 3600,
             "soa": {
@@ -351,9 +351,9 @@ fn test_zone_config_with_nameserver_glue_records() {
     assert!(zone_file.contains("@ IN NS ns1.example.com."));
     assert!(zone_file.contains("@ IN NS ns2.example.com."));
 
-    // Check that glue records (A records for nameservers) are present
-    assert!(zone_file.contains("ns1.example.com IN A 192.0.2.1"));
-    assert!(zone_file.contains("ns2.example.com IN A 192.0.2.2"));
+    // Check that glue records (A records for nameservers) are present with trailing dots
+    assert!(zone_file.contains("ns1.example.com. IN A 192.0.2.1"));
+    assert!(zone_file.contains("ns2.example.com. IN A 192.0.2.2"));
 }
 
 #[test]

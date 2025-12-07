@@ -140,7 +140,7 @@ impl RndcExecutor {
     ///
     /// # Arguments
     /// * `zone_name` - Name of the zone (e.g., "example.com")
-    /// * `zone_config` - Zone configuration block (e.g., "{ type master; file \"/var/cache/bind/example.com.zone\"; }")
+    /// * `zone_config` - Zone configuration block (e.g., "{ type primary; file \"/var/cache/bind/example.com.zone\"; }")
     pub async fn addzone(&self, zone_name: &str, zone_config: &str) -> Result<String> {
         let command = format!("addzone {} {}", zone_name, zone_config);
         self.execute(&command).await
