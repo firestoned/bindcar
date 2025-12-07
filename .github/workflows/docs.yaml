@@ -16,6 +16,11 @@ concurrency:
   group: "pages"
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  K8S_OPENAPI_ENABLED_VERSION: "1.30"
+
 jobs:
   build:
     name: Build Documentation
