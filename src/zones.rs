@@ -21,9 +21,20 @@ use std::path::PathBuf;
 use tracing::{error, info};
 use utoipa::ToSchema;
 
-use crate::{metrics, types::{ApiError, AppState}};
+use crate::{
+    metrics,
+    types::{ApiError, AppState},
+};
 
 /// SOA (Start of Authority) record configuration
+///
+/// # Default Values
+///
+/// - `serial`: Automatically generated in YYYYMMDD01 format (e.g., 2025120601) if not provided
+/// - `refresh`: 3600 seconds
+/// - `retry`: 600 seconds
+/// - `expire`: 604800 seconds (7 days)
+/// - `negative_ttl`: 86400 seconds (1 day)
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SoaRecord {
@@ -33,7 +44,8 @@ pub struct SoaRecord {
     /// Admin email (e.g., "admin.example.com.")
     pub admin_email: String,
 
-    /// Serial number (e.g., 2025010101)
+    /// Serial number (e.g., 2025120601) - defaults to current date in YYYYMMDD01 format
+    #[serde(default = "default_serial")]
     pub serial: u32,
 
     /// Refresh interval in seconds (default: 3600)
@@ -51,6 +63,13 @@ pub struct SoaRecord {
     /// Negative TTL in seconds (default: 86400)
     #[serde(default = "default_negative_ttl")]
     pub negative_ttl: u32,
+}
+
+fn default_serial() -> u32 {
+    // Generate serial as YYYYMMDD01
+    let now = chrono::Utc::now();
+    let date_part = now.format("%Y%m%d").to_string();
+    format!("{}01", date_part).parse().unwrap_or(2025120601)
 }
 
 fn default_refresh() -> u32 {
@@ -105,6 +124,10 @@ pub struct ZoneConfig {
     /// Name servers for the zone
     pub name_servers: Vec<String>,
 
+    /// A records for nameservers (glue records)
+    /// Maps nameserver hostname to IP address (e.g., "ns1.example.com." -> "192.0.2.1")
+    pub name_server_ips: std::collections::HashMap<String, String>,
+
     /// DNS records in the zone
     #[serde(default)]
     pub records: Vec<DnsRecord>,
@@ -138,6 +161,16 @@ impl ZoneConfig {
         }
 
         if !self.name_servers.is_empty() {
+            zone_file.push('\n');
+        }
+
+        // Glue records (A records for nameservers)
+        for (ns_name, ip) in &self.name_server_ips {
+            // Extract hostname without trailing dot for zone file
+            let hostname = ns_name.trim_end_matches('.');
+            zone_file.push_str(&format!("{} IN A {}\n", hostname, ip));
+        }
+        if !self.name_server_ips.is_empty() {
             zone_file.push('\n');
         }
 

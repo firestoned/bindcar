@@ -33,20 +33,54 @@ API_PORT=8080
 
 Valid range: 1-65535
 
-### RNDC_PATH
+### RNDC_SERVER
 
-- **Type**: String (path)
-- **Default**: `/usr/sbin/rndc`
+- **Type**: String (address:port)
+- **Default**: `127.0.0.1:953` (or from `/etc/bind/rndc.conf`)
 - **Required**: No
-- **Description**: Path to the rndc binary
+- **Description**: RNDC server address and port
 
 ```bash
-RNDC_PATH=/usr/sbin/rndc
+RNDC_SERVER=127.0.0.1:953
 ```
 
-The rndc binary must be:
-- Executable by the bindcar user
-- A valid BIND9 rndc installation
+### RNDC_ALGORITHM
+
+- **Type**: String
+- **Default**: `sha256` (or from `/etc/bind/rndc.conf`)
+- **Required**: No
+- **Description**: HMAC algorithm for RNDC authentication
+
+```bash
+RNDC_ALGORITHM=sha256
+```
+
+Valid values:
+- `md5` (or `hmac-md5`)
+- `sha1` (or `hmac-sha1`)
+- `sha224` (or `hmac-sha224`)
+- `sha256` (or `hmac-sha256`)
+- `sha384` (or `hmac-sha384`)
+- `sha512` (or `hmac-sha512`)
+
+Both formats (with or without `hmac-` prefix) are accepted.
+
+### RNDC_SECRET
+
+- **Type**: String (base64-encoded)
+- **Default**: None (read from `/etc/bind/rndc.conf` or `/etc/rndc.conf`)
+- **Required**: Only if not using rndc.conf
+- **Description**: Base64-encoded RNDC secret key
+
+```bash
+RNDC_SECRET=dGVzdC1zZWNyZXQtaGVyZQ==
+```
+
+**Note**: If `RNDC_SECRET` is not set, bindcar will automatically parse the RNDC configuration from `/etc/bind/rndc.conf` or `/etc/rndc.conf`, including any `include` directives for separate key files.
+
+The secret must be:
+- Base64-encoded
+- Match the key configured in BIND9's `rndc.conf`
 
 ## Logging Variables
 
@@ -125,6 +159,9 @@ docker run -d \
   -e BIND_ZONE_DIR=/var/cache/bind \
   -e API_PORT=8080 \
   -e RUST_LOG=info \
+  -e RNDC_SERVER=127.0.0.1:953 \
+  -e RNDC_ALGORITHM=sha256 \
+  -e RNDC_SECRET=dGVzdC1zZWNyZXQtaGVyZQ== \
   -e DISABLE_AUTH=false \
   ghcr.io/firestoned/bindcar:latest
 ```
@@ -139,8 +176,15 @@ env:
   value: "8080"
 - name: RUST_LOG
   value: "info"
-- name: RNDC_PATH
-  value: "/usr/sbin/rndc"
+- name: RNDC_SERVER
+  value: "127.0.0.1:953"
+- name: RNDC_ALGORITHM
+  value: "sha256"
+- name: RNDC_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: rndc-secret
+      key: secret
 - name: DISABLE_AUTH
   value: "false"
 ```

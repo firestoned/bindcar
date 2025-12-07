@@ -1,74 +1,139 @@
 // Copyright (c) 2025 Erick Bourgeois, firestoned
 // SPDX-License-Identifier: MIT
 
-//! RNDC command execution
+//! RNDC command execution using native RNDC protocol
 //!
-//! This module executes rndc commands using the system's rndc binary.
-//! The rndc binary must be configured with appropriate keys in /etc/bind/rndc.conf
+//! This module communicates with BIND9 using the RNDC protocol directly,
+//! rather than shelling out to the rndc binary. This provides:
+//! - Better error handling with structured responses
+//! - No subprocess overhead
+//! - Native async support
+//! - Direct access to error messages from BIND9
 
 use anyhow::{Context, Result};
+use rndc::RndcClient;
+use std::fs;
 use std::time::Instant;
-use tokio::process::Command;
-use tracing::{debug, error};
+use tracing::{debug, error, info, warn};
 
 use crate::metrics;
 
-/// RNDC command executor
+/// RNDC configuration parsed from rndc.conf
+#[derive(Debug, Clone)]
+pub struct RndcConfig {
+    pub server: String,
+    pub algorithm: String,
+    pub secret: String,
+}
+
+/// RNDC command executor using native protocol
 pub struct RndcExecutor {
-    pub(crate) rndc_path: String,
+    client: RndcClient,
 }
 
 impl RndcExecutor {
     /// Create a new RNDC executor
     ///
     /// # Arguments
-    /// * `rndc_path` - Path to the rndc binary (default: "/usr/sbin/rndc")
-    pub fn new(rndc_path: Option<String>) -> Self {
-        Self {
-            rndc_path: rndc_path.unwrap_or_else(|| "/usr/sbin/rndc".to_string()),
-        }
-    }
-
-    /// Execute an rndc command
-    ///
-    /// # Arguments
-    /// * `args` - Command arguments (e.g., &["status"], &["addzone", "example.com", "{ ... }"])
+    /// * `server` - RNDC server address (e.g., "127.0.0.1:953")
+    /// * `algorithm` - HMAC algorithm, accepts both formats:
+    ///   - With prefix: "hmac-md5", "hmac-sha1", "hmac-sha224", "hmac-sha256", "hmac-sha384", "hmac-sha512"
+    ///   - Without prefix: "md5", "sha1", "sha224", "sha256", "sha384", "sha512"
+    /// * `secret` - Base64-encoded RNDC secret key
     ///
     /// # Returns
-    /// The stdout output from rndc on success
+    /// A new RndcExecutor instance
+    pub fn new(server: String, algorithm: String, secret: String) -> Result<Self> {
+        // Trim whitespace from all parameters to handle environment variable issues
+        let server = server.trim();
+        let mut algorithm = algorithm.trim().to_string();
+        let secret = secret.trim();
+
+        // The rndc crate v0.1.3 only accepts algorithms WITHOUT the "hmac-" prefix
+        // Strip it if present (rndc.conf files typically use "hmac-sha256" format)
+        if algorithm.starts_with("hmac-") {
+            algorithm = algorithm.trim_start_matches("hmac-").to_string();
+        }
+
+        debug!("Using algorithm: {} for server: {}", algorithm, server);
+
+        // Validate algorithm - rndc crate v0.1.3 only supports these values
+        let valid_algorithms = ["md5", "sha1", "sha224", "sha256", "sha384", "sha512"];
+
+        if !valid_algorithms.contains(&algorithm.as_str()) {
+            return Err(anyhow::anyhow!(
+                "Invalid algorithm '{}'. Valid algorithms (without 'hmac-' prefix): {:?}",
+                algorithm,
+                valid_algorithms
+            ));
+        }
+
+        let client = RndcClient::new(server, &algorithm, secret);
+
+        Ok(Self { client })
+    }
+
+    /// Execute an RNDC command
+    ///
+    /// # Arguments
+    /// * `command` - Command string (e.g., "status", "reload example.com")
+    ///
+    /// # Returns
+    /// The response text from RNDC on success
     ///
     /// # Errors
-    /// Returns an error if the rndc command fails
-    async fn execute(&self, args: &[&str]) -> Result<String> {
-        debug!("Executing rndc command: {} {:?}", self.rndc_path, args);
+    /// Returns an error if the RNDC command fails, including detailed error
+    /// information from the BIND9 server
+    async fn execute(&self, command: &str) -> Result<String> {
+        debug!("Executing RNDC command: {}", command);
 
         let start = Instant::now();
-        let command_name = args.first().unwrap_or(&"unknown");
+        let command_name = command.split_whitespace().next().unwrap_or("unknown");
 
-        let output = Command::new(&self.rndc_path)
-            .args(args)
-            .output()
-            .await
-            .context("Failed to execute rndc command")?;
+        // Execute RNDC command using native protocol
+        let result = tokio::task::spawn_blocking({
+            let client = self.client.clone();
+            let command = command.to_string();
+            move || client.rndc_command(&command)
+        })
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to execute RNDC command '{}': task join error",
+                command_name
+            )
+        })?;
 
         let duration = start.elapsed().as_secs_f64();
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            error!("RNDC command failed: {}", stderr);
-            metrics::record_rndc_command(command_name, false, duration);
-            return Err(anyhow::anyhow!("RNDC command failed: {}", stderr));
-        }
+        match result {
+            Ok(rndc_result) => {
+                // Check if the RNDC result contains an error
+                if let Some(err) = &rndc_result.err {
+                    let error_msg = format!("RNDC command '{}' failed: {}", command_name, err);
+                    error!("{}", error_msg);
+                    metrics::record_rndc_command(command_name, false, duration);
+                    return Err(anyhow::anyhow!("{}", error_msg));
+                }
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        debug!("RNDC command output: {}", stdout);
-        metrics::record_rndc_command(command_name, true, duration);
-        Ok(stdout)
+                // Success - return the text response
+                let response = rndc_result.text.unwrap_or_default();
+                debug!("RNDC command '{}' succeeded: {}", command_name, response);
+                metrics::record_rndc_command(command_name, true, duration);
+                Ok(response)
+            }
+            Err(e) => {
+                let error_msg = format!("RNDC command '{}' failed: {}", command_name, e);
+                error!("{}", error_msg);
+                metrics::record_rndc_command(command_name, false, duration);
+                Err(anyhow::anyhow!("{}", error_msg))
+            }
+        }
     }
 
     /// Get server status
     pub async fn status(&self) -> Result<String> {
-        self.execute(&["status"]).await
+        self.execute("status").await
     }
 
     /// Add a zone
@@ -77,69 +142,198 @@ impl RndcExecutor {
     /// * `zone_name` - Name of the zone (e.g., "example.com")
     /// * `zone_config` - Zone configuration block (e.g., "{ type master; file \"/var/cache/bind/example.com.zone\"; }")
     pub async fn addzone(&self, zone_name: &str, zone_config: &str) -> Result<String> {
-        self.execute(&["addzone", zone_name, zone_config]).await
+        let command = format!("addzone {} {}", zone_name, zone_config);
+        self.execute(&command).await
     }
 
     /// Delete a zone
     pub async fn delzone(&self, zone_name: &str) -> Result<String> {
-        self.execute(&["delzone", zone_name]).await
+        let command = format!("delzone {}", zone_name);
+        self.execute(&command).await
     }
 
     /// Reload a zone
     pub async fn reload(&self, zone_name: &str) -> Result<String> {
-        self.execute(&["reload", zone_name]).await
+        let command = format!("reload {}", zone_name);
+        self.execute(&command).await
     }
 
     /// Get zone status
     pub async fn zonestatus(&self, zone_name: &str) -> Result<String> {
-        self.execute(&["zonestatus", zone_name]).await
+        let command = format!("zonestatus {}", zone_name);
+        self.execute(&command).await
     }
 
     /// Freeze a zone (disable dynamic updates)
     pub async fn freeze(&self, zone_name: &str) -> Result<String> {
-        self.execute(&["freeze", zone_name]).await
+        let command = format!("freeze {}", zone_name);
+        self.execute(&command).await
     }
 
     /// Thaw a zone (enable dynamic updates)
     pub async fn thaw(&self, zone_name: &str) -> Result<String> {
-        self.execute(&["thaw", zone_name]).await
+        let command = format!("thaw {}", zone_name);
+        self.execute(&command).await
     }
 
     /// Notify secondaries about zone changes
     pub async fn notify(&self, zone_name: &str) -> Result<String> {
-        self.execute(&["notify", zone_name]).await
+        let command = format!("notify {}", zone_name);
+        self.execute(&command).await
     }
 }
 
 impl Clone for RndcExecutor {
     fn clone(&self) -> Self {
         Self {
-            rndc_path: self.rndc_path.clone(),
+            client: self.client.clone(),
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Parse RNDC configuration from rndc.conf file
+///
+/// # Arguments
+/// * `path` - Path to rndc.conf file (typically /etc/bind/rndc.conf or /etc/rndc.conf)
+///
+/// # Returns
+/// RndcConfig with server, algorithm, and secret
+///
+/// # Errors
+/// Returns an error if the file cannot be read or parsed
+pub fn parse_rndc_conf(path: &str) -> Result<RndcConfig> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read rndc.conf from {}", path))?;
 
-    #[test]
-    fn test_rndc_executor_creation() {
-        let executor = RndcExecutor::new(None);
-        assert_eq!(executor.rndc_path, "/usr/sbin/rndc");
+    info!("Parsing rndc.conf from {}", path);
 
-        let executor_custom = RndcExecutor::new(Some("/custom/path/rndc".to_string()));
-        assert_eq!(executor_custom.rndc_path, "/custom/path/rndc");
+    let mut algorithm = None;
+    let mut secret = None;
+    let mut server = "127.0.0.1:953".to_string();
+    let mut default_key = None;
+    let mut include_files = Vec::new();
+
+    // First pass: parse main config and collect include directives
+    for line in content.lines() {
+        let line = line.trim();
+
+        // Handle include directive (e.g., include "/etc/bind/rndc.key";)
+        if line.starts_with("include") {
+            if let Some(include_path) = extract_quoted_value(line) {
+                debug!("Found include directive: {}", include_path);
+                include_files.push(include_path);
+            }
+        }
+
+        // Parse algorithm
+        if line.contains("algorithm") {
+            if let Some(algo) = extract_quoted_value(line) {
+                algorithm = Some(algo);
+            }
+        }
+
+        // Parse secret
+        if line.contains("secret") {
+            if let Some(sec) = extract_quoted_value(line) {
+                secret = Some(sec);
+            }
+        }
+
+        // Parse default-server from options block
+        if line.contains("default-server") {
+            if let Some(srv) = extract_value_after_whitespace(line) {
+                server = if srv.contains(':') {
+                    srv
+                } else {
+                    format!("{}:953", srv)
+                };
+            }
+        }
+
+        // Parse default-key from options block
+        if line.contains("default-key") {
+            if let Some(key) = extract_value_after_whitespace(line) {
+                default_key = Some(key);
+            }
+        }
     }
 
-    #[test]
-    fn test_rndc_executor_clone() {
-        let executor = RndcExecutor::new(Some("/custom/path/rndc".to_string()));
-        let cloned = executor.clone();
-        assert_eq!(cloned.rndc_path, "/custom/path/rndc");
+    // If we don't have algorithm/secret yet, try parsing included files
+    if algorithm.is_none() || secret.is_none() {
+        for include_path in &include_files {
+            info!("Parsing included file: {}", include_path);
+
+            match fs::read_to_string(include_path) {
+                Ok(include_content) => {
+                    for line in include_content.lines() {
+                        let line = line.trim();
+
+                        if algorithm.is_none() && line.contains("algorithm") {
+                            if let Some(algo) = extract_quoted_value(line) {
+                                debug!("Found algorithm in {}: {}", include_path, algo);
+                                algorithm = Some(algo);
+                            }
+                        }
+
+                        if secret.is_none() && line.contains("secret") {
+                            if let Some(sec) = extract_quoted_value(line) {
+                                debug!("Found secret in {}", include_path);
+                                secret = Some(sec);
+                            }
+                        }
+
+                        // Also check for key name in included file
+                        if default_key.is_none() && line.starts_with("key") {
+                            // Extract key name from: key "keyname" {
+                            if let Some(key_name) = extract_quoted_value(line) {
+                                default_key = Some(key_name);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to read included file {}: {}", include_path, e);
+                }
+            }
+        }
     }
 
-    // Note: Integration tests that actually execute rndc commands require
-    // a running BIND9 instance with rndc configured. These should be in
-    // integration tests, not unit tests.
+    let algorithm = algorithm
+        .ok_or_else(|| anyhow::anyhow!("No algorithm found in {} or included files", path))?;
+    let secret =
+        secret.ok_or_else(|| anyhow::anyhow!("No secret found in {} or included files", path))?;
+
+    info!(
+        "Parsed rndc configuration: server={}, algorithm={}, key={}",
+        server,
+        algorithm,
+        default_key.unwrap_or_else(|| "unnamed".to_string())
+    );
+
+    Ok(RndcConfig {
+        server,
+        algorithm,
+        secret,
+    })
+}
+
+/// Extract quoted value from a line like: algorithm "hmac-sha256";
+fn extract_quoted_value(line: &str) -> Option<String> {
+    let parts: Vec<&str> = line.split('"').collect();
+    if parts.len() >= 2 {
+        Some(parts[1].to_string())
+    } else {
+        None
+    }
+}
+
+/// Extract value after whitespace from a line like: default-server 127.0.0.1;
+fn extract_value_after_whitespace(line: &str) -> Option<String> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() >= 2 {
+        // Remove trailing semicolon if present
+        Some(parts[1].trim_end_matches(';').to_string())
+    } else {
+        None
+    }
 }

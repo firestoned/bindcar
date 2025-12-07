@@ -23,7 +23,7 @@ use axum::{
 use serde::Serialize;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -183,7 +183,6 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(DEFAULT_API_PORT);
-    let rndc_path = std::env::var("RNDC_PATH").ok();
     let disable_auth = std::env::var("DISABLE_AUTH")
         .ok()
         .and_then(|v| v.parse::<bool>().ok())
@@ -191,15 +190,64 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Zone directory: {}", zone_dir);
     info!("API port: {}", api_port);
-    if let Some(ref path) = rndc_path {
-        info!("RNDC path: {}", path);
-    }
     if disable_auth {
         warn!("⚠️  Authentication is DISABLED - API endpoints are unprotected!");
         warn!("⚠️  This should ONLY be used in trusted environments (e.g., Linkerd service mesh)");
     } else {
         info!("Authentication is enabled");
     }
+
+    // Get RNDC configuration from environment or fallback to rndc.conf
+    let (rndc_server, rndc_algorithm, rndc_secret) = match (
+        std::env::var("RNDC_SECRET").ok(),
+        std::env::var("RNDC_SERVER").ok(),
+        std::env::var("RNDC_ALGORITHM").ok(),
+    ) {
+        (Some(secret), server, algorithm) => {
+            // Environment variables provided
+            let server = server.unwrap_or_else(|| "127.0.0.1:953".to_string());
+            let algorithm = algorithm.unwrap_or_else(|| "sha256".to_string());
+            info!("Using RNDC configuration from environment variables");
+            info!("RNDC server: {}", server);
+            info!("RNDC algorithm: {}", algorithm);
+            (server, algorithm, secret)
+        }
+        (None, _, _) => {
+            // Try to parse from rndc.conf files
+            info!("RNDC_SECRET not set, attempting to parse rndc.conf");
+
+            let config_paths = vec!["/etc/bind/rndc.conf", "/etc/rndc.conf"];
+            let mut config = None;
+
+            for path in &config_paths {
+                match bindcar::rndc::parse_rndc_conf(path) {
+                    Ok(cfg) => {
+                        info!("Successfully parsed RNDC configuration from {}", path);
+                        config = Some(cfg);
+                        break;
+                    }
+                    Err(e) => {
+                        debug!("Failed to parse {}: {}", path, e);
+                    }
+                }
+            }
+
+            match config {
+                Some(cfg) => {
+                    info!("RNDC server: {}", cfg.server);
+                    info!("RNDC algorithm: {}", cfg.algorithm);
+                    (cfg.server, cfg.algorithm, cfg.secret)
+                }
+                None => {
+                    error!("RNDC configuration not found!");
+                    error!("Either set RNDC_SECRET environment variable or ensure /etc/bind/rndc.conf exists");
+                    return Err(anyhow::anyhow!(
+                        "RNDC configuration required: Set RNDC_SECRET env var or create /etc/bind/rndc.conf"
+                    ));
+                }
+            }
+        }
+    };
 
     // Verify zone directory exists
     if !tokio::fs::metadata(&zone_dir).await?.is_dir() {
@@ -208,7 +256,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Create RNDC executor
-    let rndc = Arc::new(RndcExecutor::new(rndc_path));
+    let rndc = Arc::new(
+        RndcExecutor::new(rndc_server, rndc_algorithm, rndc_secret)
+            .context("Failed to create RNDC client")?,
+    );
 
     // Create application state
     let state = AppState {

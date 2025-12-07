@@ -11,8 +11,8 @@
 
 use lazy_static::lazy_static;
 use prometheus::{
-    opts, register_counter_vec, register_gauge, register_histogram_vec, CounterVec, Encoder,
-    Gauge, HistogramVec, TextEncoder,
+    opts, register_counter_vec, register_gauge, register_histogram_vec, CounterVec, Encoder, Gauge,
+    HistogramVec, TextEncoder,
 };
 
 lazy_static! {
@@ -133,4 +133,3 @@ pub fn record_rndc_command(command: &str, success: bool, duration: f64) {
 pub fn update_zones_count(count: i64) {
     ZONES_MANAGED_TOTAL.set(count as f64);
 }
-

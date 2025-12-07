@@ -28,7 +28,11 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     let executor = RndcExecutor::new(None);
+//!     let executor = RndcExecutor::new(
+//!         "127.0.0.1:953".to_string(),
+//!         "sha256".to_string(),
+//!         "dGVzdC1zZWNyZXQtaGVyZQ==".to_string(), // base64 encoded secret
+//!     )?;
 //!
 //!     // Execute RNDC commands
 //!     let status = executor.status().await?;
@@ -42,6 +46,11 @@
 //!
 //! ```rust
 //! use bindcar::{CreateZoneRequest, ZoneConfig, SoaRecord, DnsRecord};
+//! use std::collections::HashMap;
+//!
+//! // Create nameserver glue records
+//! let mut ns_ips = HashMap::new();
+//! ns_ips.insert("ns1.example.com.".to_string(), "192.0.2.10".to_string());
 //!
 //! // Create a zone creation request
 //! let request = CreateZoneRequest {
@@ -59,6 +68,7 @@
 //!             negative_ttl: 86400,
 //!         },
 //!         name_servers: vec!["ns1.example.com.".to_string()],
+//!         name_server_ips: ns_ips,
 //!         records: vec![
 //!             DnsRecord {
 //!                 name: "@".to_string(),
@@ -85,32 +95,27 @@
 //!
 //! ## Zone File Generation
 //!
+//! The `serial` field in SoaRecord will auto-generate in YYYYMMDD01 format if omitted from JSON.
+//!
 //! ```rust
 //! use bindcar::{ZoneConfig, SoaRecord, DnsRecord};
+//! use std::collections::HashMap;
 //!
-//! let zone_config = ZoneConfig {
-//!     ttl: 3600,
-//!     soa: SoaRecord {
-//!         primary_ns: "ns1.example.com.".to_string(),
-//!         admin_email: "admin.example.com.".to_string(),
-//!         serial: 2025010101,
-//!         refresh: 3600,
-//!         retry: 600,
-//!         expire: 604800,
-//!         negative_ttl: 86400,
-//!     },
-//!     name_servers: vec!["ns1.example.com.".to_string()],
-//!     records: vec![
-//!         DnsRecord {
-//!             name: "@".to_string(),
-//!             record_type: "A".to_string(),
-//!             value: "192.0.2.1".to_string(),
-//!             ttl: None,
-//!             priority: None,
-//!         },
-//!     ],
-//! };
+//! // Example JSON can omit serial for auto-generation:
+//! let json = r#"{
+//!   "ttl": 3600,
+//!   "soa": {
+//!     "primaryNs": "ns1.example.com.",
+//!     "adminEmail": "admin.example.com."
+//!   },
+//!   "nameServers": ["ns1.example.com."],
+//!   "nameServerIps": {
+//!     "ns1.example.com.": "192.0.2.10"
+//!   },
+//!   "records": []
+//! }"#;
 //!
+//! let zone_config: ZoneConfig = serde_json::from_str(json).unwrap();
 //! let zone_file_content = zone_config.to_zone_file();
 //! println!("{}", zone_file_content);
 //! ```
@@ -148,6 +153,9 @@ pub use zones::{DnsRecord, SoaRecord, ZoneConfig};
 pub use zones::{
     CreateZoneRequest, ServerStatusResponse, ZoneInfo, ZoneListResponse, ZoneResponse,
 };
+
+// RNDC configuration
+pub use rndc::{parse_rndc_conf, RndcConfig};
 
 // Test modules
 #[cfg(test)]

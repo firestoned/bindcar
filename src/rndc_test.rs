@@ -7,18 +7,27 @@ use super::rndc::*;
 
 #[test]
 fn test_rndc_executor_creation() {
-    let executor = RndcExecutor::new(None);
-    assert_eq!(executor.rndc_path, "/usr/sbin/rndc");
-
-    let executor_custom = RndcExecutor::new(Some("/custom/path/rndc".to_string()));
-    assert_eq!(executor_custom.rndc_path, "/custom/path/rndc");
+    // Test with valid parameters
+    let result = RndcExecutor::new(
+        "127.0.0.1:953".to_string(),
+        "sha256".to_string(),
+        "dGVzdC1zZWNyZXQtaGVyZQ==".to_string(), // base64 encoded test secret
+    );
+    assert!(result.is_ok());
 }
 
 #[test]
 fn test_rndc_executor_clone() {
-    let executor = RndcExecutor::new(Some("/custom/path/rndc".to_string()));
+    let executor = RndcExecutor::new(
+        "127.0.0.1:953".to_string(),
+        "sha256".to_string(),
+        "dGVzdC1zZWNyZXQtaGVyZQ==".to_string(),
+    )
+    .expect("Failed to create executor");
+
     let cloned = executor.clone();
-    assert_eq!(cloned.rndc_path, "/custom/path/rndc");
+    // If clone succeeds without panic, the test passes
+    drop(cloned);
 }
 
 // Note: Integration tests that actually execute rndc commands require

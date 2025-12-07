@@ -96,7 +96,9 @@ Common variables:
 BIND_ZONE_DIR=/var/cache/bind
 API_PORT=8080
 RUST_LOG=info
-RNDC_PATH=/usr/sbin/rndc
+RNDC_SERVER=127.0.0.1:953
+RNDC_ALGORITHM=sha256
+RNDC_SECRET=dGVzdC1zZWNyZXQtaGVyZQ==
 DISABLE_AUTH=false
 ```
 

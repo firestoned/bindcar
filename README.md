@@ -62,9 +62,52 @@ Environment variables:
 
 - `BIND_ZONE_DIR` - Directory for zone files (default: `/var/cache/bind`)
 - `API_PORT` - API server port (default: `8080`)
-- `RNDC_PATH` - Path to rndc binary (default: `/usr/sbin/rndc`)
+- `RNDC_SERVER` - RNDC server address (default: `127.0.0.1:953`, or from `/etc/bind/rndc.conf`)
+- `RNDC_ALGORITHM` - HMAC algorithm (default: `sha256`, or from `/etc/bind/rndc.conf`)
+- `RNDC_SECRET` - Base64-encoded RNDC secret key (required if not using rndc.conf)
 - `RUST_LOG` - Log level (default: `info`)
 - `DISABLE_AUTH` - Disable authentication (default: `false`)
+
+### RNDC Configuration
+
+bindcar can be configured in two ways:
+
+**Option 1: Environment Variables**
+```bash
+export RNDC_SERVER="127.0.0.1:953"
+export RNDC_ALGORITHM="sha256"
+export RNDC_SECRET="dGVzdC1zZWNyZXQtaGVyZQ=="
+```
+
+**Option 2: Using rndc.conf**
+
+If `RNDC_SECRET` is not set, bindcar will automatically parse `/etc/bind/rndc.conf` or `/etc/rndc.conf`:
+
+```conf
+# /etc/bind/rndc.conf
+key "rndc-key" {
+    algorithm hmac-sha256;
+    secret "dGVzdC1zZWNyZXQtaGVyZQ==";
+};
+
+options {
+    default-key "rndc-key";
+    default-server 127.0.0.1;
+    default-port 953;
+};
+```
+
+The configuration also supports `include` directives for security-sensitive environments:
+
+```conf
+# /etc/bind/rndc.conf
+include "/etc/bind/rndc.key";
+
+options {
+    default-key "rndc-key";
+    default-server 127.0.0.1;
+};
+```
 
 ### Authentication
 
