@@ -6,7 +6,7 @@
 //! This demonstrates how bindy can import bindcar as a dependency and use the
 //! request/response types without maintaining duplicate definitions.
 
-use bindcar::{CreateZoneRequest, DnsRecord, SoaRecord, ZoneConfig, ZoneResponse};
+use bindcar::{CreateZoneRequest, DnsRecord, SoaRecord, ZoneConfig, ZoneResponse, ZONE_TYPE_PRIMARY};
 use std::collections::HashMap;
 
 fn main() {
@@ -56,7 +56,7 @@ fn main() {
 
     let request = CreateZoneRequest {
         zone_name: "example.com".to_string(),
-        zone_type: "master".to_string(),
+        zone_type: ZONE_TYPE_PRIMARY.to_string(),
         zone_config: zone_config.clone(),
         update_key_name: None,
     };

@@ -20,7 +20,7 @@ curl -X POST "$BASE_URL/zones" \
   -H "Content-Type: application/json" \
   -d '{
     "zoneName": "example.com",
-    "zoneType": "master",
+    "zoneType": "primary",
     "zoneConfig": {
       "ttl": 3600,
       "soa": {
@@ -96,7 +96,7 @@ def create_zone(domain, records):
     """Create a DNS zone with records."""
     zone_data = {
         "zoneName": domain,
-        "zoneType": "master",
+        "zoneType": "primary",
         "zoneConfig": {
             "ttl": 3600,
             "soa": {
@@ -418,7 +418,7 @@ def create_internal_dns_zone():
     
     zone_data = {
         "zoneName": "services.cluster.local",
-        "zoneType": "master",
+        "zoneType": "primary",
         "zoneConfig": {
             "ttl": 30,  # Short TTL for dynamic services
             "soa": {
@@ -573,7 +573,7 @@ test_case "Create zone" \
         -H "Content-Type: application/json" \
         -d '{
             "zoneName": "test.example.com",
-            "zoneType": "master",
+            "zoneType": "primary",
             "zoneConfig": {
                 "ttl": 3600,
                 "soa": {

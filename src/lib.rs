@@ -55,7 +55,7 @@
 //! // Create a zone creation request
 //! let request = CreateZoneRequest {
 //!     zone_name: "example.com".to_string(),
-//!     zone_type: "master".to_string(),
+//!     zone_type: "primary".to_string(),
 //!     zone_config: ZoneConfig {
 //!         ttl: 3600,
 //!         soa: SoaRecord {
@@ -152,6 +152,7 @@ pub use zones::{DnsRecord, SoaRecord, ZoneConfig};
 // Request/Response types for API operations
 pub use zones::{
     CreateZoneRequest, ServerStatusResponse, ZoneInfo, ZoneListResponse, ZoneResponse,
+    ZONE_TYPE_PRIMARY, ZONE_TYPE_SECONDARY,
 };
 
 // RNDC configuration

@@ -50,7 +50,7 @@ curl http://localhost:8080/api/v1/zones/example.com \
 ```json
 {
   "name": "example.com",
-  "zoneType": "master",
+  "zoneType": "primary",
   "serial": 2024010101,
   "filePath": "/var/cache/bind/example.com.zone"
 }
@@ -60,8 +60,8 @@ curl http://localhost:8080/api/v1/zones/example.com \
 
 ### Zone Type
 
-- **master** - Authoritative zone, managed locally
-- **slave** - Secondary zone, transferred from master
+- **primary** - Authoritative zone, managed locally
+- **secondary** - Secondary zone, transferred from primary
 - **stub** - Stub zone with only NS records
 
 ### Serial Number

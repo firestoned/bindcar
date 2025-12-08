@@ -155,7 +155,7 @@ graph TD
 Add a new zone to BIND9 dynamically:
 
 ```bash
-rndc addzone example.com '{ type master; file "/var/cache/bind/db.example.com"; };'
+rndc addzone example.com '{ type primary; file "/var/cache/bind/db.example.com"; };'
 ```
 
 **When Used**: POST /api/v1/zones

@@ -26,6 +26,10 @@ use crate::{
     types::{ApiError, AppState},
 };
 
+/// Zone type constants
+pub const ZONE_TYPE_PRIMARY: &str = "primary";
+pub const ZONE_TYPE_SECONDARY: &str = "secondary";
+
 /// SOA (Start of Authority) record configuration
 ///
 /// # Default Values
@@ -166,9 +170,8 @@ impl ZoneConfig {
 
         // Glue records (A records for nameservers)
         for (ns_name, ip) in &self.name_server_ips {
-            // Extract hostname without trailing dot for zone file
-            let hostname = ns_name.trim_end_matches('.');
-            zone_file.push_str(&format!("{} IN A {}\n", hostname, ip));
+            // Use FQDN with trailing dot to prevent BIND9 from appending zone name
+            zone_file.push_str(&format!("{} IN A {}\n", ns_name, ip));
         }
         if !self.name_server_ips.is_empty() {
             zone_file.push('\n');
@@ -205,7 +208,7 @@ pub struct CreateZoneRequest {
     /// Zone name (e.g., "example.com")
     pub zone_name: String,
 
-    /// Zone type ("master" or "slave")
+    /// Zone type ("primary" or "secondary")
     pub zone_type: String,
 
     /// Structured zone configuration
@@ -282,11 +285,11 @@ pub async fn create_zone(
     }
 
     // Validate zone type
-    if request.zone_type != "master" && request.zone_type != "slave" {
+    if request.zone_type != ZONE_TYPE_PRIMARY && request.zone_type != ZONE_TYPE_SECONDARY {
         metrics::record_zone_operation("create", false);
         return Err(ApiError::InvalidRequest(format!(
-            "Invalid zone type: {}. Must be 'master' or 'slave'",
-            request.zone_type
+            "Invalid zone type: {}. Must be '{}' or '{}'",
+            request.zone_type, ZONE_TYPE_PRIMARY, ZONE_TYPE_SECONDARY
         )));
     }
 

@@ -12,7 +12,7 @@ curl -X POST http://localhost:8080/api/v1/zones \
   -H "Content-Type: application/json" \
   -d '{
     "zoneName": "example.com",
-    "zoneType": "master",
+    "zoneType": "primary",
     "zoneConfig": {
       "ttl": 3600,
       "soa": {
@@ -76,7 +76,7 @@ Primary authoritative zones where records are managed directly:
 ```json
 {
   "zoneName": "example.com",
-  "zoneType": "master",
+  "zoneType": "primary",
   "zoneConfig": {...}
 }
 ```
@@ -105,7 +105,7 @@ Read-only zones that transfer from primary servers:
 - High availability
 - Load balancing DNS queries
 
-**Note**: bindcar currently focuses on master zones. Secondary zone support is planned for future releases.
+**Note**: bindcar currently focuses on primary zones. Secondary zone support is planned for future releases.
 
 ## Zone Names
 
@@ -158,7 +158,7 @@ Add initial DNS records when creating the zone:
 ```json
 {
   "zoneName": "example.com",
-  "zoneType": "master",
+  "zoneType": "primary",
   "zoneConfig": {
     "ttl": 3600,
     "soa": {...},
@@ -207,7 +207,7 @@ Simplest possible zone with just SOA and NS records:
 ```json
 {
   "zoneName": "example.com",
-  "zoneType": "master",
+  "zoneType": "primary",
   "zoneConfig": {
     "ttl": 3600,
     "soa": {
@@ -233,7 +233,7 @@ Zone for hosting a website:
 ```json
 {
   "zoneName": "example.com",
-  "zoneType": "master",
+  "zoneType": "primary",
   "zoneConfig": {
     "ttl": 3600,
     "soa": {...},
@@ -254,7 +254,7 @@ Zone with MX records for email:
 ```json
 {
   "zoneName": "example.com",
-  "zoneType": "master",
+  "zoneType": "primary",
   "zoneConfig": {
     "ttl": 3600,
     "soa": {...},

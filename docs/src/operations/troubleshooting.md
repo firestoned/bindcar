@@ -249,7 +249,7 @@ Ensure zone creation request has valid SOA:
 ```json
 {
   "zoneName": "example.com",
-  "zoneType": "master",
+  "zoneType": "primary",
   "zoneConfig": {
     "ttl": 3600,
     "soa": {
