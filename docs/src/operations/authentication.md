@@ -7,8 +7,31 @@ bindcar uses Bearer token authentication to secure API endpoints.
 By default, authentication is **enabled** for all API endpoints except:
 - `/api/v1/health`
 - `/api/v1/ready`
+- `/metrics`
 
 All other endpoints require a valid Bearer token in the Authorization header.
+
+## Authentication Modes
+
+bindcar supports two authentication modes:
+
+### Basic Mode (Default)
+
+- Validates token presence and format only
+- Does NOT verify token signatures
+- Does NOT check expiration
+- Suitable for trusted environments or when using external auth (API gateway, Linkerd service mesh)
+
+### TokenReview Mode (Optional)
+
+- Full token validation with Kubernetes TokenReview API
+- Verifies token signatures
+- Checks token expiration
+- Validates token audience
+- Restricts to allowed namespaces and ServiceAccounts
+- **Recommended for production Kubernetes deployments**
+
+Enable TokenReview mode by building with the `k8s-token-review` feature. See [Kubernetes TokenReview Validation](../developer-guide/k8s-token-validation.md) for detailed configuration.
 
 ## Bearer Token Authentication
 
@@ -103,7 +126,7 @@ curl http://localhost:8080/api/v1/zones \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-**Note**: bindcar validates token format but does not verify token signatures. Token verification should be handled by infrastructure (API gateway, Linkerd service mesh, etc.) or bindcar should be run with authentication disabled in trusted environments.
+**Note**: In **Basic Mode**, bindcar validates token format but does not verify token signatures. Token verification should be handled by infrastructure (API gateway, Linkerd service mesh, etc.). For production environments requiring token signature verification, use **TokenReview Mode**.
 
 ## Disabling Authentication
 
@@ -210,16 +233,29 @@ spec:
 
 ## Security Considerations
 
-- bindcar validates token format but not signatures
+**Basic Mode**:
+- Validates token format but not signatures
 - Token verification should be done by:
-  - Kubernetes API server (for ServiceAccount tokens)
   - API gateway or Linkerd service mesh
   - External authentication service
+- Suitable for trusted environments only
+
+**TokenReview Mode**:
+- Full token validation with Kubernetes API
+- Recommended for production environments
+- Provides defense-in-depth security
+- Can restrict access by namespace and ServiceAccount
+
+**General**:
 - Tokens are logged at `debug` level - use `info` in production
 - Always use HTTPS in production to protect tokens
+- Rotate tokens regularly
+- Use short-lived tokens when possible
 
 ## Next Steps
 
+- [Kubernetes TokenReview Validation](../developer-guide/k8s-token-validation.md) - Enhanced security setup
 - [Configuration](./configuration.md) - Configure authentication settings
+- [Environment Variables](./env-vars.md) - TokenReview environment variables
 - [Deployment](./deployment.md) - Deploy with authentication
 - [Troubleshooting](./troubleshooting.md) - Debug authentication issues

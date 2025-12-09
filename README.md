@@ -15,7 +15,8 @@ bindcar runs as a sidecar container alongside BIND9, providing a REST interface 
 ## Features
 
 - Zone management via REST API (create, delete, reload, status)
-- ServiceAccount token authentication
+- Kubernetes ServiceAccount token authentication with optional TokenReview validation
+- Fine-grained access control (audience validation, namespace/SA allowlists)
 - Health and readiness endpoints
 - Prometheus metrics for monitoring
 - Structured JSON logging
@@ -116,7 +117,30 @@ options {
 
 By default, authentication is **enabled** and requires Bearer token authentication for all API endpoints except `/health` and `/ready`.
 
-To disable authentication (e.g., when using a service mesh like Linkerd for authentication):
+**Two authentication modes:**
+
+1. **Basic Mode** (default) - Validates token format only
+2. **TokenReview Mode** (optional) - Full token validation with Kubernetes TokenReview API
+
+**TokenReview Mode** provides enhanced security:
+- Validates token signatures
+- Checks token expiration
+- Validates token audience
+- Restricts to specific namespaces/ServiceAccounts
+
+Enable TokenReview mode by building with the `k8s-token-review` feature and configuring environment variables:
+
+```yaml
+env:
+- name: BIND_TOKEN_AUDIENCES
+  value: "bindcar"  # Required audience
+- name: BIND_ALLOWED_NAMESPACES
+  value: "dns-system"  # Allowed namespaces (empty = all)
+- name: BIND_ALLOWED_SERVICE_ACCOUNTS
+  value: "system:serviceaccount:dns-system:external-dns"  # Allowed SAs (empty = all)
+```
+
+To disable authentication (e.g., when using a service mesh like Linkerd):
 
 ```bash
 # Docker
@@ -132,6 +156,8 @@ env:
 ```
 
 **WARNING**: Disabling authentication should ONLY be done in trusted environments where authentication is handled by infrastructure (Linkerd service mesh, API gateway, etc.). Never disable authentication in production without proper network-level security controls.
+
+See [Kubernetes TokenReview Validation](https://firestoned.github.io/bindcar/developer-guide/k8s-token-validation.html) for detailed configuration.
 
 ## API Endpoints
 
