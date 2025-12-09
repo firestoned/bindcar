@@ -241,7 +241,7 @@ kubectl exec dns-pod -c bind9 -- grep "example.com" /etc/bind/named.conf
 ```bash
 # Check zone file syntax
 kubectl exec dns-pod -c bind9 -- \
-  named-checkzone example.com /var/cache/bind/db.example.com
+  named-checkzone example.com /var/cache/bind/example.com.zone
 ```
 
 **Solution - Fix Request Data**:

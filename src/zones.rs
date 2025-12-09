@@ -348,7 +348,8 @@ pub async fn create_zone(
     // Add also-notify if secondary IPs are provided
     if let Some(also_notify) = &request.zone_config.also_notify {
         if !also_notify.is_empty() {
-            let notify_list = also_notify.iter()
+            let notify_list = also_notify
+                .iter()
                 .map(|ip| format!("{}; ", ip))
                 .collect::<String>();
             config_parts.push(format!(r#"also-notify {{ {} }}"#, notify_list));
@@ -358,7 +359,8 @@ pub async fn create_zone(
     // Add allow-transfer if secondary IPs are provided
     if let Some(allow_transfer) = &request.zone_config.allow_transfer {
         if !allow_transfer.is_empty() {
-            let transfer_list = allow_transfer.iter()
+            let transfer_list = allow_transfer
+                .iter()
                 .map(|ip| format!("{}; ", ip))
                 .collect::<String>();
             config_parts.push(format!(r#"allow-transfer {{ {} }}"#, transfer_list));
@@ -727,16 +729,17 @@ pub async fn get_zone(
     let mut serial = None;
 
     for line in status_output.lines() {
-        if line.contains("type:") {
-            if let Some(type_str) = line.split("type:").nth(1) {
-                zone_type = type_str.trim().to_string();
-            }
+        if let Some(type_str) = line.strip_prefix("type:").or_else(|| {
+            line.contains("type:").then(|| line.split("type:").nth(1)).flatten()
+        }) {
+            zone_type = type_str.trim().to_string();
         }
-        if line.contains("serial:") {
-            if let Some(serial_str) = line.split("serial:").nth(1) {
-                if let Ok(s) = serial_str.trim().parse::<u32>() {
-                    serial = Some(s);
-                }
+
+        if let Some(serial_str) = line.strip_prefix("serial:").or_else(|| {
+            line.contains("serial:").then(|| line.split("serial:").nth(1)).flatten()
+        }) {
+            if let Ok(s) = serial_str.trim().parse::<u32>() {
+                serial = Some(s);
             }
         }
     }

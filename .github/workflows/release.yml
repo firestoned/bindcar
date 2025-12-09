@@ -161,20 +161,26 @@ jobs:
     runs-on: ubuntu-latest
     needs: [extract-version, package-crate]
     steps:
-      - name: Download packaged crate
-        uses: actions/download-artifact@v4
-        with:
-          name: crate-package
-          path: ./package
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Update Cargo.toml version
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ needs.extract-version.outputs.version }}"/' Cargo.toml
+          echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
+          grep '^version = ' Cargo.toml
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
       - name: Publish to crates.io
         run: |
-          CRATE_FILE=$(ls package/bindcar-*.crate)
-          echo "Publishing crate: $CRATE_FILE"
-          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} "$CRATE_FILE"
+          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --allow-dirty
 
   docker-release:
     name: Build and Push Docker Image

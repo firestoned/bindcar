@@ -16,7 +16,7 @@ BIND_ZONE_DIR=/var/cache/bind
 ```
 
 Must be:
-- Readable and writable by the bindcar user (UID 1000)
+- Readable and writable by the bindcar user (UID 101)
 - Shared between bindcar and BIND9 containers
 - An existing directory
 
