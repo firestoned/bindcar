@@ -126,6 +126,50 @@ Valid values:
 
 **WARNING**: Setting this to `true` disables all authentication. Only use in environments where authentication is handled by infrastructure (Linkerd service mesh, API gateway, etc.).
 
+### BIND_TOKEN_AUDIENCES
+
+- **Type**: String (comma-separated)
+- **Default**: `bindcar`
+- **Required**: No (only when `k8s-token-review` feature enabled)
+- **Description**: Expected token audiences for TokenReview validation
+
+```bash
+BIND_TOKEN_AUDIENCES=bindcar,https://bindcar.dns-system.svc.cluster.local
+```
+
+Prevents token reuse across different services. Tokens must be created with matching audience:
+```bash
+kubectl create token my-app --audience=bindcar
+```
+
+### BIND_ALLOWED_NAMESPACES
+
+- **Type**: String (comma-separated)
+- **Default**: None (allow all)
+- **Required**: No (only when `k8s-token-review` feature enabled)
+- **Description**: Allowed Kubernetes namespaces for token authentication
+
+```bash
+BIND_ALLOWED_NAMESPACES=dns-system,kube-system
+```
+
+Empty value allows all namespaces (default). When set, only tokens from specified namespaces are accepted.
+
+### BIND_ALLOWED_SERVICE_ACCOUNTS
+
+- **Type**: String (comma-separated)
+- **Default**: None (allow all)
+- **Required**: No (only when `k8s-token-review` feature enabled)
+- **Description**: Allowed ServiceAccounts for token authentication
+
+```bash
+BIND_ALLOWED_SERVICE_ACCOUNTS=system:serviceaccount:dns-system:external-dns,system:serviceaccount:dns-system:cert-manager
+```
+
+Format: `system:serviceaccount:<namespace>:<name>`
+
+Empty value allows all ServiceAccounts (default). When set, only specified ServiceAccounts are accepted.
+
 ## Environment Variable Precedence
 
 1. Explicit environment variables (highest priority)
@@ -166,7 +210,7 @@ docker run -d \
   ghcr.io/firestoned/bindcar:latest
 ```
 
-### Kubernetes
+### Kubernetes (Basic Auth)
 
 ```yaml
 env:
@@ -187,6 +231,36 @@ env:
       key: secret
 - name: DISABLE_AUTH
   value: "false"
+```
+
+### Kubernetes (TokenReview Mode - Production)
+
+```yaml
+env:
+- name: BIND_ZONE_DIR
+  value: "/var/cache/bind"
+- name: API_PORT
+  value: "8080"
+- name: RUST_LOG
+  value: "info"
+- name: RNDC_SERVER
+  value: "127.0.0.1:953"
+- name: RNDC_ALGORITHM
+  value: "sha256"
+- name: RNDC_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: rndc-secret
+      key: secret
+- name: DISABLE_AUTH
+  value: "false"
+# TokenReview security configuration
+- name: BIND_TOKEN_AUDIENCES
+  value: "bindcar,https://bindcar.dns-system.svc.cluster.local"
+- name: BIND_ALLOWED_NAMESPACES
+  value: "dns-system"
+- name: BIND_ALLOWED_SERVICE_ACCOUNTS
+  value: "system:serviceaccount:dns-system:external-dns"
 ```
 
 ## Best Practices

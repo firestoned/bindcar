@@ -160,16 +160,33 @@ sequenceDiagram
 
 ### Authentication
 
-Two authentication methods supported:
+Three authentication modes supported:
 
-1. **Static Tokens**: Pre-configured Bearer tokens in `BIND_ALLOWED_TOKENS`
-2. **Kubernetes ServiceAccounts**: Dynamic JWT token validation
+1. **Basic Mode** (default): Validates token presence and format only
+2. **TokenReview Mode** (feature: `k8s-token-review`): Full Kubernetes TokenReview API validation
+3. **Disabled Mode**: No authentication (via `DISABLE_AUTH=true`)
+
+**TokenReview Mode Features**:
+- Validates token signatures with Kubernetes API
+- Checks token expiration
+- Validates token audience
+- Restricts to specific namespaces (via `BIND_ALLOWED_NAMESPACES`)
+- Restricts to specific ServiceAccounts (via `BIND_ALLOWED_SERVICE_ACCOUNTS`)
+- Returns authenticated user information
 
 ### Authorization
 
-- All API endpoints (except `/health` and `/ready`) require authentication
+**Basic Mode**:
+- All API endpoints (except `/health`, `/ready`, `/metrics`) require authentication
 - No fine-grained RBAC - authenticated users have full access
 - Zone operations are validated before execution
+
+**TokenReview Mode**:
+- Same as Basic Mode, plus:
+- Namespace-level authorization (optional)
+- ServiceAccount-level authorization (optional)
+- Audience-based authorization
+- Defense-in-depth security model
 
 ### File System Security
 
