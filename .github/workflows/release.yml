@@ -63,6 +63,12 @@ jobs:
         with:
           targets: ${{ matrix.platform.target }}
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform.target }}
+          cache-on-failure: true
+
       - name: Cache cross binary
         if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
         id: cache-cross
@@ -85,30 +91,6 @@ jobs:
           docker --version
           docker info
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-registry-
-
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-git-
-
-      - name: Cache cargo build
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-${{ matrix.platform.target }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.platform.target }}-cargo-build-target-
-
       - name: Build (release) - x86_64
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
         run: cargo build --release --target ${{ matrix.platform.target }} --verbose
@@ -117,25 +99,31 @@ jobs:
         if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
         run: cross build --release --target ${{ matrix.platform.target }} --verbose
 
+      - name: Cache cargo-cyclonedx
+        id: cache-cyclonedx
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-cyclonedx
+          key: ${{ runner.os }}-cargo-cyclonedx-0.5.7
+          restore-keys: |
+            ${{ runner.os }}-cargo-cyclonedx-
+
       - name: Install cargo-cyclonedx
-        run: cargo install cargo-cyclonedx
+        if: steps.cache-cyclonedx.outputs.cache-hit != 'true'
+        run: cargo install cargo-cyclonedx --version 0.5.7
 
       - name: Generate SBOM
         run: |
           cargo cyclonedx --format json --target ${{ matrix.platform.target }} --override-filename sbom
           mv sbom.json target/${{ matrix.platform.target }}/release/sbom.json
 
-      - name: Upload binary artifact
+      - name: Upload binary and SBOM artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform.artifact_name }}
-          path: target/${{ matrix.platform.target }}/release/${{ matrix.platform.binary_name }}
-
-      - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.platform.artifact_name }}-sbom
-          path: target/${{ matrix.platform.target }}/release/sbom.json
+          path: |
+            target/${{ matrix.platform.target }}/release/${{ matrix.platform.binary_name }}
+            target/${{ matrix.platform.target }}/release/sbom.json
 
   package-crate:
     name: Package Crate for crates.io
@@ -154,21 +142,10 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-registry-
-
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-git-
+          cache-on-failure: true
 
       - name: Package crate
         run: cargo package --verbose --allow-dirty
@@ -184,20 +161,20 @@ jobs:
     runs-on: ubuntu-latest
     needs: [extract-version, package-crate]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Update Cargo.toml version
-        run: |
-          sed -i 's/^version = ".*"/version = "${{ needs.extract-version.outputs.version }}"/' Cargo.toml
-          echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
-          grep '^version = ' Cargo.toml
+      - name: Download packaged crate
+        uses: actions/download-artifact@v4
+        with:
+          name: crate-package
+          path: ./package
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Publish to crates.io
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --allow-dirty
+        run: |
+          CRATE_FILE=$(ls package/bindcar-*.crate)
+          echo "Publishing crate: $CRATE_FILE"
+          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --package "$CRATE_FILE"
 
   docker-release:
     name: Build and Push Docker Image
@@ -270,7 +247,7 @@ jobs:
   upload-release-assets:
     name: Upload Release Assets
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, docker-release]
     permissions:
       contents: write
     steps:
@@ -285,11 +262,6 @@ jobs:
 
           # Process each platform binary
           for dir in bindcar-*; do
-            # Skip SBOM directories
-            if [[ "$dir" == *-sbom ]]; then
-              continue
-            fi
-
             platform="$dir"
             echo "Processing $platform..."
             cd "$platform"
@@ -305,9 +277,9 @@ jobs:
 
           # Collect all SBOM files
           mkdir -p sboms
-          for sbom_dir in *-sbom; do
-            if [ -d "$sbom_dir" ]; then
-              cp "$sbom_dir"/sbom.json "sboms/${sbom_dir}.json" 2>/dev/null || true
+          for dir in bindcar-*; do
+            if [ -f "$dir/sbom.json" ]; then
+              cp "$dir/sbom.json" "sboms/${dir}-sbom.json"
             fi
           done
 
