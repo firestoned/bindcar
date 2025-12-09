@@ -45,7 +45,6 @@ pub enum ApiError {
     ZoneNotFound(String),
 
     #[error("Internal server error: {0}")]
-    #[allow(dead_code)] // Reserved for future use
     InternalError(String),
 }
 

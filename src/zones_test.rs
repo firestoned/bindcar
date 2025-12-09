@@ -40,6 +40,8 @@ fn test_zone_config_to_zone_file() {
                 priority: Some(10),
             },
         ],
+        also_notify: None,
+        allow_transfer: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -192,6 +194,8 @@ fn test_zone_config_empty_name_servers() {
         name_servers: vec![],
         name_server_ips: HashMap::new(),
         records: vec![],
+        also_notify: None,
+        allow_transfer: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -223,6 +227,8 @@ fn test_zone_config_special_characters_in_names() {
             ttl: None,
             priority: None,
         }],
+        also_notify: None,
+        allow_transfer: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -246,6 +252,8 @@ fn test_zone_config_zero_ttl() {
         name_servers: vec!["ns1.example.com.".to_string()],
         name_server_ips: HashMap::new(),
         records: vec![],
+        also_notify: None,
+        allow_transfer: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -276,6 +284,8 @@ fn test_dns_record_mx_with_priority_zero() {
         name_servers: vec!["ns1.example.com.".to_string()],
         name_server_ips: HashMap::new(),
         records: vec![record],
+        also_notify: None,
+        allow_transfer: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -313,6 +323,8 @@ fn test_multiple_records_same_name() {
                 priority: None,
             },
         ],
+        also_notify: None,
+        allow_transfer: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -343,6 +355,8 @@ fn test_zone_config_with_nameserver_glue_records() {
         ],
         name_server_ips: ns_ips,
         records: vec![],
+        also_notify: None,
+        allow_transfer: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -375,6 +389,8 @@ fn test_zone_config_glue_records_serialization() {
         name_servers: vec!["ns1.example.com.".to_string()],
         name_server_ips: ns_ips,
         records: vec![],
+        also_notify: None,
+        allow_transfer: None,
     };
 
     // Test that it can be serialized to JSON
@@ -406,6 +422,8 @@ fn test_zone_config_without_nameserver_ips() {
         name_servers: vec!["ns1.example.com.".to_string()],
         name_server_ips: HashMap::new(),
         records: vec![],
+        also_notify: None,
+        allow_transfer: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -415,4 +433,154 @@ fn test_zone_config_without_nameserver_ips() {
 
     // Should NOT have A records for nameservers when name_server_ips is empty
     assert!(!zone_file.contains("ns1.example.com IN A"));
+}
+
+#[test]
+fn test_zone_config_with_also_notify() {
+    let json = r#"{
+        "ttl": 3600,
+        "soa": {
+            "primaryNs": "ns1.example.com.",
+            "adminEmail": "admin.example.com.",
+            "serial": 2025010101
+        },
+        "nameServers": ["ns1.example.com."],
+        "nameServerIps": {},
+        "records": [],
+        "alsoNotify": ["10.244.2.101", "10.244.2.102"]
+    }"#;
+
+    let config: ZoneConfig = serde_json::from_str(json).unwrap();
+    assert!(config.also_notify.is_some());
+    let also_notify = config.also_notify.unwrap();
+    assert_eq!(also_notify.len(), 2);
+    assert_eq!(also_notify[0], "10.244.2.101");
+    assert_eq!(also_notify[1], "10.244.2.102");
+}
+
+#[test]
+fn test_zone_config_with_allow_transfer() {
+    let json = r#"{
+        "ttl": 3600,
+        "soa": {
+            "primaryNs": "ns1.example.com.",
+            "adminEmail": "admin.example.com.",
+            "serial": 2025010101
+        },
+        "nameServers": ["ns1.example.com."],
+        "nameServerIps": {},
+        "records": [],
+        "allowTransfer": ["10.244.2.101", "10.244.2.102", "10.244.2.103"]
+    }"#;
+
+    let config: ZoneConfig = serde_json::from_str(json).unwrap();
+    assert!(config.allow_transfer.is_some());
+    let allow_transfer = config.allow_transfer.unwrap();
+    assert_eq!(allow_transfer.len(), 3);
+    assert_eq!(allow_transfer[0], "10.244.2.101");
+    assert_eq!(allow_transfer[1], "10.244.2.102");
+    assert_eq!(allow_transfer[2], "10.244.2.103");
+}
+
+#[test]
+fn test_zone_config_with_both_notify_and_transfer() {
+    let json = r#"{
+        "ttl": 3600,
+        "soa": {
+            "primaryNs": "ns1.example.com.",
+            "adminEmail": "admin.example.com.",
+            "serial": 2025010101
+        },
+        "nameServers": ["ns1.example.com."],
+        "nameServerIps": {},
+        "records": [],
+        "alsoNotify": ["10.244.2.101", "10.244.2.102"],
+        "allowTransfer": ["10.244.2.101", "10.244.2.102"]
+    }"#;
+
+    let config: ZoneConfig = serde_json::from_str(json).unwrap();
+    assert!(config.also_notify.is_some());
+    assert!(config.allow_transfer.is_some());
+
+    let also_notify = config.also_notify.unwrap();
+    let allow_transfer = config.allow_transfer.unwrap();
+
+    assert_eq!(also_notify.len(), 2);
+    assert_eq!(allow_transfer.len(), 2);
+    assert_eq!(also_notify, allow_transfer); // Same IPs
+}
+
+#[test]
+fn test_zone_config_without_notify_and_transfer() {
+    let json = r#"{
+        "ttl": 3600,
+        "soa": {
+            "primaryNs": "ns1.example.com.",
+            "adminEmail": "admin.example.com.",
+            "serial": 2025010101
+        },
+        "nameServers": ["ns1.example.com."],
+        "nameServerIps": {},
+        "records": []
+    }"#;
+
+    let config: ZoneConfig = serde_json::from_str(json).unwrap();
+    assert!(config.also_notify.is_none());
+    assert!(config.allow_transfer.is_none());
+}
+
+#[test]
+fn test_zone_config_with_empty_notify_and_transfer() {
+    let json = r#"{
+        "ttl": 3600,
+        "soa": {
+            "primaryNs": "ns1.example.com.",
+            "adminEmail": "admin.example.com.",
+            "serial": 2025010101
+        },
+        "nameServers": ["ns1.example.com."],
+        "nameServerIps": {},
+        "records": [],
+        "alsoNotify": [],
+        "allowTransfer": []
+    }"#;
+
+    let config: ZoneConfig = serde_json::from_str(json).unwrap();
+    assert!(config.also_notify.is_some());
+    assert!(config.allow_transfer.is_some());
+    assert_eq!(config.also_notify.unwrap().len(), 0);
+    assert_eq!(config.allow_transfer.unwrap().len(), 0);
+}
+
+#[test]
+fn test_create_zone_request_with_zone_transfer_fields() {
+    let json = r#"{
+        "zoneName": "example.com",
+        "zoneType": "primary",
+        "zoneConfig": {
+            "ttl": 3600,
+            "soa": {
+                "primaryNs": "ns1.example.com.",
+                "adminEmail": "admin.example.com.",
+                "serial": 2025010101
+            },
+            "nameServers": ["ns1.example.com."],
+            "nameServerIps": {},
+            "records": [],
+            "alsoNotify": ["10.244.2.101", "10.244.2.102"],
+            "allowTransfer": ["10.244.2.101", "10.244.2.102"]
+        }
+    }"#;
+
+    let request: CreateZoneRequest = serde_json::from_str(json).unwrap();
+    assert_eq!(request.zone_name, "example.com");
+    assert_eq!(request.zone_type, "primary");
+    assert!(request.zone_config.also_notify.is_some());
+    assert!(request.zone_config.allow_transfer.is_some());
+
+    let also_notify = request.zone_config.also_notify.unwrap();
+    let allow_transfer = request.zone_config.allow_transfer.unwrap();
+
+    assert_eq!(also_notify.len(), 2);
+    assert_eq!(allow_transfer.len(), 2);
 }

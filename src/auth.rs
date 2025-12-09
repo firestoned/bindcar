@@ -15,7 +15,16 @@
 //! ### Kubernetes TokenReview Mode (feature: `k8s-token-review`)
 //! - Validates tokens against Kubernetes TokenReview API
 //! - Verifies token authenticity and expiration
+//! - Validates token audience
+//! - Restricts to allowed namespaces and service accounts
 //! - Requires in-cluster configuration or kubeconfig
+//!
+//! ## Security Configuration
+//!
+//! Environment variables for TokenReview mode:
+//! - `BIND_TOKEN_AUDIENCES` - Comma-separated list of expected audiences (default: "bindcar")
+//! - `BIND_ALLOWED_NAMESPACES` - Comma-separated list of allowed namespaces (empty = allow all)
+//! - `BIND_ALLOWED_SERVICE_ACCOUNTS` - Comma-separated list of allowed SA names (empty = allow all)
 
 use axum::{
     extract::Request,
@@ -33,11 +42,94 @@ use k8s_openapi::api::authentication::v1::TokenReview;
 use kube::{Api, Client};
 #[cfg(feature = "k8s-token-review")]
 use tracing::error;
+#[cfg(feature = "k8s-token-review")]
+use std::env;
 
 /// Error response for authentication failures
 #[derive(Serialize)]
 pub struct AuthError {
     pub error: String,
+}
+
+/// Configuration for TokenReview security policies
+#[cfg(feature = "k8s-token-review")]
+#[derive(Debug, Clone)]
+pub struct TokenReviewConfig {
+    /// Expected audiences for token validation
+    pub audiences: Vec<String>,
+    /// Allowed namespaces (empty = allow all)
+    pub allowed_namespaces: Vec<String>,
+    /// Allowed service accounts in format "system:serviceaccount:namespace:name" (empty = allow all)
+    pub allowed_service_accounts: Vec<String>,
+}
+
+#[cfg(feature = "k8s-token-review")]
+impl TokenReviewConfig {
+    /// Load configuration from environment variables
+    pub fn from_env() -> Self {
+        let audiences = match env::var("BIND_TOKEN_AUDIENCES") {
+            Ok(val) if !val.trim().is_empty() => val
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            _ => vec!["bindcar".to_string()],
+        };
+
+        let allowed_namespaces = env::var("BIND_ALLOWED_NAMESPACES")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let allowed_service_accounts = env::var("BIND_ALLOWED_SERVICE_ACCOUNTS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let config = Self {
+            audiences,
+            allowed_namespaces,
+            allowed_service_accounts,
+        };
+
+        debug!("TokenReview config loaded: audiences={:?}, allowed_namespaces={:?}, allowed_service_accounts={:?}",
+            config.audiences, config.allowed_namespaces, config.allowed_service_accounts);
+
+        config
+    }
+
+    /// Check if a namespace is allowed
+    pub(crate) fn is_namespace_allowed(&self, namespace: &str) -> bool {
+        // Empty list means allow all
+        if self.allowed_namespaces.is_empty() {
+            return true;
+        }
+        self.allowed_namespaces.contains(&namespace.to_string())
+    }
+
+    /// Check if a service account is allowed
+    pub(crate) fn is_service_account_allowed(&self, username: &str) -> bool {
+        // Empty list means allow all
+        if self.allowed_service_accounts.is_empty() {
+            return true;
+        }
+        self.allowed_service_accounts.contains(&username.to_string())
+    }
+
+    /// Extract namespace from service account username
+    /// Format: "system:serviceaccount:namespace:name"
+    pub(crate) fn extract_namespace(username: &str) -> Option<String> {
+        let parts: Vec<&str> = username.split(':').collect();
+        if parts.len() == 4 && parts[0] == "system" && parts[1] == "serviceaccount" {
+            Some(parts[2].to_string())
+        } else {
+            None
+        }
+    }
 }
 
 /// Authentication middleware
@@ -125,14 +217,22 @@ pub async fn authenticate(
 /// It verifies that the token is authentic, not expired, and belongs to a valid
 /// service account.
 ///
+/// Additionally validates:
+/// - Token audience matches expected audiences
+/// - Service account namespace is in allowed list (if configured)
+/// - Service account name is in allowed list (if configured)
+///
 /// # Arguments
 /// * `token` - The bearer token to validate
 ///
 /// # Returns
-/// * `Ok(())` if the token is valid
+/// * `Ok(())` if the token is valid and authorized
 /// * `Err(String)` if validation fails
 #[cfg(feature = "k8s-token-review")]
-async fn validate_token_with_k8s(token: &str) -> Result<(), String> {
+pub(crate) async fn validate_token_with_k8s(token: &str) -> Result<(), String> {
+    // Load security configuration
+    let config = TokenReviewConfig::from_env();
+
     // Create Kubernetes client
     let client = Client::try_default()
         .await
@@ -141,12 +241,18 @@ async fn validate_token_with_k8s(token: &str) -> Result<(), String> {
     // Create TokenReview API client
     let token_reviews: Api<TokenReview> = Api::all(client);
 
-    // Build TokenReview request
+    // Build TokenReview request with audience validation
+    let audiences = if config.audiences.is_empty() {
+        None
+    } else {
+        Some(config.audiences.clone())
+    };
+
     let token_review = TokenReview {
         metadata: Default::default(),
         spec: k8s_openapi::api::authentication::v1::TokenReviewSpec {
             token: Some(token.to_string()),
-            audiences: None,
+            audiences,
         },
         status: None,
     };
@@ -164,9 +270,32 @@ async fn validate_token_with_k8s(token: &str) -> Result<(), String> {
     if let Some(status) = result.status {
         if let Some(true) = status.authenticated {
             debug!("Token authenticated successfully");
+
+            // Validate user information and authorization
             if let Some(user) = status.user {
-                debug!("Authenticated user: {:?}", user.username);
+                let username = user.username.as_deref().unwrap_or("");
+                debug!("Authenticated user: {}", username);
+
+                // Validate namespace restriction
+                if let Some(namespace) = TokenReviewConfig::extract_namespace(username) {
+                    if !config.is_namespace_allowed(&namespace) {
+                        warn!("ServiceAccount from unauthorized namespace: {} (from {})", namespace, username);
+                        return Err(format!("ServiceAccount from unauthorized namespace: {}", namespace));
+                    }
+                    debug!("Namespace {} is allowed", namespace);
+                }
+
+                // Validate service account allowlist
+                if !config.is_service_account_allowed(username) {
+                    warn!("ServiceAccount not in allowlist: {}", username);
+                    return Err(format!("ServiceAccount not authorized: {}", username));
+                }
+                debug!("ServiceAccount {} is allowed", username);
+            } else {
+                warn!("TokenReview succeeded but no user information returned");
+                return Err("No user information in TokenReview response".to_string());
             }
+
             Ok(())
         } else {
             let error_msg = status

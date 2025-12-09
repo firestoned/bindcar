@@ -78,6 +78,8 @@
 //!                 priority: None,
 //!             },
 //!         ],
+//!         also_notify: None,
+//!         allow_transfer: None,
 //!     },
 //!     update_key_name: None,
 //! };

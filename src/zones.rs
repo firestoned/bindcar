@@ -135,6 +135,16 @@ pub struct ZoneConfig {
     /// DNS records in the zone
     #[serde(default)]
     pub records: Vec<DnsRecord>,
+
+    /// IP addresses of secondary servers to notify when zone changes (BIND9 also-notify)
+    /// Example: ["10.244.2.101", "10.244.2.102"]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub also_notify: Option<Vec<String>>,
+
+    /// IP addresses allowed to transfer the zone (BIND9 allow-transfer)
+    /// Example: ["10.244.2.101", "10.244.2.102"]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_transfer: Option<Vec<String>>,
 }
 
 impl ZoneConfig {
@@ -323,17 +333,40 @@ pub async fn create_zone(
 
     // Build zone configuration for rndc addzone
     let zone_file_full_path = format!("{}/{}", state.zone_dir, zone_file_name);
-    let zone_config = if let Some(key_name) = &request.update_key_name {
-        format!(
-            r#"{{ type {}; file "{}"; allow-update {{ key "{}"; }}; }};"#,
-            request.zone_type, zone_file_full_path, key_name
-        )
-    } else {
-        format!(
-            r#"{{ type {}; file "{}"; }};"#,
-            request.zone_type, zone_file_full_path
-        )
-    };
+
+    // Start with basic configuration
+    let mut config_parts = vec![
+        format!(r#"type {}"#, request.zone_type),
+        format!(r#"file "{}""#, zone_file_full_path),
+    ];
+
+    // Add allow-update if TSIG key is provided
+    if let Some(key_name) = &request.update_key_name {
+        config_parts.push(format!(r#"allow-update {{ key "{}"; }}"#, key_name));
+    }
+
+    // Add also-notify if secondary IPs are provided
+    if let Some(also_notify) = &request.zone_config.also_notify {
+        if !also_notify.is_empty() {
+            let notify_list = also_notify.iter()
+                .map(|ip| format!("{}; ", ip))
+                .collect::<String>();
+            config_parts.push(format!(r#"also-notify {{ {} }}"#, notify_list));
+        }
+    }
+
+    // Add allow-transfer if secondary IPs are provided
+    if let Some(allow_transfer) = &request.zone_config.allow_transfer {
+        if !allow_transfer.is_empty() {
+            let transfer_list = allow_transfer.iter()
+                .map(|ip| format!("{}; ", ip))
+                .collect::<String>();
+            config_parts.push(format!(r#"allow-transfer {{ {} }}"#, transfer_list));
+        }
+    }
+
+    // Join all parts into final configuration
+    let zone_config = format!("{{ {}; }};", config_parts.join("; "));
 
     // Execute rndc addzone
     let output = state
