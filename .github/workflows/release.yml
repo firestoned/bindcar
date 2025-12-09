@@ -174,7 +174,7 @@ jobs:
         run: |
           CRATE_FILE=$(ls package/bindcar-*.crate)
           echo "Publishing crate: $CRATE_FILE"
-          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --package "$CRATE_FILE"
+          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} "$CRATE_FILE"
 
   docker-release:
     name: Build and Push Docker Image
