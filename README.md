@@ -1,7 +1,10 @@
 # bindcar
 
+[![Crates.io](https://img.shields.io/crates/v/bindcar.svg)](https://crates.io/crates/bindcar)
 [![codecov](https://codecov.io/gh/firestoned/bindcar/branch/main/graph/badge.svg)](https://codecov.io/gh/firestoned/bindcar)
 [![Build Status](https://github.com/firestoned/bindcar/workflows/CI/badge.svg)](https://github.com/firestoned/bindcar/actions)
+[![Minimum Rust Version](https://img.shields.io/badge/rustc-1.75+-blue.svg)](https://rust-lang.github.io/rfcs/2495-min-rust-version.html)
+[![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 
 A lightweight HTTP REST API server for managing BIND9 zones via rndc commands.
 

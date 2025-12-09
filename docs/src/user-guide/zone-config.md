@@ -147,7 +147,70 @@ For dynamic updates with TSIG authentication.
 
 Requires BIND9 to be configured with the named key.
 
+## Zone Transfer Configuration (Optional)
+
+Configure zone transfers for high availability with secondary DNS servers.
+
+### Also Notify
+
+IP addresses of secondary servers to notify when the zone changes:
+
+```json
+{
+  "alsoNotify": ["10.244.2.101", "10.244.2.102"]
+}
+```
+
+- **Type**: Array of strings
+- **Format**: IP addresses (IPv4 or IPv6)
+- **Use Case**: Automatically notify secondary servers of zone updates
+- **BIND9 Directive**: `also-notify { ... };`
+
+### Allow Transfer
+
+IP addresses allowed to transfer the zone:
+
+```json
+{
+  "allowTransfer": ["10.244.2.101", "10.244.2.102"]
+}
+```
+
+- **Type**: Array of strings
+- **Format**: IP addresses (IPv4 or IPv6)
+- **Use Case**: Control which servers can request zone transfers
+- **BIND9 Directive**: `allow-transfer { ... };`
+
+### High Availability Example
+
+```json
+{
+  "zoneName": "example.com",
+  "zoneType": "primary",
+  "zoneConfig": {
+    "ttl": 3600,
+    "soa": { ... },
+    "nameServers": ["ns1.example.com.", "ns2.example.com."],
+    "nameServerIps": {
+      "ns1.example.com.": "10.244.1.101",
+      "ns2.example.com.": "10.244.2.101"
+    },
+    "records": [ ... ],
+    "alsoNotify": ["10.244.2.101", "10.244.2.102"],
+    "allowTransfer": ["10.244.2.101", "10.244.2.102"]
+  }
+}
+```
+
+**Benefits**:
+- Automatic zone replication to secondary servers
+- High availability (HA) if primary fails
+- Load distribution for DNS queries
+- Geographic redundancy
+
 ## Complete Example
+
+Full zone configuration with all optional fields:
 
 ```json
 {
@@ -164,11 +227,16 @@ Requires BIND9 to be configured with the named key.
       "expire": 1209600,
       "negativeTtl": 86400
     },
-    "nameservers": [
+    "nameServers": [
       "ns1.example.com.",
       "ns2.example.com.",
       "ns3.example.com."
     ],
+    "nameServerIps": {
+      "ns1.example.com.": "10.244.1.101",
+      "ns2.example.com.": "10.244.2.101",
+      "ns3.example.com.": "10.244.3.101"
+    },
     "records": [
       {
         "name": "@",
@@ -197,8 +265,11 @@ Requires BIND9 to be configured with the named key.
         "type": "TXT",
         "value": "v=spf1 mx -all"
       }
-    ]
-  }
+    ],
+    "alsoNotify": ["10.244.2.101", "10.244.3.101"],
+    "allowTransfer": ["10.244.2.101", "10.244.3.101"]
+  },
+  "updateKeyName": "update-key"
 }
 ```
 

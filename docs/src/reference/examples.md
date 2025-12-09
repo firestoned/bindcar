@@ -365,6 +365,306 @@ add_ptr_record "192.0.2.10" "web1.example.com"
 add_ptr_record "192.0.2.20" "mail.example.com"
 ```
 
+## High Availability DNS Setup
+
+### Primary-Secondary Zone Replication
+
+Configure zone transfers between primary and secondary DNS servers for high availability:
+
+```bash
+#!/bin/bash
+# create-ha-zone.sh
+
+TOKEN="your-secret-token"
+BASE_URL="http://localhost:8080/api/v1"
+
+# Secondary DNS server IPs
+SECONDARY_IPS=("10.244.2.101" "10.244.2.102")
+
+echo "Creating HA zone with automatic replication..."
+
+curl -X POST "$BASE_URL/zones" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "zoneName": "example.com",
+    "zoneType": "primary",
+    "zoneConfig": {
+      "ttl": 3600,
+      "soa": {
+        "primaryNs": "ns1.example.com.",
+        "adminEmail": "admin.example.com.",
+        "serial": 1,
+        "refresh": 3600,
+        "retry": 600,
+        "expire": 604800,
+        "negativeTtl": 86400
+      },
+      "nameServers": ["ns1.example.com.", "ns2.example.com."],
+      "nameServerIps": {
+        "ns1.example.com.": "10.244.1.101",
+        "ns2.example.com.": "10.244.2.101"
+      },
+      "records": [
+        {
+          "name": "@",
+          "type": "A",
+          "value": "192.0.2.1"
+        },
+        {
+          "name": "www",
+          "type": "A",
+          "value": "192.0.2.10"
+        }
+      ],
+      "alsoNotify": ["10.244.2.101", "10.244.2.102"],
+      "allowTransfer": ["10.244.2.101", "10.244.2.102"]
+    }
+  }'
+
+echo -e "\n\nZone created with automatic notification to secondary servers:"
+echo "  - Secondary 1: 10.244.2.101"
+echo "  - Secondary 2: 10.244.2.102"
+echo ""
+echo "Zone transfers are allowed from these IPs"
+echo "Secondaries will be notified when the zone changes"
+```
+
+### Python Helper for Multi-Primary Setup
+
+```python
+#!/usr/bin/env python3
+"""
+Create primary zones with automatic secondary notifications in Kubernetes.
+"""
+import requests
+from kubernetes import client, config
+
+# Load Kubernetes config
+config.load_incluster_config()
+v1 = client.CoreV1Api()
+
+BINDCAR_URL = "http://bindcar-service:8080/api/v1"
+with open("/var/run/secrets/kubernetes.io/serviceaccount/token") as f:
+    TOKEN = f.read().strip()
+
+headers = {
+    "Authorization": f"Bearer {TOKEN}",
+    "Content-Type": "application/json"
+}
+
+def get_secondary_ips(namespace="default", label_selector="app=bind9,role=secondary"):
+    """Get IPs of all secondary BIND9 pods."""
+    pods = v1.list_namespaced_pod(namespace, label_selector=label_selector)
+    return [pod.status.pod_ip for pod in pods.items if pod.status.pod_ip]
+
+def create_ha_zone(domain, records, primary_ns_ip):
+    """Create a zone configured for high availability."""
+
+    # Discover secondary servers
+    secondary_ips = get_secondary_ips()
+
+    if not secondary_ips:
+        print("⚠️  Warning: No secondary servers found")
+
+    zone_data = {
+        "zoneName": domain,
+        "zoneType": "primary",
+        "zoneConfig": {
+            "ttl": 3600,
+            "soa": {
+                "primaryNs": f"ns1.{domain}.",
+                "adminEmail": f"admin.{domain}.",
+                "serial": 1,
+                "refresh": 3600,
+                "retry": 600,
+                "expire": 604800,
+                "negativeTtl": 86400
+            },
+            "nameServers": [f"ns1.{domain}.", f"ns2.{domain}."],
+            "nameServerIps": {
+                f"ns1.{domain}.": primary_ns_ip,
+                f"ns2.{domain}.": secondary_ips[0] if secondary_ips else "127.0.0.2"
+            },
+            "records": records,
+            "alsoNotify": secondary_ips,
+            "allowTransfer": secondary_ips
+        }
+    }
+
+    response = requests.post(
+        f"{BINDCAR_URL}/zones",
+        headers=headers,
+        json=zone_data
+    )
+
+    if response.status_code == 201:
+        print(f"✓ Created HA zone: {domain}")
+        print(f"  Primary NS: {primary_ns_ip}")
+        print(f"  Secondaries: {', '.join(secondary_ips) if secondary_ips else 'none'}")
+    else:
+        print(f"✗ Failed to create {domain}: {response.text}")
+
+    return response
+
+# Example: Create production zone with HA
+create_ha_zone(
+    domain="prod.example.com",
+    records=[
+        {"name": "@", "type": "A", "value": "192.0.2.1"},
+        {"name": "www", "type": "A", "value": "192.0.2.10"},
+        {"name": "api", "type": "A", "value": "192.0.2.20"},
+    ],
+    primary_ns_ip="10.244.1.101"
+)
+```
+
+### Kubernetes StatefulSet with Zone Transfers
+
+```yaml
+# bind9-ha-statefulset.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: bind9-primary
+spec:
+  selector:
+    app: bind9
+    role: primary
+  ports:
+  - name: dns-tcp
+    port: 53
+    protocol: TCP
+  - name: dns-udp
+    port: 53
+    protocol: UDP
+  - name: rndc
+    port: 953
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bind9-secondary
+spec:
+  selector:
+    app: bind9
+    role: secondary
+  ports:
+  - name: dns-tcp
+    port: 53
+    protocol: TCP
+  - name: dns-udp
+    port: 53
+    protocol: UDP
+---
+# Primary BIND9 server
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bind9-primary
+spec:
+  serviceName: bind9-primary
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bind9
+      role: primary
+  template:
+    metadata:
+      labels:
+        app: bind9
+        role: primary
+    spec:
+      containers:
+      - name: bind9
+        image: ubuntu/bind9:latest
+        ports:
+        - containerPort: 53
+          name: dns-tcp
+          protocol: TCP
+        - containerPort: 53
+          name: dns-udp
+          protocol: UDP
+        - containerPort: 953
+          name: rndc
+        volumeMounts:
+        - name: zones
+          mountPath: /var/cache/bind
+        - name: rndc-key
+          mountPath: /etc/bind/rndc.key
+          subPath: rndc.key
+
+      - name: bindcar
+        image: ghcr.io/firestoned/bindcar:latest
+        ports:
+        - containerPort: 8080
+          name: api
+        volumeMounts:
+        - name: zones
+          mountPath: /var/cache/bind
+        - name: rndc-key
+          mountPath: /etc/bind/rndc.key
+          subPath: rndc.key
+
+      volumes:
+      - name: zones
+        emptyDir: {}
+      - name: rndc-key
+        secret:
+          secretName: rndc-key
+---
+# Secondary BIND9 servers
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bind9-secondary
+spec:
+  serviceName: bind9-secondary
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bind9
+      role: secondary
+  template:
+    metadata:
+      labels:
+        app: bind9
+        role: secondary
+    spec:
+      containers:
+      - name: bind9
+        image: ubuntu/bind9:latest
+        ports:
+        - containerPort: 53
+          name: dns-tcp
+          protocol: TCP
+        - containerPort: 53
+          name: dns-udp
+          protocol: UDP
+        volumeMounts:
+        - name: zones
+          mountPath: /var/cache/bind
+        - name: config
+          mountPath: /etc/bind/named.conf.local
+          subPath: named.conf.local
+
+      volumes:
+      - name: zones
+        emptyDir: {}
+      - name: config
+        configMap:
+          name: bind9-secondary-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bind9-secondary-config
+data:
+  named.conf.local: |
+    // Secondary zones will be automatically added via zone transfers
+    // from primary server
+```
+
 ## Dynamic Zone Updates
 
 ### Service Discovery Integration

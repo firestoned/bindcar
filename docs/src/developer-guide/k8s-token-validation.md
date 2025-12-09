@@ -37,7 +37,10 @@ When enabled, bindcar validates tokens using the Kubernetes TokenReview API:
 - ✅ All basic validations
 - ✅ Verifies token signature with Kubernetes API
 - ✅ Checks token expiration
+- ✅ Validates token audience
 - ✅ Validates service account exists
+- ✅ Restricts to allowed namespaces (configurable)
+- ✅ Restricts to allowed service accounts (configurable)
 - ✅ Returns authenticated user information
 
 **Best for:**
@@ -70,6 +73,150 @@ cargo build --features k8s-token-review
 **Local Development:**
 - Valid kubeconfig file (~/.kube/config)
 - Kubernetes cluster access
+
+## Security Configuration
+
+bindcar supports fine-grained access control through environment variables:
+
+### Environment Variables
+
+| Variable | Description | Default | Example |
+|----------|-------------|---------|---------|
+| `BIND_TOKEN_AUDIENCES` | Comma-separated list of expected token audiences | `bindcar` | `bindcar,dns-api` |
+| `BIND_ALLOWED_NAMESPACES` | Comma-separated list of allowed namespaces | None (allow all) | `dns-system,kube-system` |
+| `BIND_ALLOWED_SERVICE_ACCOUNTS` | Comma-separated list of allowed service accounts | None (allow all) | `system:serviceaccount:dns-system:external-dns` |
+
+### Audience Validation
+
+Token audience validation ensures tokens are issued specifically for bindcar:
+
+```yaml
+# In your deployment
+env:
+- name: BIND_TOKEN_AUDIENCES
+  value: "bindcar,https://bindcar.dns-system.svc.cluster.local"
+```
+
+**How it works:**
+- Tokens must be created with matching audience
+- Prevents token reuse across different services
+- Provides defense-in-depth security
+
+**Create tokens with audience:**
+```bash
+kubectl create token external-dns --audience=bindcar
+```
+
+### Namespace Restriction
+
+Limit which namespaces can authenticate to bindcar:
+
+```yaml
+# Only allow tokens from dns-system and kube-system
+env:
+- name: BIND_ALLOWED_NAMESPACES
+  value: "dns-system,kube-system"
+```
+
+**Use cases:**
+- Multi-tenant clusters with namespace isolation
+- Restrict DNS management to specific namespaces
+- Compliance requirements
+
+**Example rejection:**
+```
+Token validation failed: ServiceAccount from unauthorized namespace: default
+```
+
+### ServiceAccount Allowlist
+
+Explicitly allow specific service accounts:
+
+```yaml
+# Only allow specific service accounts
+env:
+- name: BIND_ALLOWED_SERVICE_ACCOUNTS
+  value: "system:serviceaccount:dns-system:external-dns,system:serviceaccount:dns-system:cert-manager"
+```
+
+**Format:** `system:serviceaccount:<namespace>:<name>`
+
+**Use cases:**
+- Zero-trust security model
+- Explicit authorization required
+- Audit and compliance tracking
+
+**Example rejection:**
+```
+Token validation failed: ServiceAccount not authorized: system:serviceaccount:default:my-app
+```
+
+### Configuration Best Practices
+
+**Development:**
+```yaml
+# Relaxed - allow all namespaces
+env:
+- name: BIND_TOKEN_AUDIENCES
+  value: "bindcar"
+# BIND_ALLOWED_NAMESPACES: not set (allow all)
+# BIND_ALLOWED_SERVICE_ACCOUNTS: not set (allow all)
+```
+
+**Staging:**
+```yaml
+# Moderate - restrict namespaces
+env:
+- name: BIND_TOKEN_AUDIENCES
+  value: "bindcar"
+- name: BIND_ALLOWED_NAMESPACES
+  value: "dns-system,test-system"
+```
+
+**Production:**
+```yaml
+# Strict - explicit allowlist
+env:
+- name: BIND_TOKEN_AUDIENCES
+  value: "bindcar,https://bindcar.dns-system.svc.cluster.local"
+- name: BIND_ALLOWED_NAMESPACES
+  value: "dns-system"
+- name: BIND_ALLOWED_SERVICE_ACCOUNTS
+  value: "system:serviceaccount:dns-system:external-dns"
+```
+
+### ConfigMap Alternative
+
+For large allowlists, use a ConfigMap:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bindcar-allowed-accounts
+  namespace: dns-system
+data:
+  allowed-service-accounts: |
+    system:serviceaccount:dns-system:external-dns
+    system:serviceaccount:dns-system:cert-manager
+    system:serviceaccount:dns-system:ingress-dns
+---
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+      - name: bindcar
+        env:
+        - name: BIND_ALLOWED_SERVICE_ACCOUNTS
+          valueFrom:
+            configMapKeyRef:
+              name: bindcar-allowed-accounts
+              key: allowed-service-accounts
+```
+
+**Note:** ConfigMap values are newline-separated, not comma-separated. You'll need to adjust the parsing or use commas in the ConfigMap.
 
 ## RBAC Configuration
 
@@ -201,6 +348,9 @@ Failed validation:
 | `Failed to create Kubernetes client` | Cannot connect to K8s API | 401 |
 | `Token validation failed: <reason>` | TokenReview rejected token | 401 |
 | `Token not authenticated` | K8s says token is invalid | 401 |
+| `ServiceAccount from unauthorized namespace: <ns>` | Token from blocked namespace | 401 |
+| `ServiceAccount not authorized: <name>` | Token not in allowlist | 401 |
+| `No user information in TokenReview response` | TokenReview missing user data | 401 |
 
 ## Testing
 
@@ -242,6 +392,59 @@ curl -H "Authorization: Bearer invalid-token" \
 # {
 #   "error": "Token validation failed: token not authenticated"
 # }
+```
+
+### Testing Security Restrictions
+
+**Test audience validation:**
+```bash
+# Create token without audience
+TOKEN=$(kubectl create token my-app)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/zones
+# Expected: May fail if BIND_TOKEN_AUDIENCES requires specific audience
+
+# Create token with correct audience
+TOKEN=$(kubectl create token my-app --audience=bindcar)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/zones
+# Expected: Success (if other validations pass)
+```
+
+**Test namespace restriction:**
+```bash
+# Set allowed namespaces
+export BIND_ALLOWED_NAMESPACES="dns-system"
+
+# Create token from allowed namespace
+kubectl create serviceaccount test-sa -n dns-system
+TOKEN=$(kubectl create token test-sa -n dns-system --audience=bindcar)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/zones
+# Expected: Success
+
+# Create token from blocked namespace
+kubectl create serviceaccount test-sa -n default
+TOKEN=$(kubectl create token test-sa -n default --audience=bindcar)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/zones
+# Expected: 401 Unauthorized
+# {"error": "Token validation failed: ServiceAccount from unauthorized namespace: default"}
+```
+
+**Test service account allowlist:**
+```bash
+# Set allowed service accounts
+export BIND_ALLOWED_SERVICE_ACCOUNTS="system:serviceaccount:dns-system:external-dns"
+
+# Create allowed service account
+kubectl create serviceaccount external-dns -n dns-system
+TOKEN=$(kubectl create token external-dns -n dns-system --audience=bindcar)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/zones
+# Expected: Success
+
+# Create blocked service account
+kubectl create serviceaccount other-app -n dns-system
+TOKEN=$(kubectl create token other-app -n dns-system --audience=bindcar)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/zones
+# Expected: 401 Unauthorized
+# {"error": "Token validation failed: ServiceAccount not authorized: system:serviceaccount:dns-system:other-app"}
 ```
 
 ## Performance Considerations

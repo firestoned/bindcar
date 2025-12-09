@@ -169,14 +169,14 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     info!(
-        "Starting BIND9 RNDC API server v{}",
+        "starting bind9 rndc api server v{}",
         env!("CARGO_PKG_VERSION")
     );
 
-    // Initialize metrics
+    // initialize metrics
     metrics::init_metrics();
 
-    // Get configuration from environment
+    // get configuration from environment
     let zone_dir =
         std::env::var("BIND_ZONE_DIR").unwrap_or_else(|_| DEFAULT_BIND_ZONE_DIR.to_string());
     let api_port = std::env::var("API_PORT")
@@ -188,32 +188,32 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|v| v.parse::<bool>().ok())
         .unwrap_or(false);
 
-    info!("Zone directory: {}", zone_dir);
-    info!("API port: {}", api_port);
+    info!("zone directory: {}", zone_dir);
+    info!("api port: {}", api_port);
     if disable_auth {
-        warn!("⚠️  Authentication is DISABLED - API endpoints are unprotected!");
-        warn!("⚠️  This should ONLY be used in trusted environments (e.g., Linkerd service mesh)");
+        warn!("⚠️  authentication is disabled - api endpoints are unprotected!");
+        warn!("⚠️  this should only be used in trusted environments (e.g., linkerd service mesh)");
     } else {
-        info!("Authentication is enabled");
+        info!("authentication is enabled");
     }
 
-    // Get RNDC configuration from environment or fallback to rndc.conf
+    // get rndc configuration from environment or fallback to rndc.conf
     let (rndc_server, rndc_algorithm, rndc_secret) = match (
         std::env::var("RNDC_SECRET").ok(),
         std::env::var("RNDC_SERVER").ok(),
         std::env::var("RNDC_ALGORITHM").ok(),
     ) {
         (Some(secret), server, algorithm) => {
-            // Environment variables provided
+            // environment variables provided
             let server = server.unwrap_or_else(|| "127.0.0.1:953".to_string());
             let algorithm = algorithm.unwrap_or_else(|| "sha256".to_string());
-            info!("Using RNDC configuration from environment variables");
-            info!("RNDC server: {}", server);
-            info!("RNDC algorithm: {}", algorithm);
+            info!("using rndc configuration from environment variables");
+            info!("rndc server: {}", server);
+            info!("rndc algorithm: {}", algorithm);
             (server, algorithm, secret)
         }
         (None, _, _) => {
-            // Try to parse from rndc.conf files
+            // try to parse from rndc.conf files
             info!("RNDC_SECRET not set, attempting to parse rndc.conf");
 
             let config_paths = vec!["/etc/bind/rndc.conf", "/etc/rndc.conf"];
@@ -222,52 +222,52 @@ async fn main() -> anyhow::Result<()> {
             for path in &config_paths {
                 match bindcar::rndc::parse_rndc_conf(path) {
                     Ok(cfg) => {
-                        info!("Successfully parsed RNDC configuration from {}", path);
+                        info!("successfully parsed rndc configuration from {}", path);
                         config = Some(cfg);
                         break;
                     }
                     Err(e) => {
-                        debug!("Failed to parse {}: {}", path, e);
+                        debug!("failed to parse {}: {}", path, e);
                     }
                 }
             }
 
             match config {
                 Some(cfg) => {
-                    info!("RNDC server: {}", cfg.server);
-                    info!("RNDC algorithm: {}", cfg.algorithm);
+                    info!("rndc server: {}", cfg.server);
+                    info!("rndc algorithm: {}", cfg.algorithm);
                     (cfg.server, cfg.algorithm, cfg.secret)
                 }
                 None => {
-                    error!("RNDC configuration not found!");
-                    error!("Either set RNDC_SECRET environment variable or ensure /etc/bind/rndc.conf exists");
+                    error!("rndc configuration not found!");
+                    error!("either set RNDC_SECRET environment variable or ensure /etc/bind/rndc.conf exists");
                     return Err(anyhow::anyhow!(
-                        "RNDC configuration required: Set RNDC_SECRET env var or create /etc/bind/rndc.conf"
+                        "rndc configuration required: set RNDC_SECRET env var or create /etc/bind/rndc.conf"
                     ));
                 }
             }
         }
     };
 
-    // Verify zone directory exists
+    // verify zone directory exists
     if !tokio::fs::metadata(&zone_dir).await?.is_dir() {
-        error!("Zone directory does not exist: {}", zone_dir);
-        return Err(anyhow::anyhow!("Zone directory not found"));
+        error!("zone directory does not exist: {}", zone_dir);
+        return Err(anyhow::anyhow!("zone directory not found"));
     }
 
-    // Create RNDC executor
+    // create rndc executor
     let rndc = Arc::new(
         RndcExecutor::new(rndc_server, rndc_algorithm, rndc_secret)
-            .context("Failed to create RNDC client")?,
+            .context("failed to create rndc client")?,
     );
 
-    // Create application state
+    // create application state
     let state = AppState {
         rndc,
         zone_dir: zone_dir.clone(),
     };
 
-    // Build API routes
+    // build api routes
     let api_routes = Router::new()
         .route("/zones", post(zones::create_zone).get(zones::list_zones))
         .route(
@@ -282,14 +282,14 @@ async fn main() -> anyhow::Result<()> {
         .route("/server/status", get(zones::server_status))
         .with_state(state.clone());
 
-    // Conditionally apply authentication middleware
+    // conditionally apply authentication middleware
     let api_routes = if disable_auth {
         api_routes
     } else {
         api_routes.layer(axum_middleware::from_fn(authenticate))
     };
 
-    // Build main router
+    // build main router
     let app = Router::new()
         .merge(SwaggerUi::new("/api/v1/docs").url("/api/v1/openapi.json", ApiDoc::openapi()))
         .route("/api/v1/health", get(health_check))
@@ -300,17 +300,17 @@ async fn main() -> anyhow::Result<()> {
         .layer(axum_middleware::from_fn(middleware::track_metrics))
         .layer(TraceLayer::new_for_http());
 
-    // Start server
+    // start server
     let addr = format!("0.0.0.0:{}", api_port);
 
-    info!("BIND9 RNDC API server listening on {}", addr);
-    info!("Swagger UI available at http://{}/api/v1/docs", addr);
+    info!("bind9 rndc api server listening on {}", addr);
+    info!("swagger ui available at http://{}/api/v1/docs", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     axum::serve(listener, app.into_make_service())
         .await
-        .context("Server error")?;
+        .context("server error")?;
 
     Ok(())
 }
