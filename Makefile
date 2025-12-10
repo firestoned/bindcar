@@ -4,6 +4,7 @@
 # Makefile for bindcar
 
 # Configuration
+K8S_OPENAPI_ENABLED_VERSION ?= "1.30"
 IMAGE_NAME ?= bindcar
 IMAGE_TAG ?= latest
 REGISTRY ?= ghcr.io/firestoned
@@ -67,7 +68,7 @@ docs: ## Build all documentation (mdBook + rustdoc + OpenAPI)
 	@echo "Building all documentation..."
 	@command -v mdbook >/dev/null 2>&1 || { echo "Error: mdbook not found. Install with: cargo install mdbook"; exit 1; }
 	@echo "Building rustdoc API documentation..."
-	@cargo doc --no-deps --all-features
+	@cargo doc --no-deps
 	@echo "Install mermaid assets and build mdBook documentation..."
 	@cd docs && mdbook-mermaid install && mdbook build
 	@echo "Copying rustdoc into documentation..."
@@ -121,7 +122,7 @@ docs-mdbook: ## Build mdBook documentation only
 
 .PHONY: docs-rustdoc
 docs-rustdoc: ## Build rustdoc API documentation only
-	cargo doc --no-deps --all-features --open
+	cargo doc --no-deps --open
 
 .PHONY: docs-clean
 docs-clean: ## Clean documentation build artifacts

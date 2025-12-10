@@ -61,7 +61,7 @@ Content-Type: application/json
 | 400  | Invalid zone name or configuration |
 | 502  | RNDC command failed |
 
-### Example
+### Example - Primary Zone
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/zones \
@@ -77,10 +77,36 @@ curl -X POST http://localhost:8080/api/v1/zones \
         "adminEmail": "admin.example.com.",
         "serial": 2025010101
       },
-      "nameServers": ["ns1.example.com."]
+      "nameServers": ["ns1.example.com."],
+      "nameServerIps": {}
     }
   }'
 ```
+
+### Example - Secondary Zone
+
+```bash
+curl -X POST http://localhost:8080/api/v1/zones \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "zoneName": "example.com",
+    "zoneType": "secondary",
+    "zoneConfig": {
+      "ttl": 3600,
+      "soa": {
+        "primaryNs": "ns1.example.com.",
+        "adminEmail": "admin.example.com.",
+        "serial": 2025010101
+      },
+      "nameServers": ["ns1.example.com."],
+      "nameServerIps": {},
+      "primaries": ["192.0.2.1", "192.0.2.2"]
+    }
+  }'
+```
+
+**Note**: Secondary zones require the `primaries` field with at least one IP address of the primary server(s).
 
 ---
 

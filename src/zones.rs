@@ -145,6 +145,12 @@ pub struct ZoneConfig {
     /// Example: ["10.244.2.101", "10.244.2.102"]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_transfer: Option<Vec<String>>,
+
+    /// IP addresses of primary servers for secondary zones (BIND9 primaries/masters)
+    /// Example: ["192.0.2.1", "192.0.2.2"]
+    /// Required for secondary zone types
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primaries: Option<Vec<String>>,
 }
 
 impl ZoneConfig {
@@ -303,42 +309,74 @@ pub async fn create_zone(
         )));
     }
 
-    // Generate zone file content from structured configuration
-    let zone_content = request.zone_config.to_zone_file();
+    // Validate secondary zone requirements
+    if request.zone_type == ZONE_TYPE_SECONDARY
+        && request
+            .zone_config
+            .primaries
+            .as_ref()
+            .map_or(true, |p| p.is_empty())
+    {
+        metrics::record_zone_operation("create", false);
+        return Err(ApiError::InvalidRequest(
+            "Secondary zones require at least one primary server in 'primaries' field".to_string(),
+        ));
+    }
 
-    info!(
-        "Generated zone file content for {}: {} bytes",
-        request.zone_name,
-        zone_content.len()
-    );
+    // Generate zone file content from structured configuration (only for primary zones)
+    let zone_content = if request.zone_type == ZONE_TYPE_PRIMARY {
+        request.zone_config.to_zone_file()
+    } else {
+        String::new() // Secondary zones don't need zone files
+    };
 
-    // Create zone file path
+    // Only write zone file for primary zones
     let zone_file_name = format!("{}.zone", request.zone_name);
     let zone_file_path = PathBuf::from(&state.zone_dir).join(&zone_file_name);
 
-    // Write zone file
-    tokio::fs::write(&zone_file_path, &zone_content)
-        .await
-        .map_err(|e| {
-            error!(
-                "Failed to write zone file {}: {}",
-                zone_file_path.display(),
-                e
-            );
-            metrics::record_zone_operation("create", false);
-            ApiError::ZoneFileError(format!("Failed to write zone file: {}", e))
-        })?;
+    if request.zone_type == ZONE_TYPE_PRIMARY {
+        info!(
+            "Generated zone file content for {}: {} bytes",
+            request.zone_name,
+            zone_content.len()
+        );
 
-    info!("Wrote zone file: {}", zone_file_path.display());
+        tokio::fs::write(&zone_file_path, &zone_content)
+            .await
+            .map_err(|e| {
+                error!(
+                    "Failed to write zone file {}: {}",
+                    zone_file_path.display(),
+                    e
+                );
+                metrics::record_zone_operation("create", false);
+                ApiError::ZoneFileError(format!("Failed to write zone file: {}", e))
+            })?;
+
+        info!("Wrote zone file: {}", zone_file_path.display());
+    }
 
     // Build zone configuration for rndc addzone
-    let zone_file_full_path = format!("{}/{}", state.zone_dir, zone_file_name);
+    let mut config_parts = vec![format!(r#"type {}"#, request.zone_type)];
 
-    // Start with basic configuration
-    let mut config_parts = vec![
-        format!(r#"type {}"#, request.zone_type),
-        format!(r#"file "{}""#, zone_file_full_path),
-    ];
+    // Add file path for primary zones
+    if request.zone_type == ZONE_TYPE_PRIMARY {
+        let zone_file_full_path = format!("{}/{}", state.zone_dir, zone_file_name);
+        config_parts.push(format!(r#"file "{}""#, zone_file_full_path));
+    }
+
+    // Add primaries for secondary zones
+    if request.zone_type == ZONE_TYPE_SECONDARY {
+        if let Some(primaries) = &request.zone_config.primaries {
+            if !primaries.is_empty() {
+                let primaries_list = primaries
+                    .iter()
+                    .map(|ip| format!("{}; ", ip))
+                    .collect::<String>();
+                config_parts.push(format!(r#"primaries {{ {} }}"#, primaries_list));
+            }
+        }
+    }
 
     // Add allow-update if TSIG key is provided
     if let Some(key_name) = &request.update_key_name {

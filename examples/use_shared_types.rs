@@ -54,6 +54,7 @@ fn main() {
         ],
         also_notify: None,
         allow_transfer: None,
+        primaries: None,
     };
 
     let request = CreateZoneRequest {
@@ -123,6 +124,7 @@ fn main() {
         ],
         also_notify: None,
         allow_transfer: None,
+        primaries: None,
     };
 
     println!("Zone file with glue records:\n{}", zone_with_glue.to_zone_file());

@@ -42,6 +42,7 @@ fn test_zone_config_to_zone_file() {
         ],
         also_notify: None,
         allow_transfer: None,
+    primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -196,6 +197,7 @@ fn test_zone_config_empty_name_servers() {
         records: vec![],
         also_notify: None,
         allow_transfer: None,
+        primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -229,6 +231,7 @@ fn test_zone_config_special_characters_in_names() {
         }],
         also_notify: None,
         allow_transfer: None,
+    primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -254,6 +257,7 @@ fn test_zone_config_zero_ttl() {
         records: vec![],
         also_notify: None,
         allow_transfer: None,
+    primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -286,6 +290,7 @@ fn test_dns_record_mx_with_priority_zero() {
         records: vec![record],
         also_notify: None,
         allow_transfer: None,
+    primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -325,6 +330,7 @@ fn test_multiple_records_same_name() {
         ],
         also_notify: None,
         allow_transfer: None,
+    primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -357,6 +363,7 @@ fn test_zone_config_with_nameserver_glue_records() {
         records: vec![],
         also_notify: None,
         allow_transfer: None,
+    primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -391,6 +398,7 @@ fn test_zone_config_glue_records_serialization() {
         records: vec![],
         also_notify: None,
         allow_transfer: None,
+    primaries: None,
     };
 
     // Test that it can be serialized to JSON
@@ -424,6 +432,7 @@ fn test_zone_config_without_nameserver_ips() {
         records: vec![],
         also_notify: None,
         allow_transfer: None,
+    primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -582,5 +591,162 @@ fn test_create_zone_request_with_zone_transfer_fields() {
     let allow_transfer = request.zone_config.allow_transfer.unwrap();
 
     assert_eq!(also_notify.len(), 2);
+    assert_eq!(allow_transfer.len(), 2);
+}
+
+// Tests for secondary zones with primaries
+
+#[test]
+fn test_zone_config_with_primaries() {
+    let json = r#"{
+        "ttl": 3600,
+        "soa": {
+            "primaryNs": "ns1.example.com.",
+            "adminEmail": "admin.example.com.",
+            "serial": 2025010101
+        },
+        "nameServers": ["ns1.example.com."],
+        "nameServerIps": {},
+        "records": [],
+        "primaries": ["192.0.2.1", "192.0.2.2"]
+    }"#;
+
+    let config: ZoneConfig = serde_json::from_str(json).unwrap();
+    assert!(config.primaries.is_some());
+    let primaries = config.primaries.unwrap();
+    assert_eq!(primaries.len(), 2);
+    assert_eq!(primaries[0], "192.0.2.1");
+    assert_eq!(primaries[1], "192.0.2.2");
+}
+
+#[test]
+fn test_create_secondary_zone_request() {
+    let json = r#"{
+        "zoneName": "example.com",
+        "zoneType": "secondary",
+        "zoneConfig": {
+            "ttl": 3600,
+            "soa": {
+                "primaryNs": "ns1.example.com.",
+                "adminEmail": "admin.example.com.",
+                "serial": 2025010101
+            },
+            "nameServers": ["ns1.example.com."],
+            "nameServerIps": {},
+            "records": [],
+            "primaries": ["192.0.2.1", "192.0.2.2"]
+        }
+    }"#;
+
+    let request: CreateZoneRequest = serde_json::from_str(json).unwrap();
+    assert_eq!(request.zone_name, "example.com");
+    assert_eq!(request.zone_type, "secondary");
+    assert!(request.zone_config.primaries.is_some());
+
+    let primaries = request.zone_config.primaries.unwrap();
+    assert_eq!(primaries.len(), 2);
+    assert_eq!(primaries[0], "192.0.2.1");
+    assert_eq!(primaries[1], "192.0.2.2");
+}
+
+#[test]
+fn test_secondary_zone_with_single_primary() {
+    let json = r#"{
+        "zoneName": "example.com",
+        "zoneType": "secondary",
+        "zoneConfig": {
+            "ttl": 3600,
+            "soa": {
+                "primaryNs": "ns1.example.com.",
+                "adminEmail": "admin.example.com.",
+                "serial": 2025010101
+            },
+            "nameServers": ["ns1.example.com."],
+            "nameServerIps": {},
+            "records": [],
+            "primaries": ["192.0.2.1"]
+        }
+    }"#;
+
+    let request: CreateZoneRequest = serde_json::from_str(json).unwrap();
+    assert_eq!(request.zone_type, "secondary");
+    assert!(request.zone_config.primaries.is_some());
+
+    let primaries = request.zone_config.primaries.unwrap();
+    assert_eq!(primaries.len(), 1);
+    assert_eq!(primaries[0], "192.0.2.1");
+}
+
+#[test]
+fn test_zone_config_without_primaries() {
+    let json = r#"{
+        "ttl": 3600,
+        "soa": {
+            "primaryNs": "ns1.example.com.",
+            "adminEmail": "admin.example.com.",
+            "serial": 2025010101
+        },
+        "nameServers": ["ns1.example.com."],
+        "nameServerIps": {},
+        "records": []
+    }"#;
+
+    let config: ZoneConfig = serde_json::from_str(json).unwrap();
+    assert!(config.primaries.is_none());
+}
+
+#[test]
+fn test_zone_config_with_empty_primaries() {
+    let json = r#"{
+        "ttl": 3600,
+        "soa": {
+            "primaryNs": "ns1.example.com.",
+            "adminEmail": "admin.example.com.",
+            "serial": 2025010101
+        },
+        "nameServers": ["ns1.example.com."],
+        "nameServerIps": {},
+        "records": [],
+        "primaries": []
+    }"#;
+
+    let config: ZoneConfig = serde_json::from_str(json).unwrap();
+    assert!(config.primaries.is_some());
+    assert_eq!(config.primaries.unwrap().len(), 0);
+}
+
+#[test]
+fn test_secondary_zone_with_all_transfer_fields() {
+    let json = r#"{
+        "zoneName": "example.com",
+        "zoneType": "secondary",
+        "zoneConfig": {
+            "ttl": 3600,
+            "soa": {
+                "primaryNs": "ns1.example.com.",
+                "adminEmail": "admin.example.com.",
+                "serial": 2025010101
+            },
+            "nameServers": ["ns1.example.com."],
+            "nameServerIps": {},
+            "records": [],
+            "primaries": ["192.0.2.1", "192.0.2.2"],
+            "alsoNotify": ["10.244.2.101"],
+            "allowTransfer": ["10.244.2.101", "10.244.2.102"]
+        }
+    }"#;
+
+    let request: CreateZoneRequest = serde_json::from_str(json).unwrap();
+    assert_eq!(request.zone_type, "secondary");
+    assert!(request.zone_config.primaries.is_some());
+    assert!(request.zone_config.also_notify.is_some());
+    assert!(request.zone_config.allow_transfer.is_some());
+
+    let primaries = request.zone_config.primaries.unwrap();
+    let also_notify = request.zone_config.also_notify.unwrap();
+    let allow_transfer = request.zone_config.allow_transfer.unwrap();
+
+    assert_eq!(primaries.len(), 2);
+    assert_eq!(also_notify.len(), 1);
     assert_eq!(allow_transfer.len(), 2);
 }
