@@ -80,6 +80,7 @@
 //!         ],
 //!         also_notify: None,
 //!         allow_transfer: None,
+//!         primaries: None,
 //!     },
 //!     update_key_name: None,
 //! };

@@ -69,7 +69,7 @@ sequenceDiagram
 
 ## Zone Types
 
-### Master Zones
+### Primary Zones
 
 Primary authoritative zones where records are managed directly:
 
@@ -77,7 +77,13 @@ Primary authoritative zones where records are managed directly:
 {
   "zoneName": "example.com",
   "zoneType": "primary",
-  "zoneConfig": {...}
+  "zoneConfig": {
+    "ttl": 3600,
+    "soa": {...},
+    "nameServers": ["ns1.example.com."],
+    "nameServerIps": {},
+    "records": [...]
+  }
 }
 ```
 
@@ -95,7 +101,11 @@ Read-only zones that transfer from primary servers:
   "zoneName": "example.com",
   "zoneType": "secondary",
   "zoneConfig": {
-    "masters": ["192.0.2.1", "192.0.2.2"]
+    "ttl": 3600,
+    "soa": {...},
+    "nameServers": ["ns1.example.com."],
+    "nameServerIps": {},
+    "primaries": ["192.0.2.1", "192.0.2.2"]
   }
 }
 ```
@@ -105,7 +115,10 @@ Read-only zones that transfer from primary servers:
 - High availability
 - Load balancing DNS queries
 
-**Note**: bindcar currently focuses on primary zones. Secondary zone support is planned for future releases.
+**Required Fields for Secondary Zones**:
+- `primaries`: Array of IP addresses of primary servers (at least one required)
+
+**Note**: Secondary zones do not require zone file creation. The zone data is automatically transferred from the primary servers via AXFR/IXFR.
 
 ## Zone Names
 
