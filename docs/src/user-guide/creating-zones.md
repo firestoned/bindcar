@@ -32,9 +32,9 @@ curl -X POST http://localhost:8080/api/v1/zones \
 
 ```json
 {
-  "message": "Zone created successfully",
-  "zone": "example.com",
-  "file": "/var/cache/bind/db.example.com"
+  "success": true,
+  "message": "Zone example.com created successfully",
+  "details": "zone example.com/IN: loaded serial 2025010101"
 }
 ```
 

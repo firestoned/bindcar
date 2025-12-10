@@ -129,12 +129,13 @@ async fn ready_check(State(state): State<AppState>) -> Json<ReadyResponse> {
 
     // Check if zone directory is writable
     match tokio::fs::metadata(&state.zone_dir).await {
-        Ok(metadata) if metadata.is_dir() => {
-            checks.push(format!("zone_dir_accessible: {}", state.zone_dir));
-        }
-        Ok(_) => {
-            ready = false;
-            checks.push(format!("zone_dir_not_directory: {}", state.zone_dir));
+        Ok(metadata) => {
+            if !metadata.is_dir() {
+                ready = false;
+                checks.push(format!("zone_dir_not_directory: {}", state.zone_dir));
+            } else {
+                checks.push(format!("zone_dir_accessible: {}", state.zone_dir));
+            }
         }
         Err(e) => {
             ready = false;
@@ -143,15 +144,12 @@ async fn ready_check(State(state): State<AppState>) -> Json<ReadyResponse> {
     }
 
     // Check if rndc is available
-    match state.rndc.status().await {
-        Ok(_) => {
-            checks.push("rndc_available: true".to_string());
-        }
-        Err(e) => {
-            warn!("RNDC not ready: {}", e);
-            ready = false;
-            checks.push(format!("rndc_error: {}", e));
-        }
+    if let Err(e) = state.rndc.status().await {
+        warn!("RNDC not ready: {}", e);
+        ready = false;
+        checks.push(format!("rndc_error: {}", e));
+    } else {
+        checks.push("rndc_available: true".to_string());
     }
 
     Json(ReadyResponse { ready, checks })
@@ -198,53 +196,46 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // get rndc configuration from environment or fallback to rndc.conf
-    let (rndc_server, rndc_algorithm, rndc_secret) = match (
-        std::env::var("RNDC_SECRET").ok(),
-        std::env::var("RNDC_SERVER").ok(),
-        std::env::var("RNDC_ALGORITHM").ok(),
-    ) {
-        (Some(secret), server, algorithm) => {
-            // environment variables provided
-            let server = server.unwrap_or_else(|| "127.0.0.1:953".to_string());
-            let algorithm = algorithm.unwrap_or_else(|| "sha256".to_string());
-            info!("using rndc configuration from environment variables");
-            info!("rndc server: {}", server);
-            info!("rndc algorithm: {}", algorithm);
-            (server, algorithm, secret)
-        }
-        (None, _, _) => {
-            // try to parse from rndc.conf files
-            info!("RNDC_SECRET not set, attempting to parse rndc.conf");
+    let (rndc_server, rndc_algorithm, rndc_secret) = if let Ok(secret) = std::env::var("RNDC_SECRET") {
+        // environment variables provided
+        let server = std::env::var("RNDC_SERVER").unwrap_or_else(|_| "127.0.0.1:953".to_string());
+        let algorithm = std::env::var("RNDC_ALGORITHM").unwrap_or_else(|_| "sha256".to_string());
+        info!("using rndc configuration from environment variables");
+        info!("rndc server: {}", server);
+        info!("rndc algorithm: {}", algorithm);
+        (server, algorithm, secret)
+    } else {
+        // try to parse from rndc.conf files
+        info!("RNDC_SECRET not set, attempting to parse rndc.conf");
 
-            let config_paths = vec!["/etc/bind/rndc.conf", "/etc/rndc.conf"];
-            let mut config = None;
+        let config_paths = vec!["/etc/bind/rndc.conf", "/etc/rndc.conf"];
+        let mut config = None;
 
-            for path in &config_paths {
-                match bindcar::rndc::parse_rndc_conf(path) {
-                    Ok(cfg) => {
-                        info!("successfully parsed rndc configuration from {}", path);
-                        config = Some(cfg);
-                        break;
-                    }
-                    Err(e) => {
-                        debug!("failed to parse {}: {}", path, e);
-                    }
+        for path in &config_paths {
+            match bindcar::rndc::parse_rndc_conf(path) {
+                Ok(cfg) => {
+                    info!("successfully parsed rndc configuration from {}", path);
+                    config = Some(cfg);
+                    break;
+                }
+                Err(e) => {
+                    debug!("failed to parse {}: {}", path, e);
                 }
             }
+        }
 
-            match config {
-                Some(cfg) => {
-                    info!("rndc server: {}", cfg.server);
-                    info!("rndc algorithm: {}", cfg.algorithm);
-                    (cfg.server, cfg.algorithm, cfg.secret)
-                }
-                None => {
-                    error!("rndc configuration not found!");
-                    error!("either set RNDC_SECRET environment variable or ensure /etc/bind/rndc.conf exists");
-                    return Err(anyhow::anyhow!(
-                        "rndc configuration required: set RNDC_SECRET env var or create /etc/bind/rndc.conf"
-                    ));
-                }
+        match config {
+            Some(cfg) => {
+                info!("rndc server: {}", cfg.server);
+                info!("rndc algorithm: {}", cfg.algorithm);
+                (cfg.server, cfg.algorithm, cfg.secret)
+            }
+            None => {
+                error!("rndc configuration not found!");
+                error!("either set RNDC_SECRET environment variable or ensure /etc/bind/rndc.conf exists");
+                return Err(anyhow::anyhow!(
+                    "rndc configuration required: set RNDC_SECRET env var or create /etc/bind/rndc.conf"
+                ));
             }
         }
     };
@@ -283,10 +274,10 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state.clone());
 
     // conditionally apply authentication middleware
-    let api_routes = if disable_auth {
-        api_routes
-    } else {
+    let api_routes = if !disable_auth {
         api_routes.layer(axum_middleware::from_fn(authenticate))
+    } else {
+        api_routes
     };
 
     // build main router

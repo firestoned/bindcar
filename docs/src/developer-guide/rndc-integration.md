@@ -155,7 +155,7 @@ graph TD
 Add a new zone to BIND9 dynamically:
 
 ```bash
-rndc addzone example.com '{ type primary; file "/var/cache/bind/db.example.com"; };'
+rndc addzone example.com '{ type primary; file "/var/cache/bind/example.com.zone"; };'
 ```
 
 **When Used**: POST /api/v1/zones
@@ -281,7 +281,7 @@ flowchart TD
 
 1. **Validate Request** - Check zone name, SOA record, NS records, etc.
 2. **Generate Zone File** - Create BIND9 format zone file content
-3. **Write to Disk** - Save to `BIND_ZONE_DIR/db.{zone_name}`
+3. **Write to Disk** - Save to `BIND_ZONE_DIR/{zone_name}.zone`
 4. **Execute addzone** - Register zone with BIND9 via RNDC
 5. **Cleanup on Failure** - Remove zone file if RNDC command fails
 
@@ -305,13 +305,13 @@ $TTL 3600
 Zone files are named using the pattern:
 
 ```
-db.{zone_name}
+{zone_name}.zone
 ```
 
 Examples:
-- `db.example.com`
-- `db.sub.example.com`
-- `db.192.in-addr.arpa`
+- `example.com.zone`
+- `sub.example.com.zone`
+- `192.in-addr.arpa.zone`
 
 ### Shared Volume Requirements
 

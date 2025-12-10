@@ -42,7 +42,7 @@ Complete HTTP status code reference for all bindcar API endpoints.
 {
   "message": "Zone created successfully",
   "zone": "example.com",
-  "file": "/var/cache/bind/db.example.com"
+  "filePath": "/var/cache/bind/example.com.zone"
 }
 ```
 
@@ -300,7 +300,7 @@ Complete HTTP status code reference for all bindcar API endpoints.
 {
   "error": "Failed to write zone file",
   "zone": "example.com",
-  "details": "Permission denied: /var/cache/bind/db.example.com"
+  "details": "Permission denied: /var/cache/bind/example.com.zone"
 }
 ```
 

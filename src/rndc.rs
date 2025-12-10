@@ -106,29 +106,26 @@ impl RndcExecutor {
 
         let duration = start.elapsed().as_secs_f64();
 
-        match result {
-            Ok(rndc_result) => {
-                // Check if the RNDC result contains an error
-                if let Some(err) = &rndc_result.err {
-                    let error_msg = format!("RNDC command '{}' failed: {}", command_name, err);
-                    error!("{}", error_msg);
-                    metrics::record_rndc_command(command_name, false, duration);
-                    return Err(anyhow::anyhow!("{}", error_msg));
-                }
+        let rndc_result = result.map_err(|e| {
+            let error_msg = format!("RNDC command '{}' failed: {}", command_name, e);
+            error!("{}", error_msg);
+            metrics::record_rndc_command(command_name, false, duration);
+            anyhow::anyhow!("{}", error_msg)
+        })?;
 
-                // Success - return the text response
-                let response = rndc_result.text.unwrap_or_default();
-                debug!("RNDC command '{}' succeeded: {}", command_name, response);
-                metrics::record_rndc_command(command_name, true, duration);
-                Ok(response)
-            }
-            Err(e) => {
-                let error_msg = format!("RNDC command '{}' failed: {}", command_name, e);
-                error!("{}", error_msg);
-                metrics::record_rndc_command(command_name, false, duration);
-                Err(anyhow::anyhow!("{}", error_msg))
-            }
+        // Check if the RNDC result contains an error
+        if let Some(err) = &rndc_result.err {
+            let error_msg = format!("RNDC command '{}' failed: {}", command_name, err);
+            error!("{}", error_msg);
+            metrics::record_rndc_command(command_name, false, duration);
+            return Err(anyhow::anyhow!("{}", error_msg));
         }
+
+        // Success - return the text response
+        let response = rndc_result.text.unwrap_or_default();
+        debug!("RNDC command '{}' succeeded: {}", command_name, response);
+        metrics::record_rndc_command(command_name, true, duration);
+        Ok(response)
     }
 
     /// Get server status
@@ -263,36 +260,37 @@ pub fn parse_rndc_conf(path: &str) -> Result<RndcConfig> {
         for include_path in &include_files {
             info!("Parsing included file: {}", include_path);
 
-            match fs::read_to_string(include_path) {
-                Ok(include_content) => {
-                    for line in include_content.lines() {
-                        let line = line.trim();
-
-                        if algorithm.is_none() && line.contains("algorithm") {
-                            if let Some(algo) = extract_quoted_value(line) {
-                                debug!("Found algorithm in {}: {}", include_path, algo);
-                                algorithm = Some(algo);
-                            }
-                        }
-
-                        if secret.is_none() && line.contains("secret") {
-                            if let Some(sec) = extract_quoted_value(line) {
-                                debug!("Found secret in {}", include_path);
-                                secret = Some(sec);
-                            }
-                        }
-
-                        // Also check for key name in included file
-                        if default_key.is_none() && line.starts_with("key") {
-                            // Extract key name from: key "keyname" {
-                            if let Some(key_name) = extract_quoted_value(line) {
-                                default_key = Some(key_name);
-                            }
-                        }
-                    }
-                }
+            let include_content = match fs::read_to_string(include_path) {
+                Ok(content) => content,
                 Err(e) => {
                     warn!("Failed to read included file {}: {}", include_path, e);
+                    continue;
+                }
+            };
+
+            for line in include_content.lines() {
+                let line = line.trim();
+
+                if algorithm.is_none() && line.contains("algorithm") {
+                    if let Some(algo) = extract_quoted_value(line) {
+                        debug!("Found algorithm in {}: {}", include_path, algo);
+                        algorithm = Some(algo);
+                    }
+                }
+
+                if secret.is_none() && line.contains("secret") {
+                    if let Some(sec) = extract_quoted_value(line) {
+                        debug!("Found secret in {}", include_path);
+                        secret = Some(sec);
+                    }
+                }
+
+                // Also check for key name in included file
+                if default_key.is_none() && line.starts_with("key") {
+                    // Extract key name from: key "keyname" {
+                    if let Some(key_name) = extract_quoted_value(line) {
+                        default_key = Some(key_name);
+                    }
                 }
             }
         }

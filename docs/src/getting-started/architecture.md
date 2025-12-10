@@ -27,17 +27,18 @@ graph TB
 
 ### RNDC Integration
 
-bindcar communicates with BIND9 via the `rndc` command-line tool:
+bindcar communicates with BIND9 via the native RNDC protocol:
 
-- **Process Execution**: Uses `tokio::process::Command` for async execution
-- **Commands Used**: `addzone`, `delzone`, `reload`, `status`, `freeze`, `thaw`, `notify`
-- **Authentication**: Uses shared `rndc.key` for BIND9 authentication
+- **Native Protocol**: Uses the `rndc` crate for direct RNDC protocol communication
+- **Commands Used**: `addzone`, `delzone`, `reload`, `zonestatus`, `status`, `freeze`, `thaw`, `notify`
+- **Authentication**: HMAC-based authentication with configurable algorithms
+- **Configuration**: Supports environment variables or automatic rndc.conf parsing
 
 ### Zone File Management
 
 - **Storage**: Zone files stored in `BIND_ZONE_DIR` (default: `/var/cache/bind`)
 - **Format**: Standard BIND9 zone file format
-- **Naming**: `db.{zone_name}` (e.g., `db.example.com`)
+- **Naming**: `{zone_name}.zone` (e.g., `example.com.zone`)
 - **Shared Access**: Both bindcar and BIND9 must have access to the same directory
 
 ## Deployment Patterns
@@ -144,12 +145,12 @@ sequenceDiagram
 
 ### Core Technologies
 
-- **Language**: Rust 1.89.0+
+- **Language**: Rust 1.75+
 - **Web Framework**: Axum (tokio-based async)
 - **HTTP Client**: Tower / Hyper
 - **JSON**: Serde
 - **Logging**: tracing + tracing-subscriber
-- **Process Execution**: tokio::process
+- **RNDC Client**: rndc crate (native protocol)
 
 ### External Dependencies
 

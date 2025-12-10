@@ -124,11 +124,10 @@ impl TokenReviewConfig {
     /// Format: "system:serviceaccount:namespace:name"
     pub(crate) fn extract_namespace(username: &str) -> Option<String> {
         let parts: Vec<&str> = username.split(':').collect();
-        if parts.len() == 4 && parts[0] == "system" && parts[1] == "serviceaccount" {
-            Some(parts[2].to_string())
-        } else {
-            None
+        if parts.len() != 4 || parts[0] != "system" || parts[1] != "serviceaccount" {
+            return None;
         }
+        Some(parts[2].to_string())
     }
 }
 
@@ -190,23 +189,21 @@ pub async fn authenticate(
 
     // Validate token with Kubernetes TokenReview API if feature is enabled
     #[cfg(feature = "k8s-token-review")]
-    {
-        if let Err(e) = validate_token_with_k8s(token).await {
-            warn!("Token validation failed: {}", e);
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(AuthError {
-                    error: format!("Token validation failed: {}", e),
-                }),
-            ));
-        }
-        debug!("Token validated with Kubernetes TokenReview API");
+    if let Err(e) = validate_token_with_k8s(token).await {
+        warn!("Token validation failed: {}", e);
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(AuthError {
+                error: format!("Token validation failed: {}", e),
+            }),
+        ));
     }
 
+    #[cfg(feature = "k8s-token-review")]
+    debug!("Token validated with Kubernetes TokenReview API");
+
     #[cfg(not(feature = "k8s-token-review"))]
-    {
-        debug!("Token validation: basic mode (presence check only)");
-    }
+    debug!("Token validation: basic mode (presence check only)");
 
     Ok(next.run(request).await)
 }
@@ -242,10 +239,10 @@ pub(crate) async fn validate_token_with_k8s(token: &str) -> Result<(), String> {
     let token_reviews: Api<TokenReview> = Api::all(client);
 
     // Build TokenReview request with audience validation
-    let audiences = if config.audiences.is_empty() {
-        None
-    } else {
+    let audiences = if !config.audiences.is_empty() {
         Some(config.audiences.clone())
+    } else {
+        None
     };
 
     let token_review = TokenReview {
@@ -267,44 +264,42 @@ pub(crate) async fn validate_token_with_k8s(token: &str) -> Result<(), String> {
         })?;
 
     // Check if token is authenticated
-    if let Some(status) = result.status {
-        if let Some(true) = status.authenticated {
-            debug!("Token authenticated successfully");
+    let status = result.status.ok_or_else(|| "TokenReview status not available".to_string())?;
 
-            // Validate user information and authorization
-            if let Some(user) = status.user {
-                let username = user.username.as_deref().unwrap_or("");
-                debug!("Authenticated user: {}", username);
-
-                // Validate namespace restriction
-                if let Some(namespace) = TokenReviewConfig::extract_namespace(username) {
-                    if !config.is_namespace_allowed(&namespace) {
-                        warn!("ServiceAccount from unauthorized namespace: {} (from {})", namespace, username);
-                        return Err(format!("ServiceAccount from unauthorized namespace: {}", namespace));
-                    }
-                    debug!("Namespace {} is allowed", namespace);
-                }
-
-                // Validate service account allowlist
-                if !config.is_service_account_allowed(username) {
-                    warn!("ServiceAccount not in allowlist: {}", username);
-                    return Err(format!("ServiceAccount not authorized: {}", username));
-                }
-                debug!("ServiceAccount {} is allowed", username);
-            } else {
-                warn!("TokenReview succeeded but no user information returned");
-                return Err("No user information in TokenReview response".to_string());
-            }
-
-            Ok(())
-        } else {
-            let error_msg = status
-                .error
-                .unwrap_or_else(|| "Token not authenticated".to_string());
-            warn!("Token authentication failed: {}", error_msg);
-            Err(error_msg)
-        }
-    } else {
-        Err("TokenReview status not available".to_string())
+    if status.authenticated != Some(true) {
+        let error_msg = status
+            .error
+            .unwrap_or_else(|| "Token not authenticated".to_string());
+        warn!("Token authentication failed: {}", error_msg);
+        return Err(error_msg);
     }
+
+    debug!("Token authenticated successfully");
+
+    // Validate user information and authorization
+    let user = status.user.ok_or_else(|| {
+        warn!("TokenReview succeeded but no user information returned");
+        "No user information in TokenReview response".to_string()
+    })?;
+
+    let username = user.username.as_deref().unwrap_or("");
+    debug!("Authenticated user: {}", username);
+
+    // Validate namespace restriction
+    if let Some(namespace) = TokenReviewConfig::extract_namespace(username) {
+        if !config.is_namespace_allowed(&namespace) {
+            warn!("ServiceAccount from unauthorized namespace: {} (from {})", namespace, username);
+            return Err(format!("ServiceAccount from unauthorized namespace: {}", namespace));
+        }
+        debug!("Namespace {} is allowed", namespace);
+    }
+
+    // Validate service account allowlist
+    if !config.is_service_account_allowed(username) {
+        warn!("ServiceAccount not in allowlist: {}", username);
+        return Err(format!("ServiceAccount not authorized: {}", username));
+    }
+
+    debug!("ServiceAccount {} is allowed", username);
+    Ok(())
 }
