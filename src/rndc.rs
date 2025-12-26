@@ -178,6 +178,15 @@ impl RndcExecutor {
         let command = format!("notify {}", zone_name);
         self.execute(&command).await
     }
+
+    /// Force a zone retransfer from primary
+    ///
+    /// This command is used on secondary zones to discard the current zone data
+    /// and initiate a fresh transfer from the primary server.
+    pub async fn retransfer(&self, zone_name: &str) -> Result<String> {
+        let command = format!("retransfer {}", zone_name);
+        self.execute(&command).await
+    }
 }
 
 impl Clone for RndcExecutor {

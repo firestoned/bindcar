@@ -1,5 +1,14 @@
 # Project Guidelines
 
+## Rust Development Environment
+
+**CRITICAL:** Before executing any `cargo` or Rust-related commands, always run:
+```bash
+source ~/.zshrc
+```
+
+This ensures the Rust toolchain is properly loaded in the shell environment.
+
 ## Service Mesh
 
 When referencing service mesh in documentation or code, always use **Linkerd** as the example implementation.

@@ -4,7 +4,7 @@
 # Makefile for bindcar
 
 # Configuration
-K8S_OPENAPI_ENABLED_VERSION ?= "1.30"
+K8S_OPENAPI_ENABLED_VERSION ?= 1.31
 IMAGE_NAME ?= bindcar
 IMAGE_TAG ?= latest
 REGISTRY ?= ghcr.io/firestoned
@@ -18,11 +18,11 @@ help: ## Show this help
 
 .PHONY: build
 build: ## Build the binary in release mode
-	cargo build --release
+	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo build --release
 
 .PHONY: test
 test: ## Run tests
-	cargo test
+	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo test
 
 .PHONY: fmt
 fmt: ## Format code
@@ -30,21 +30,37 @@ fmt: ## Format code
 
 .PHONY: clippy
 clippy: ## Run clippy
-	cargo clippy -- -D warnings
+	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo clippy -- -D warnings
 
 .PHONY: check
 check: fmt clippy test ## Run all checks
 
+#
+# Docker targets
+#
+
 .PHONY: docker-build
-docker-build: ## Build Docker image
-	docker build -t $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG) .
+docker-build: ## Build Docker image (uses cargo-chef strategy)
+	./scripts/build-docker-fast.sh chef
+
+.PHONY: docker-build-local
+docker-build-local: ## Build Docker image locally (fastest: ~10s)
+	./scripts/build-docker-fast.sh local
+
+.PHONY: docker-build-chainguard
+docker-build-chainguard: ## Build Chainguard production image (requires binaries/)
+	./scripts/build-docker-fast.sh chainguard
+
+.PHONY: docker-build-distroless
+docker-build-distroless: ## Build Distroless production image (requires binaries/)
+	./scripts/build-docker-fast.sh distroless
 
 .PHONY: docker-push
 docker-push: ## Push Docker image to registry
-	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 	docker push $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 
-docker-push-kind: docker-build ## Push Docker image to local kind
+.PHONY: docker-push-kind
+docker-push-kind: docker-build-local ## Push Docker image to local kind
 	kind load docker-image $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG) --name $(KIND_CLUSTER)
 
 .PHONY: docker-buildx
@@ -54,7 +70,7 @@ docker-buildx: ## Build multi-arch Docker image
 .PHONY: run
 run: ## Run the API server locally
 	@mkdir -p .tmp/zones
-	RUST_LOG=debug BIND_ZONE_DIR=.tmp/zones cargo run
+	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) RUST_LOG=debug BIND_ZONE_DIR=.tmp/zones cargo run
 
 .PHONY: clean
 clean: ## Clean build artifacts
@@ -68,9 +84,9 @@ docs: ## Build all documentation (mdBook + rustdoc + OpenAPI)
 	@echo "Building all documentation..."
 	@command -v mdbook >/dev/null 2>&1 || { echo "Error: mdbook not found. Install with: cargo install mdbook"; exit 1; }
 	@echo "Building rustdoc API documentation..."
-	@cargo doc --no-deps
-	@echo "Install mermaid assets and build mdBook documentation..."
-	@cd docs && mdbook-mermaid install && mdbook build
+	@K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo doc --no-deps
+	@echo "Build mdBook documentation..."
+	@cd docs && mdbook build
 	@echo "Copying rustdoc into documentation..."
 	@mkdir -p docs/target/rustdoc
 	@cp -r target/doc/* docs/target/rustdoc/

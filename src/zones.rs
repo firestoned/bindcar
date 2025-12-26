@@ -661,6 +661,41 @@ pub async fn notify_zone(
     }))
 }
 
+/// Force a zone retransfer from primary
+#[utoipa::path(
+    post,
+    path = "/api/v1/zones/{name}/retransfer",
+    params(
+        ("name" = String, Path, description = "Zone name to retransfer")
+    ),
+    responses(
+        (status = 200, description = "Zone retransfer initiated", body = ZoneResponse),
+        (status = 502, description = "RNDC command failed")
+    ),
+    tag = "zones"
+)]
+pub async fn retransfer_zone(
+    State(state): State<AppState>,
+    Path(zone_name): Path<String>,
+) -> Result<Json<ZoneResponse>, ApiError> {
+    info!("Retransferring zone: {}", zone_name);
+
+    let output = state.rndc.retransfer(&zone_name).await.map_err(|e| {
+        error!("RNDC retransfer failed for {}: {}", zone_name, e);
+        metrics::record_zone_operation("retransfer", false);
+        ApiError::RndcError(format!("Failed to retransfer zone: {}", e))
+    })?;
+
+    info!("Zone {} retransfer initiated successfully", zone_name);
+    metrics::record_zone_operation("retransfer", true);
+
+    Ok(Json(ZoneResponse {
+        success: true,
+        message: format!("Retransfer initiated for zone {}", zone_name),
+        details: Some(output),
+    }))
+}
+
 /// Get server status
 #[utoipa::path(
     get,

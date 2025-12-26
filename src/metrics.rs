@@ -82,6 +82,16 @@ lazy_static! {
         &["version"]
     )
     .expect("Failed to create APP_INFO metric");
+
+    /// Rate limit counter by result
+    pub static ref RATE_LIMIT_REQUESTS_TOTAL: CounterVec = register_counter_vec!(
+        opts!(
+            "bindcar_rate_limit_requests_total",
+            "Total number of rate limit checks"
+        ),
+        &["result"]
+    )
+    .expect("Failed to create RATE_LIMIT_REQUESTS_TOTAL metric");
 }
 
 /// Initialize metrics with application info
@@ -132,4 +142,12 @@ pub fn record_rndc_command(command: &str, success: bool, duration: f64) {
 /// Update the total number of managed zones
 pub fn update_zones_count(count: i64) {
     ZONES_MANAGED_TOTAL.set(count as f64);
+}
+
+/// Record a rate limit check
+pub fn record_rate_limit(allowed: bool) {
+    let result = if allowed { "allowed" } else { "rejected" };
+    RATE_LIMIT_REQUESTS_TOTAL
+        .with_label_values(&[result])
+        .inc();
 }

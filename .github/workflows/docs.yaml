@@ -1,9 +1,21 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: MIT
+
 name: Documentation
 
 on:
   push:
     branches:
       - main
+    paths:
+      - 'docs/**'
+      - 'api/**'
+      - '.github/workflows/docs.yaml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'api/**'
+      - '.github/workflows/docs.yaml'
   workflow_dispatch:
 
 permissions:
@@ -19,7 +31,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  K8S_OPENAPI_ENABLED_VERSION: "1.30"
+  K8S_OPENAPI_ENABLED_VERSION: "1.31"
 
 jobs:
   build:
@@ -29,13 +41,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust build environment
+        uses: firestoned/github-actions/rust/setup-rust-build@v1.3.2
         with:
-          toolchain: stable
-
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
+          target: x86_64-unknown-linux-gnu
 
       - name: Install mdBook and preprocessors
         run: |

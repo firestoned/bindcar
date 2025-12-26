@@ -1,6 +1,33 @@
-target/
-Cargo.lock
+# Rust build artifacts
+target/debug/
+target/doc/
+target/tmp/
+target/.rustc_info.json
+
+# Git
 .git/
 .gitignore
-README.md
+.gitattributes
+
+# Documentation
 *.md
+!README.md
+docs/
+
+# CI/CD
+.github/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker (when building from root)
+docker/
+!docker/Dockerfile*
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# GitHub
+.github
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Docker
+Dockerfile*
+.dockerignore
+
+# Documentation
+docs/
+*.md
+LICENSE
+
+# CI/CD
+.gitlab-ci.yml
+.travis.yml
+
+# OS
+.DS_Store
+Thumbs.db

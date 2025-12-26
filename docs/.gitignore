@@ -3,3 +3,10 @@ target/
 
 # Rust documentation
 rustdoc/
+
+# Mermaid temporary files (if any are generated)
+**/.mermaid-*
+**/mermaid-diagram-*.svg
+
+# Note: We DO want to commit mermaid.min.js and mermaid-init.js
+# These are essential for rendering diagrams

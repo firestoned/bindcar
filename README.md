@@ -15,6 +15,7 @@ bindcar runs as a sidecar container alongside BIND9, providing a REST interface 
 ## Features
 
 - Zone management via REST API (create, delete, reload, status)
+- IP-based rate limiting with configurable thresholds (GCRA algorithm)
 - Kubernetes ServiceAccount token authentication with optional TokenReview validation
 - Fine-grained access control (audience validation, namespace/SA allowlists)
 - Health and readiness endpoints
@@ -71,6 +72,10 @@ Environment variables:
 - `RNDC_SECRET` - Base64-encoded RNDC secret key (required if not using rndc.conf)
 - `RUST_LOG` - Log level (default: `info`)
 - `DISABLE_AUTH` - Disable authentication (default: `false`)
+- `RATE_LIMIT_ENABLED` - Enable rate limiting (default: `true`)
+- `RATE_LIMIT_REQUESTS` - Max requests per period (default: `100`)
+- `RATE_LIMIT_PERIOD_SECS` - Rate limit period in seconds (default: `60`)
+- `RATE_LIMIT_BURST` - Burst size for rate limiting (default: `10`)
 
 ### RNDC Configuration
 

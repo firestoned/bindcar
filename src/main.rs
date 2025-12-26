@@ -20,6 +20,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use std::net::SocketAddr;
 use serde::Serialize;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
@@ -31,10 +32,12 @@ use utoipa_swagger_ui::SwaggerUi;
 use bindcar::{
     auth::authenticate,
     metrics, middleware,
+    rate_limit::RateLimitConfig,
     rndc::RndcExecutor,
     types::{AppState, ErrorResponse},
     zones,
 };
+use tower_governor::{governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer};
 
 /// OpenAPI documentation structure
 #[derive(OpenApi)]
@@ -47,6 +50,7 @@ use bindcar::{
         zones::freeze_zone,
         zones::thaw_zone,
         zones::notify_zone,
+        zones::retransfer_zone,
         zones::server_status,
         zones::list_zones,
         zones::get_zone,
@@ -195,6 +199,24 @@ async fn main() -> anyhow::Result<()> {
         info!("authentication is enabled");
     }
 
+    // load rate limiting configuration
+    let rate_limit_config = RateLimitConfig::from_env();
+    if let Err(e) = rate_limit_config.validate() {
+        error!("invalid rate limit configuration: {}", e);
+        return Err(anyhow::anyhow!("invalid rate limit configuration: {}", e));
+    }
+
+    if rate_limit_config.enabled {
+        info!(
+            "rate limiting enabled: {} requests per {} seconds (burst: {})",
+            rate_limit_config.requests_per_period,
+            rate_limit_config.period_secs,
+            rate_limit_config.burst_size
+        );
+    } else {
+        warn!("⚠️  rate limiting is disabled");
+    }
+
     // get rndc configuration from environment or fallback to rndc.conf
     let (rndc_server, rndc_algorithm, rndc_secret) = if let Ok(secret) = std::env::var("RNDC_SECRET") {
         // environment variables provided
@@ -270,12 +292,34 @@ async fn main() -> anyhow::Result<()> {
         .route("/zones/{name}/freeze", post(zones::freeze_zone))
         .route("/zones/{name}/thaw", post(zones::thaw_zone))
         .route("/zones/{name}/notify", post(zones::notify_zone))
+        .route("/zones/{name}/retransfer", post(zones::retransfer_zone))
         .route("/server/status", get(zones::server_status))
         .with_state(state.clone());
 
     // conditionally apply authentication middleware
     let api_routes = if !disable_auth {
         api_routes.layer(axum_middleware::from_fn(authenticate))
+    } else {
+        api_routes
+    };
+
+    // conditionally apply rate limiting layer
+    let api_routes = if rate_limit_config.enabled {
+        // Calculate requests per second from period
+        let per_second = rate_limit_config.requests_per_period / rate_limit_config.period_secs.max(1) as u32;
+        let per_second = per_second.max(1); // Ensure at least 1 request per second
+
+        // Build governor configuration
+        let governor_conf = Arc::new(
+            GovernorConfigBuilder::default()
+                .key_extractor(SmartIpKeyExtractor)
+                .per_second(per_second.into())
+                .burst_size(rate_limit_config.burst_size)
+                .finish()
+                .expect("Failed to create governor config"),
+        );
+
+        api_routes.layer(GovernorLayer::new(governor_conf))
     } else {
         api_routes
     };
@@ -299,9 +343,12 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-    axum::serve(listener, app.into_make_service())
-        .await
-        .context("server error")?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .context("server error")?;
 
     Ok(())
 }

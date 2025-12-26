@@ -228,21 +228,30 @@ Complete HTTP status code reference for all bindcar API endpoints.
 ### 429 Too Many Requests
 
 **When Returned**:
-- Rate limit exceeded (if rate limiting is configured)
+- Client IP address has exceeded the configured rate limit
+- Default: 100 requests per 60 seconds with burst of 10
 
-**Response Body**: JSON error
-
-**Headers**:
-- `Retry-After: 60` - Seconds to wait before retrying
+**Response Body**: Plain text message
 
 **Example**:
-```json
-{
-  "error": "Rate limit exceeded",
-  "limit": "100 requests per minute",
-  "retry_after": 60
-}
 ```
+Rate limit exceeded. Please try again later.
+```
+
+**Configuration**:
+Rate limiting can be configured via environment variables:
+- `RATE_LIMIT_ENABLED` - Enable/disable (default: `true`)
+- `RATE_LIMIT_REQUESTS` - Max requests per period (default: `100`)
+- `RATE_LIMIT_PERIOD_SECS` - Period in seconds (default: `60`)
+- `RATE_LIMIT_BURST` - Burst size (default: `10`)
+
+**Client Detection**:
+Client IP is extracted from (in order):
+1. `X-Forwarded-For` header (first IP)
+2. `X-Real-IP` header
+3. Peer socket address
+
+**Note**: Rate limiting uses the GCRA (Generic Cell Rate Algorithm) for sophisticated, per-IP address rate limiting.
 
 ## Server Error Codes
 
@@ -371,11 +380,11 @@ graph TD
 
 | Endpoint | Success | Error Codes |
 |----------|---------|-------------|
-| /api/v1/zones | 201 Created | 400, 401, 409, 413, 415, 422, 502, 503 |
-| /api/v1/zones/{name}/reload | 200 OK | 401, 404, 502, 503 |
-| /api/v1/zones/{name}/freeze | 200 OK | 401, 404, 502, 503 |
-| /api/v1/zones/{name}/thaw | 200 OK | 401, 404, 502, 503 |
-| /api/v1/zones/{name}/notify | 200 OK | 401, 404, 502, 503 |
+| /api/v1/zones | 201 Created | 400, 401, 409, 413, 415, 422, 429, 502, 503 |
+| /api/v1/zones/{name}/reload | 200 OK | 401, 404, 429, 502, 503 |
+| /api/v1/zones/{name}/freeze | 200 OK | 401, 404, 429, 502, 503 |
+| /api/v1/zones/{name}/thaw | 200 OK | 401, 404, 429, 502, 503 |
+| /api/v1/zones/{name}/notify | 200 OK | 401, 404, 429, 502, 503 |
 
 ### GET Endpoints
 
@@ -383,16 +392,16 @@ graph TD
 |----------|---------|-------------|
 | /api/v1/health | 200 OK | 503 Service Unavailable |
 | /api/v1/ready | 200 OK | 503 Service Unavailable |
-| /api/v1/zones | 200 OK | 401, 502, 503 |
-| /api/v1/zones/{name} | 200 OK | 401, 404, 502, 503 |
-| /api/v1/zones/{name}/status | 200 OK | 401, 404, 502, 503 |
-| /api/v1/server/status | 200 OK | 401, 502, 503 |
+| /api/v1/zones | 200 OK | 401, 429, 502, 503 |
+| /api/v1/zones/{name} | 200 OK | 401, 404, 429, 502, 503 |
+| /api/v1/zones/{name}/status | 200 OK | 401, 404, 429, 502, 503 |
+| /api/v1/server/status | 200 OK | 401, 429, 502, 503 |
 
 ### DELETE Endpoints
 
 | Endpoint | Success | Error Codes |
 |----------|---------|-------------|
-| /api/v1/zones/{name} | 204 No Content | 401, 404, 502, 503 |
+| /api/v1/zones/{name} | 204 No Content | 401, 404, 429, 502, 503 |
 
 ## Best Practices
 
@@ -427,6 +436,11 @@ case $status in
     echo "Zone already exists"
     exit 1
     ;;
+  429)
+    echo "Rate limit exceeded - backing off"
+    sleep 60
+    exit 1
+    ;;
   502)
     echo "RNDC error: $body"
     exit 1
@@ -458,6 +472,10 @@ def create_zone(zone_data, max_retries=3):
         
         if response.status_code == 201:
             return response.json()
+        elif response.status_code == 429:
+            # Rate limited - back off exponentially
+            time.sleep(60 * (2 ** attempt))
+            continue
         elif response.status_code in [502, 503]:
             # Retry on server errors
             time.sleep(2 ** attempt)
