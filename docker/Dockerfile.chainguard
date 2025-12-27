@@ -1,0 +1,63 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: MIT
+
+# CHAINGUARD PRODUCTION DOCKERFILE - CVE-Free Base Images
+# This Dockerfile uses Chainguard's hardened, zero-CVE base images designed for
+# regulated environments (SOX, NIST 800-53, PCI-DSS, FedRAMP).
+#
+# Build time: ~30 seconds (just copies pre-built binaries)
+#
+# Base image: Chainguard glibc-dynamic (CVE-free, daily rebuilds, SBOMs included)
+#
+# Benefits:
+# - Zero known CVEs (Chainguard rebuilds daily with security patches)
+# - FIPS-validated images available (cgr.dev/chainguard/glibc-dynamic:latest-fips)
+# - Included SBOMs for supply chain security
+# - Designed for compliance (SOX, FedRAMP, PCI-DSS)
+# - ~10-15MB image size
+# - Non-root by default
+#
+# Usage in CI/CD:
+#   1. Build binaries for both architectures using cargo (GNU targets)
+#   2. Copy binaries to ./binaries/amd64/ and ./binaries/arm64/
+#   3. Build multi-arch image:
+#      docker buildx build --platform linux/amd64,linux/arm64 \
+#        -f docker/Dockerfile.chainguard \
+#        -t registry/image:tag-chainguard .
+#
+# The TARGETARCH build argument is automatically set by Docker BuildKit
+# to match the target platform (amd64 or arm64).
+
+# Runtime stage - Chainguard glibc-dynamic (zero CVEs)
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:ce2066b540536a53708fbb8e83c76add5fc1710cb4a923ac7cb466f91b2d911e
+
+ARG TARGETARCH
+ARG VERSION=0.1.0
+
+LABEL org.opencontainers.image.source="https://github.com/firestoned/bindcar"
+LABEL org.opencontainers.image.description="BIND9 RNDC API Server (Chainguard - Zero CVEs)"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.base.name="cgr.dev/chainguard/glibc-dynamic:latest"
+
+# Copy the pre-built binary for the target architecture
+# TARGETARCH is automatically set by BuildKit (amd64 or arm64)
+# Map docker architectures to our binary paths:
+# - amd64 → binaries/amd64/bindcar (x86_64-unknown-linux-gnu)
+# - arm64 → binaries/arm64/bindcar (aarch64-unknown-linux-gnu)
+COPY --chmod=755 binaries/${TARGETARCH}/bindcar /usr/local/bin/bindcar
+
+# Chainguard images run as nonroot user (UID 65532) by default
+USER 65532:65532
+
+# Expose API port
+EXPOSE 8080
+
+# Set default environment variables
+ENV BIND_ZONE_DIR=/var/cache/bind
+ENV API_PORT=8080
+ENV RUST_LOG=info
+ENV DISABLE_AUTH=false
+
+# Start the API server
+ENTRYPOINT ["/usr/local/bin/bindcar"]

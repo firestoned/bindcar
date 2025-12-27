@@ -1,0 +1,54 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: MIT
+
+# ULTRA-FAST LOCAL DEVELOPMENT DOCKERFILE
+# This assumes you've already built the binary locally with `cargo build --release`
+# Build time: ~5 seconds (just copies the pre-built binary)
+#
+# Usage:
+#   1. Build locally: cargo build --release
+#   2. Build image: docker build -f docker/Dockerfile.local -t bindcar:latest .
+#
+# IMPORTANT: This is for local development only. Do NOT use in CI/CD.
+
+FROM alpine:3.20
+
+LABEL org.opencontainers.image.source="https://github.com/firestoned/bindcar"
+LABEL org.opencontainers.image.description="BIND9 RNDC API Server (Local Dev Build)"
+LABEL org.opencontainers.image.licenses="MIT"
+
+# Install required libraries for glibc compatibility
+RUN apk add --no-cache \
+    ca-certificates \
+    curl \
+    gcompat
+
+# Create bindcar user and directories
+RUN addgroup -S bindcar && adduser -S -G bindcar bindcar && \
+    mkdir -p /var/cache/bind && \
+    chown -R bindcar:bindcar /var/cache/bind
+
+# Copy the pre-built binary from your local target directory
+COPY target/release/bindcar /usr/local/bin/
+
+# Set permissions
+RUN chmod +x /usr/local/bin/bindcar
+
+# Run as bindcar user
+USER bindcar
+
+# Expose API port
+EXPOSE 8080
+
+# Set default environment variables
+ENV BIND_ZONE_DIR=/var/cache/bind
+ENV API_PORT=8080
+ENV RUST_LOG=info
+ENV DISABLE_AUTH=false
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/api/v1/health || exit 1
+
+# Start the API server
+ENTRYPOINT ["/usr/local/bin/bindcar"]

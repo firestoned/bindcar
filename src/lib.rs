@@ -137,6 +137,7 @@
 pub mod auth;
 pub mod metrics;
 pub mod middleware;
+pub mod rate_limit;
 pub mod rndc;
 pub mod types;
 pub mod zones;

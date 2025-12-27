@@ -170,6 +170,120 @@ Format: `system:serviceaccount:<namespace>:<name>`
 
 Empty value allows all ServiceAccounts (default). When set, only specified ServiceAccounts are accepted.
 
+## Rate Limiting Variables
+
+### RATE_LIMIT_ENABLED
+
+- **Type**: Boolean
+- **Default**: `true`
+- **Required**: No
+- **Description**: Enable or disable rate limiting
+
+```bash
+RATE_LIMIT_ENABLED=true
+```
+
+Valid values:
+- `true` - Enable rate limiting (recommended)
+- `false` - Disable rate limiting (USE ONLY IN TRUSTED ENVIRONMENTS)
+
+Rate limiting helps protect the API from abuse and ensures fair resource allocation across clients.
+
+### RATE_LIMIT_REQUESTS
+
+- **Type**: Integer
+- **Default**: `100`
+- **Required**: No
+- **Description**: Maximum number of requests allowed per time period
+
+```bash
+RATE_LIMIT_REQUESTS=100
+```
+
+This value represents the total number of requests a client can make within the time period defined by `RATE_LIMIT_PERIOD_SECS`.
+
+Valid range: 1-4,294,967,295 (must be greater than 0)
+
+### RATE_LIMIT_PERIOD_SECS
+
+- **Type**: Integer
+- **Default**: `60`
+- **Required**: No
+- **Description**: Time period in seconds for rate limit calculation
+
+```bash
+RATE_LIMIT_PERIOD_SECS=60
+```
+
+Combined with `RATE_LIMIT_REQUESTS`, this defines the rate limit. For example:
+- `RATE_LIMIT_REQUESTS=100` + `RATE_LIMIT_PERIOD_SECS=60` = 100 requests per minute
+- `RATE_LIMIT_REQUESTS=1000` + `RATE_LIMIT_PERIOD_SECS=3600` = 1000 requests per hour
+
+Valid range: 1-4,294,967,295 (must be greater than 0)
+
+### RATE_LIMIT_BURST
+
+- **Type**: Integer
+- **Default**: `10`
+- **Required**: No
+- **Description**: Maximum burst size for rate limiting
+
+```bash
+RATE_LIMIT_BURST=10
+```
+
+The burst size allows clients to temporarily exceed the steady-state rate limit. This accommodates legitimate traffic spikes without penalizing normal usage patterns.
+
+For example, with a burst of 10, a client can make 10 requests immediately, then must wait according to the rate limit before making more requests.
+
+Valid range: 1-4,294,967,295 (must be greater than 0)
+
+**How Rate Limiting Works**:
+
+bindcar uses the Generic Cell Rate Algorithm (GCRA) via the `tower-governor` crate, which provides sophisticated rate limiting based on client IP addresses.
+
+**Client IP Detection** (in order of precedence):
+1. `X-Forwarded-For` header (first IP)
+2. `X-Real-IP` header
+3. Peer socket address
+
+This ensures proper rate limiting when bindcar is deployed behind reverse proxies like Linkerd.
+
+**Rate Limit Responses**:
+
+When a client exceeds the rate limit:
+- HTTP Status: `429 Too Many Requests`
+- Response Body: `Rate limit exceeded. Please try again later.`
+- Metrics: Tracked via `bindcar_rate_limit_requests_total{result="rejected"}`
+
+**Example Configurations**:
+
+Permissive (development):
+```bash
+RATE_LIMIT_REQUESTS=1000
+RATE_LIMIT_PERIOD_SECS=60
+RATE_LIMIT_BURST=50
+```
+
+Standard (production):
+```bash
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_PERIOD_SECS=60
+RATE_LIMIT_BURST=10
+```
+
+Strict (high-security):
+```bash
+RATE_LIMIT_REQUESTS=30
+RATE_LIMIT_PERIOD_SECS=60
+RATE_LIMIT_BURST=5
+```
+
+Disabled (trusted environment only):
+```bash
+RATE_LIMIT_ENABLED=false
+```
+
 ## Environment Variable Precedence
 
 1. Explicit environment variables (highest priority)

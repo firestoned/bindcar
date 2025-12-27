@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: MIT
+
 name: Release
 
 on:
@@ -6,28 +9,67 @@ on:
       - published
 
 permissions:
+  contents: write
   packages: write
+  security-events: write  # For uploading SARIF results
+  id-token: write  # For keyless signing with Cosign
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  K8S_OPENAPI_ENABLED_VERSION: "1.30"
+  K8S_OPENAPI_ENABLED_VERSION: "1.31"
 
 jobs:
+  license-check:
+    name: Verify SPDX License Headers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check license headers
+        uses: firestoned/github-actions/security/license-check@v1.3.2
+        with:
+          copyright-holder: "Erick Bourgeois, firestoned"
+          license-id: "MIT"
+
+  verify-commits:
+    name: Verify Signed Commits
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for verification
+
+      - name: Verify release tag commit is signed
+        uses: firestoned/github-actions/security/verify-signed-commits@v1.3.2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          verify-mode: release
+
   extract-version:
     name: Extract Version from Tag
     runs-on: ubuntu-latest
+    needs: [license-check, verify-commits]
     outputs:
       version: ${{ steps.version.outputs.version }}
-      tag_name: ${{ steps.version.outputs.tag_name }}
+      tag_name: ${{ steps.version.outputs.tag-name }}
+      short-sha: ${{ steps.version.outputs.short-sha }}
     steps:
-      - name: Extract version from tag
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version
         id: version
         run: |
           TAG_NAME="${{ github.event.release.tag_name }}"
           VERSION="${TAG_NAME#v}"
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "tag-name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "short-sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "Extracted version: ${VERSION} from tag: ${TAG_NAME}"
 
   build:
@@ -58,64 +100,21 @@ jobs:
           echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
           grep '^version = ' Cargo.toml
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust build environment
+        uses: firestoned/github-actions/rust/setup-rust-build@v1.3.2
         with:
-          targets: ${{ matrix.platform.target }}
+          target: ${{ matrix.platform.target }}
+          cache-key: release-${{ needs.extract-version.outputs.version }}
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+      - name: Build binary
+        uses: firestoned/github-actions/rust/build-binary@v1.3.2
         with:
-          key: ${{ matrix.platform.target }}
-          cache-on-failure: true
-
-      - name: Cache cross binary
-        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
-        id: cache-cross
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/cross
-          key: ${{ runner.os }}-cross-v0.2.5
-          restore-keys: |
-            ${{ runner.os }}-cross-
-
-      - name: Install cross for ARM64 builds
-        if: matrix.platform.target == 'aarch64-unknown-linux-gnu' && steps.cache-cross.outputs.cache-hit != 'true'
-        run: |
-          cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5
-          cross --version
-
-      - name: Verify Docker for cross (ARM64)
-        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          docker --version
-          docker info
-
-      - name: Build (release) - x86_64
-        if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
-        run: cargo build --release --target ${{ matrix.platform.target }} --verbose
-
-      - name: Build (release) - ARM64 with cross
-        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
-        run: cross build --release --target ${{ matrix.platform.target }} --verbose
-
-      - name: Cache cargo-cyclonedx
-        id: cache-cyclonedx
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/cargo-cyclonedx
-          key: ${{ runner.os }}-cargo-cyclonedx-0.5.7
-          restore-keys: |
-            ${{ runner.os }}-cargo-cyclonedx-
-
-      - name: Install cargo-cyclonedx
-        if: steps.cache-cyclonedx.outputs.cache-hit != 'true'
-        run: cargo install cargo-cyclonedx --version 0.5.7
+          target: ${{ matrix.platform.target }}
 
       - name: Generate SBOM
-        run: |
-          cargo cyclonedx --format json --target ${{ matrix.platform.target }} --override-filename sbom
-          mv sbom.json target/${{ matrix.platform.target }}/release/sbom.json
+        uses: firestoned/github-actions/rust/generate-sbom@v1.3.2
+        with:
+          target: ${{ matrix.platform.target }}
 
       - name: Upload binary and SBOM artifacts
         uses: actions/upload-artifact@v4
@@ -123,91 +122,39 @@ jobs:
           name: ${{ matrix.platform.artifact_name }}
           path: |
             target/${{ matrix.platform.target }}/release/${{ matrix.platform.binary_name }}
-            target/${{ matrix.platform.target }}/release/sbom.json
-
-  package-crate:
-    name: Package Crate for crates.io
-    runs-on: ubuntu-latest
-    needs: extract-version
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Update Cargo.toml version
-        run: |
-          sed -i 's/^version = ".*"/version = "${{ needs.extract-version.outputs.version }}"/' Cargo.toml
-          echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
-          grep '^version = ' Cargo.toml
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Package crate
-        run: cargo package --verbose --allow-dirty
-
-      - name: Upload package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: crate-package
-          path: target/package/bindcar-*.crate
-
-  publish-crate:
-    name: Publish to crates.io
-    runs-on: ubuntu-latest
-    needs: [extract-version, package-crate]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Update Cargo.toml version
-        run: |
-          sed -i 's/^version = ".*"/version = "${{ needs.extract-version.outputs.version }}"/' Cargo.toml
-          echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
-          grep '^version = ' Cargo.toml
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Publish to crates.io
-        run: |
-          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --allow-dirty
+            *.cdx.*
 
   docker-release:
-    name: Build and Push Docker Image
+    name: Build and Push Docker Image - ${{ matrix.variant.name }}
     runs-on: ubuntu-latest
     needs: [extract-version, build]
     permissions:
       contents: write
       packages: write
+      id-token: write  # For keyless signing with Cosign
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - name: Chainguard
+            dockerfile: docker/Dockerfile.chainguard
+            suffix: ""
+            description: "BIND9 RNDC API Server - Chainguard Zero-CVE"
+          - name: Distroless
+            dockerfile: docker/Dockerfile
+            suffix: "-distroless"
+            description: "BIND9 RNDC API Server - Google Distroless"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Update Cargo.toml version
-        run: |
-          sed -i 's/^version = ".*"/version = "${{ needs.extract-version.outputs.version }}"/' Cargo.toml
-          echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
-          grep '^version = ' Cargo.toml
+      - name: Prepare Docker binaries
+        uses: ./.github/actions/prepare-docker-binaries
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+      - name: Setup Docker environment
+        uses: firestoned/github-actions/docker/setup-docker@v1.3.2
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
@@ -215,45 +162,137 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}},value=${{ needs.extract-version.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.extract-version.outputs.version }}
-            type=semver,pattern={{major}},value=${{ needs.extract-version.outputs.version }}
-            type=raw,value=latest
-            type=raw,value=${{ needs.extract-version.outputs.tag_name }}
+            type=semver,pattern={{version}}${{ matrix.variant.suffix }},value=${{ needs.extract-version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}}${{ matrix.variant.suffix }},value=${{ needs.extract-version.outputs.version }}
+            type=semver,pattern={{major}}${{ matrix.variant.suffix }},value=${{ needs.extract-version.outputs.version }}
+            type=raw,value=${{ needs.extract-version.outputs.tag_name }}${{ matrix.variant.suffix }}
+          flavor: |
+            latest=false
 
-      - name: Build and push Docker image
+      - name: Build and push Docker image (${{ matrix.variant.name }})
         id: docker_build
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ${{ matrix.variant.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            org.opencontainers.image.description=${{ matrix.variant.description }}
           build-args: |
             VERSION=${{ needs.extract-version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.variant.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant.name }}
           platforms: linux/amd64,linux/arm64
           sbom: true
           provenance: true
 
-      - name: Generate Docker SBOM
+      - name: Sign container image with Cosign
+        uses: firestoned/github-actions/security/cosign-sign@v1.3.2
+        with:
+          image-digest: ${{ steps.docker_build.outputs.digest }}
+          image-tags: ${{ needs.extract-version.outputs.tag_name }}${{ matrix.variant.suffix }}
+          registry: ghcr.io
+          repository: ${{ github.repository }}
+
+      - name: Generate Docker SBOM for ${{ matrix.variant.name }}
         uses: anchore/sbom-action@v0
         with:
-          image: ghcr.io/${{ github.repository }}:${{ needs.extract-version.outputs.tag_name }}
+          image: ghcr.io/${{ github.repository }}:${{ needs.extract-version.outputs.tag_name }}${{ matrix.variant.suffix }}
           format: cyclonedx-json
-          output-file: docker-sbom.json
+          output-file: docker-sbom-${{ matrix.variant.name }}.json
 
       - name: Upload Docker SBOM as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: docker-sbom
-          path: docker-sbom.json
+          name: docker-sbom-${{ matrix.variant.name }}
+          path: docker-sbom-${{ matrix.variant.name }}.json
+
+  sign-artifacts:
+    name: Sign Binary Artifacts
+    runs-on: ubuntu-latest
+    needs: [build, extract-version]
+    permissions:
+      id-token: write  # For keyless signing with Cosign
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Linux x86_64
+            artifact_name: bindcar-linux-amd64
+          - name: Linux ARM64
+            artifact_name: bindcar-linux-arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.platform.artifact_name }}
+          path: ./artifacts/${{ matrix.platform.artifact_name }}
+
+      - name: Create tarball for signing
+        run: |
+          cd artifacts/${{ matrix.platform.artifact_name }}
+          chmod +x bindcar
+          tar czf ${{ matrix.platform.artifact_name }}.tar.gz bindcar
+          ls -lh ${{ matrix.platform.artifact_name }}.tar.gz
+
+      - name: Sign binary tarball with Cosign
+        uses: firestoned/github-actions/security/cosign-sign@v1.3.2
+        with:
+          artifact-path: artifacts/${{ matrix.platform.artifact_name }}/${{ matrix.platform.artifact_name }}.tar.gz
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform.artifact_name }}-signed
+          path: |
+            artifacts/${{ matrix.platform.artifact_name }}/${{ matrix.platform.artifact_name }}.tar.gz
+            artifacts/${{ matrix.platform.artifact_name }}/${{ matrix.platform.artifact_name }}.tar.gz.bundle
+
+  generate-provenance-subjects:
+    name: Generate SLSA Provenance Subjects
+    runs-on: ubuntu-latest
+    needs: [sign-artifacts, extract-version]
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
+    steps:
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bindcar-linux-*-signed
+          path: ./artifacts
+          merge-multiple: true
+
+      - name: Generate hashes for SLSA provenance
+        id: hash
+        run: |
+          cd artifacts
+          # Generate SHA256 hashes for all signed tarballs
+          sha256sum *.tar.gz > checksums.txt
+          cat checksums.txt
+          echo "hashes=$(cat checksums.txt | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+  slsa-provenance:
+    name: Generate SLSA Provenance
+    needs: [generate-provenance-subjects, extract-version]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
+    with:
+      base64-subjects: "${{ needs.generate-provenance-subjects.outputs.hashes }}"
+      upload-assets: true
+      provenance-name: "${{ needs.extract-version.outputs.version }}.intoto.jsonl"
 
   upload-release-assets:
     name: Upload Release Assets
     runs-on: ubuntu-latest
-    needs: [build, docker-release]
+    needs: [build, docker-release, sign-artifacts, slsa-provenance]
     permissions:
       contents: write
     steps:
@@ -262,45 +301,89 @@ jobs:
         with:
           path: ./artifacts
 
-      - name: Create tarballs and checksums
+      - name: Organize release artifacts
         run: |
           cd artifacts
+          mkdir -p release sboms signatures provenance
 
-          # Process each platform binary
-          for dir in bindcar-*; do
-            platform="$dir"
-            echo "Processing $platform..."
-            cd "$platform"
+          # Copy signed tarballs and signature bundles
+          for dir in bindcar-linux-*-signed; do
+            if [ -d "$dir" ]; then
+              platform="${dir%-signed}"
+              echo "Processing signed artifacts for $platform..."
 
-            # Make binary executable and create tarball
-            if [ -f "bindcar" ]; then
-              chmod +x bindcar
-              tar czf "../${platform}.tar.gz" bindcar
-            fi
+              # Copy tarball
+              if compgen -G "$dir/*.tar.gz" > /dev/null; then
+                cp "$dir"/*.tar.gz release/
+              fi
 
-            cd ..
-          done
-
-          # Collect all SBOM files
-          mkdir -p sboms
-          for dir in bindcar-*; do
-            if [ -f "$dir/sbom.json" ]; then
-              cp "$dir/sbom.json" "sboms/${dir}-sbom.json"
+              # Copy signature bundle
+              if compgen -G "$dir/*.tar.gz.bundle" > /dev/null; then
+                cp "$dir"/*.tar.gz.bundle signatures/
+              fi
             fi
           done
 
-          # Copy Docker SBOM if it exists
-          if [ -f "docker-sbom/docker-sbom.json" ]; then
-            cp docker-sbom/docker-sbom.json sboms/
+          # Collect all SBOM files (using default cargo-cyclonedx naming)
+          for dir in bindcar-linux-amd64 bindcar-linux-arm64; do
+            if [ -d "$dir" ]; then
+              # Find any .cdx.json files (cargo-cyclonedx default naming)
+              if compgen -G "$dir/*.cdx.json" > /dev/null; then
+                cp "$dir"/*.cdx.json "sboms/${dir}-sbom.json"
+              fi
+            fi
+          done
+
+          # Copy Docker SBOMs for both variants
+          for variant in Chainguard Distroless; do
+            if [ -d "docker-sbom-${variant}" ] && [ -f "docker-sbom-${variant}/docker-sbom-${variant}.json" ]; then
+              cp "docker-sbom-${variant}/docker-sbom-${variant}.json" "sboms/docker-sbom-${variant}.json"
+            fi
+          done
+
+          # Copy SLSA provenance (generated by slsa-github-generator)
+          if compgen -G "*.intoto.jsonl" > /dev/null; then
+            # Find and copy the actual .intoto.jsonl file from within the directory
+            find . -name "*.intoto.jsonl" -type f -exec cp {} provenance/ \;
           fi
 
-          # Generate SHA256 checksums
-          sha256sum *.tar.gz sboms/*.json > checksums.sha256 2>/dev/null || true
+          # Generate SHA256 checksums for all release artifacts
+          cd release
+          sha256sum *.tar.gz > checksums.sha256
+          cd ../sboms
+          sha256sum *.json >> ../release/checksums.sha256
+          cd ../signatures
+          sha256sum *.bundle >> ../release/checksums.sha256
+          cd ../provenance
+          if compgen -G "*.intoto.jsonl" > /dev/null; then
+            sha256sum *.intoto.jsonl >> ../release/checksums.sha256
+          fi
+
+          echo "Release artifacts prepared:"
+          ls -lh ../release/
+          echo "Provenance files:"
+          ls -lh ../provenance/ || echo "No provenance files found"
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/*.tar.gz
+            artifacts/release/*.tar.gz
             artifacts/sboms/*.json
-            artifacts/checksums.sha256
+            artifacts/signatures/*.bundle
+            artifacts/provenance/*.intoto.jsonl
+            artifacts/release/checksums.sha256
+
+  security:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: extract-version
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run security scan
+        uses: firestoned/github-actions/rust/security-scan@v1.3.2
+        with:
+          cargo-audit-version: "0.22.0"
+          upload-artifact-name: cargo-audit-report-release
