@@ -236,8 +236,18 @@ jobs:
       - name: Create tarball for signing
         run: |
           cd artifacts/${{ matrix.platform.artifact_name }}
-          chmod +x bindcar
-          tar czf ${{ matrix.platform.artifact_name }}.tar.gz bindcar
+
+          # Find the binary (may be in nested directory)
+          BINARY=$(find . -type f -name "bindcar" | head -1)
+          if [ -z "$BINARY" ]; then
+            echo "ERROR: bindcar binary not found in artifacts/${{ matrix.platform.artifact_name }}"
+            find . -ls
+            exit 1
+          fi
+
+          echo "Found binary at: $BINARY"
+          chmod +x "$BINARY"
+          tar czf ${{ matrix.platform.artifact_name }}.tar.gz -C "$(dirname "$BINARY")" "$(basename "$BINARY")"
           ls -lh ${{ matrix.platform.artifact_name }}.tar.gz
 
       - name: Sign binary tarball with Cosign
