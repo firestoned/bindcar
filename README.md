@@ -1,12 +1,51 @@
 # bindcar
 
+## Project Status
+
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Crates.io](https://img.shields.io/crates/v/bindcar.svg)](https://crates.io/crates/bindcar)
+[![GitHub Release](https://img.shields.io/github/v/release/firestoned/bindcar)](https://github.com/firestoned/bindcar/releases/latest)
+[![GitHub commits since latest release](https://img.shields.io/github/commits-since/firestoned/bindcar/latest)](https://github.com/firestoned/bindcar/commits/main)
+[![Last Commit](https://img.shields.io/github/last-commit/firestoned/bindcar)](https://github.com/firestoned/bindcar/commits/main)
+
+## CI/CD Status
+
+[![Main Branch CI/CD](https://github.com/firestoned/bindcar/actions/workflows/main.yaml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/main.yaml)
+[![Pull Request Checks](https://github.com/firestoned/bindcar/actions/workflows/pr.yml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/pr.yml)
+[![Release Workflow](https://github.com/firestoned/bindcar/actions/workflows/release.yml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/release.yml)
+[![Documentation](https://github.com/firestoned/bindcar/actions/workflows/docs.yaml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/docs.yaml)
+
+## Code Quality
+
 [![codecov](https://codecov.io/gh/firestoned/bindcar/branch/main/graph/badge.svg)](https://codecov.io/gh/firestoned/bindcar)
-[![Build Status](https://github.com/firestoned/bindcar/workflows/CI/badge.svg)](https://github.com/firestoned/bindcar/actions)
-[![Minimum Rust Version](https://img.shields.io/badge/rustc-1.91+-blue.svg)](https://rust-lang.github.io/rfcs/2495-min-rust-version.html)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 
-A lightweight HTTP REST API server for managing BIND9 zones via rndc commands.
+## Technology & Compatibility
+
+[![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![BIND9](https://img.shields.io/badge/BIND9-DNS%20Server-blue)](https://www.isc.org/bind/)
+[![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](https://www.linux.org/)
+[![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Kubernetes](https://img.shields.io/badge/kubernetes-compatible-326CE5.svg?logo=kubernetes&logoColor=white)](https://kubernetes.io)
+
+## Security & Compliance
+
+[![SPDX](https://img.shields.io/badge/SPDX-License--Identifier-blue)](https://spdx.dev/)
+[![SBOM](https://img.shields.io/badge/SBOM-CycloneDX-orange)](https://cyclonedx.org/)
+[![Cosign Signed](https://img.shields.io/badge/releases-signed-brightgreen.svg)](https://github.com/firestoned/bindcar/releases)
+
+## Community & Support
+
+[![Issues](https://img.shields.io/github/issues/firestoned/bindcar)](https://github.com/firestoned/bindcar/issues)
+[![Pull Requests](https://img.shields.io/github/issues-pr/firestoned/bindcar)](https://github.com/firestoned/bindcar/pulls)
+[![Contributors](https://img.shields.io/github/contributors/firestoned/bindcar)](https://github.com/firestoned/bindcar/graphs/contributors)
+[![Stars](https://img.shields.io/github/stars/firestoned/bindcar?style=social)](https://github.com/firestoned/bindcar/stargazers)
+
+---
+
+**A lightweight HTTP REST API server for managing BIND9 zones via rndc commands.**
+
+---
 
 ## Overview
 
