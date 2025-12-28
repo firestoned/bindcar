@@ -12,9 +12,8 @@
 
 use anyhow::{Context, Result};
 use rndc::RndcClient;
-use std::fs;
 use std::time::Instant;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::metrics;
 
@@ -230,139 +229,56 @@ impl Clone for RndcExecutor {
 /// # Errors
 /// Returns an error if the file cannot be read or parsed
 pub fn parse_rndc_conf(path: &str) -> Result<RndcConfig> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read rndc.conf from {}", path))?;
+    use crate::rndc_conf_parser::parse_rndc_conf_file;
+    use std::path::Path;
 
     info!("Parsing rndc.conf from {}", path);
 
-    let mut algorithm = None;
-    let mut secret = None;
-    let mut server = "127.0.0.1:953".to_string();
-    let mut default_key = None;
-    let mut include_files = Vec::new();
+    // Use new parser
+    let conf_file = parse_rndc_conf_file(Path::new(path))
+        .map_err(|e| anyhow::anyhow!("Failed to parse rndc.conf: {}", e))?;
 
-    // First pass: parse main config and collect include directives
-    for line in content.lines() {
-        let line = line.trim();
+    // Extract default key (from options.default_key or first key)
+    let default_key_name = conf_file
+        .options
+        .default_key
+        .clone()
+        .or_else(|| conf_file.keys.keys().next().cloned());
 
-        // Handle include directive (e.g., include "/etc/bind/rndc.key";)
-        if line.starts_with("include") {
-            if let Some(include_path) = extract_quoted_value(line) {
-                debug!("Found include directive: {}", include_path);
-                include_files.push(include_path);
-            }
-        }
+    let key_block = if let Some(ref key_name) = default_key_name {
+        conf_file
+            .keys
+            .get(key_name)
+            .ok_or_else(|| anyhow::anyhow!("Default key '{}' not found", key_name))?
+    } else {
+        return Err(anyhow::anyhow!("No keys found in configuration"));
+    };
 
-        // Parse algorithm
-        if line.contains("algorithm") {
-            if let Some(algo) = extract_quoted_value(line) {
-                algorithm = Some(algo);
-            }
-        }
+    // Extract server address from options or use default
+    let server = conf_file
+        .options
+        .default_server
+        .clone()
+        .unwrap_or_else(|| "127.0.0.1".to_string());
 
-        // Parse secret
-        if line.contains("secret") {
-            if let Some(sec) = extract_quoted_value(line) {
-                secret = Some(sec);
-            }
-        }
-
-        // Parse default-server from options block
-        if line.contains("default-server") {
-            if let Some(srv) = extract_value_after_whitespace(line) {
-                server = if srv.contains(':') {
-                    srv
-                } else {
-                    format!("{}:953", srv)
-                };
-            }
-        }
-
-        // Parse default-key from options block
-        if line.contains("default-key") {
-            if let Some(key) = extract_value_after_whitespace(line) {
-                default_key = Some(key);
-            }
-        }
-    }
-
-    // If we don't have algorithm/secret yet, try parsing included files
-    if algorithm.is_none() || secret.is_none() {
-        for include_path in &include_files {
-            info!("Parsing included file: {}", include_path);
-
-            let include_content = match fs::read_to_string(include_path) {
-                Ok(content) => content,
-                Err(e) => {
-                    warn!("Failed to read included file {}: {}", include_path, e);
-                    continue;
-                }
-            };
-
-            for line in include_content.lines() {
-                let line = line.trim();
-
-                if algorithm.is_none() && line.contains("algorithm") {
-                    if let Some(algo) = extract_quoted_value(line) {
-                        debug!("Found algorithm in {}: {}", include_path, algo);
-                        algorithm = Some(algo);
-                    }
-                }
-
-                if secret.is_none() && line.contains("secret") {
-                    if let Some(sec) = extract_quoted_value(line) {
-                        debug!("Found secret in {}", include_path);
-                        secret = Some(sec);
-                    }
-                }
-
-                // Also check for key name in included file
-                if default_key.is_none() && line.starts_with("key") {
-                    // Extract key name from: key "keyname" {
-                    if let Some(key_name) = extract_quoted_value(line) {
-                        default_key = Some(key_name);
-                    }
-                }
-            }
-        }
-    }
-
-    let algorithm = algorithm
-        .ok_or_else(|| anyhow::anyhow!("No algorithm found in {} or included files", path))?;
-    let secret =
-        secret.ok_or_else(|| anyhow::anyhow!("No secret found in {} or included files", path))?;
+    // Add port if not present
+    let server = if server.contains(':') {
+        server
+    } else {
+        let port = conf_file.options.default_port.unwrap_or(953);
+        format!("{}:{}", server, port)
+    };
 
     info!(
         "Parsed rndc configuration: server={}, algorithm={}, key={}",
         server,
-        algorithm,
-        default_key.unwrap_or_else(|| "unnamed".to_string())
+        key_block.algorithm,
+        default_key_name.unwrap_or_else(|| "unnamed".to_string())
     );
 
     Ok(RndcConfig {
         server,
-        algorithm,
-        secret,
+        algorithm: key_block.algorithm.clone(),
+        secret: key_block.secret.clone(),
     })
-}
-
-/// Extract quoted value from a line like: algorithm "hmac-sha256";
-fn extract_quoted_value(line: &str) -> Option<String> {
-    let parts: Vec<&str> = line.split('"').collect();
-    if parts.len() >= 2 {
-        Some(parts[1].to_string())
-    } else {
-        None
-    }
-}
-
-/// Extract value after whitespace from a line like: default-server 127.0.0.1;
-fn extract_value_after_whitespace(line: &str) -> Option<String> {
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    if parts.len() >= 2 {
-        // Remove trailing semicolon if present
-        Some(parts[1].trim_end_matches(';').to_string())
-    } else {
-        None
-    }
 }

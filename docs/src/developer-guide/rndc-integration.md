@@ -537,6 +537,277 @@ named-checkzone example.com /var/cache/bind/db.example.com
 tail -f /var/log/syslog | grep named
 ```
 
+## RNDC Output Parsing
+
+bindcar includes comprehensive parsers for RNDC command outputs using the `nom` parser combinator library. This enables structured parsing of BIND9 responses for reliable zone configuration management.
+
+### Parser Architecture
+
+```mermaid
+graph LR
+    A[RNDC Output] --> B[nom Parser]
+    B --> C[ZoneConfig]
+    C --> D[Modify Fields]
+    D --> E[Serialize]
+    E --> F[RNDC Input]
+
+    style B fill:#e1f5ff
+    style C fill:#c8e6c9
+```
+
+### Supported Commands
+
+#### showzone Parser
+
+Parses `rndc showzone <zone>` output into structured `ZoneConfig`:
+
+```rust
+use bindcar::rndc_parser::parse_showzone;
+
+let output = r#"zone "example.com" {
+    type primary;
+    file "/var/cache/bind/example.com.zone";
+    allow-transfer { 10.0.0.1/32; 10.0.0.2/32; };
+    also-notify { 10.0.0.1; 10.0.0.2; };
+};"#;
+
+let config = parse_showzone(output)?;
+assert_eq!(config.zone_name, "example.com");
+assert_eq!(config.zone_type, ZoneType::Primary);
+```
+
+**Supported Fields**:
+- `zone_name` - Zone domain name
+- `zone_type` - Primary, Secondary, Stub, Forward, Hint, Mirror, Delegation, Redirect
+- `class` - IN, CH, HS (default: IN)
+- `file` - Zone file path
+- `primaries` - Primary server IPs with optional ports (for secondary zones)
+- `also-notify` - IPs to notify on zone changes
+- `allow-transfer` - IPs allowed to transfer the zone
+- `allow-update` - IPs allowed to update the zone (key references ignored)
+
+### CIDR Notation Support
+
+The parser automatically handles CIDR notation in IP address lists:
+
+```rust
+// Input from BIND9
+let input = r#"zone "internal.local" {
+    type primary;
+    allow-transfer { 10.244.1.18/32; 10.244.1.21/32; };
+};"#;
+
+let config = parse_showzone(input)?;
+
+// CIDR suffix is stripped, only IP addresses extracted
+assert_eq!(config.allow_transfer.unwrap(), vec![
+    "10.244.1.18".parse::<IpAddr>()?,
+    "10.244.1.21".parse::<IpAddr>()?,
+]);
+```
+
+**Why CIDR Stripping?**
+- BIND9 outputs CIDR notation (`/32`, `/128`) in ACLs
+- bindcar stores only IP addresses for simplicity
+- CIDR information is not needed for zone modification
+- Reduces complexity in zone configuration updates
+
+### Key-Based Access Control
+
+The parser handles key-based `allow-update` directives:
+
+```rust
+// Input with TSIG key reference
+let input = r#"zone "example.com" {
+    type primary;
+    allow-update { key "update-key"; };
+};"#;
+
+let config = parse_showzone(input)?;
+
+// Key references are ignored, only IP addresses extracted
+assert_eq!(config.allow_update, Some(vec![])); // Empty - no IPs
+```
+
+**Rationale**:
+- TSIG keys managed separately from zone configuration
+- bindcar focuses on IP-based ACLs for API operations
+- Key-based updates use BIND9's existing TSIG infrastructure
+- Prevents accidental modification of key-based permissions
+
+### Zone Type Support
+
+Parser accepts both modern and legacy BIND9 terminology:
+
+| Modern | Legacy | ZoneType |
+|--------|--------|----------|
+| `primary` | `master` | Primary |
+| `secondary` | `slave` | Secondary |
+| `stub` | `stub` | Stub |
+| `forward` | `forward` | Forward |
+| `hint` | `hint` | Hint |
+| `mirror` | `mirror` | Mirror |
+| `delegation-only` | `delegation-only` | Delegation |
+| `redirect` | `redirect` | Redirect |
+
+```rust
+// Both formats are accepted
+parse_showzone(r#"zone "a.com" { type master; };"#)?; // Legacy
+parse_showzone(r#"zone "b.com" { type primary; };"#)?; // Modern
+```
+
+### Round-Trip Serialization
+
+Zone configurations can be parsed, modified, and serialized back to RNDC format:
+
+```rust
+use bindcar::rndc_parser::parse_showzone;
+
+// 1. Parse BIND9 output
+let output = rndc_executor.showzone("example.com").await?;
+let mut config = parse_showzone(&output)?;
+
+// 2. Modify configuration
+config.also_notify = Some(vec![
+    "10.0.0.3".parse()?,
+    "10.0.0.4".parse()?,
+]);
+
+// 3. Serialize back to RNDC format
+let rndc_block = config.to_rndc_block();
+// Output: "{ type primary; file "..."; also-notify { 10.0.0.3; 10.0.0.4; }; };"
+
+// 4. Update zone in BIND9
+rndc_executor.modzone("example.com", &rndc_block).await?;
+```
+
+### Error Handling
+
+Parser provides detailed error messages:
+
+```rust
+use bindcar::rndc_parser::{parse_showzone, RndcParseError};
+
+match parse_showzone(invalid_input) {
+    Ok(config) => { /* Use config */ },
+    Err(RndcParseError::ParseError(msg)) => {
+        eprintln!("Parse failed: {}", msg);
+    },
+    Err(RndcParseError::InvalidZoneType(type_str)) => {
+        eprintln!("Unknown zone type: {}", type_str);
+    },
+    Err(RndcParseError::InvalidIpAddress(addr)) => {
+        eprintln!("Invalid IP address: {}", addr);
+    },
+    Err(RndcParseError::MissingField(field)) => {
+        eprintln!("Required field missing: {}", field);
+    },
+    Err(RndcParseError::Incomplete) => {
+        eprintln!("Incomplete input");
+    },
+}
+```
+
+### Parser Implementation
+
+The parser uses `nom` combinators for robust parsing:
+
+```rust
+// Primitive parsers
+fn quoted_string(input: &str) -> IResult<&str, String>
+fn identifier(input: &str) -> IResult<&str, &str>
+fn ip_addr(input: &str) -> IResult<&str, IpAddr>
+fn ip_with_port(input: &str) -> IResult<&str, PrimarySpec>
+
+// Zone statement parsers
+fn parse_type_statement(input: &str) -> IResult<&str, ZoneStatement>
+fn parse_file_statement(input: &str) -> IResult<&str, ZoneStatement>
+fn parse_primaries_statement(input: &str) -> IResult<&str, ZoneStatement>
+fn parse_also_notify_statement(input: &str) -> IResult<&str, ZoneStatement>
+fn parse_allow_transfer_statement(input: &str) -> IResult<&str, ZoneStatement>
+fn parse_allow_update_statement(input: &str) -> IResult<&str, ZoneStatement>
+
+// Top-level parser
+pub fn parse_showzone(input: &str) -> ParseResult<ZoneConfig>
+```
+
+### Use Cases
+
+**Zone Modification (PATCH /api/v1/zones/{name})**:
+```rust
+// Get current configuration
+let output = state.rndc.showzone(&zone_name).await?;
+let mut config = parse_showzone(&output)?;
+
+// Update fields from API request
+if let Some(also_notify) = request.also_notify {
+    config.also_notify = Some(also_notify);
+}
+
+// Apply changes
+let rndc_block = config.to_rndc_block();
+state.rndc.modzone(&zone_name, &rndc_block).await?;
+```
+
+**Zone Inspection**:
+```rust
+// Parse zone configuration
+let output = rndc_executor.showzone("example.com").await?;
+let config = parse_showzone(&output)?;
+
+// Inspect zone details
+println!("Zone: {}", config.zone_name);
+println!("Type: {}", config.zone_type.as_str());
+println!("File: {:?}", config.file);
+println!("Notify: {:?}", config.also_notify);
+```
+
+### Testing
+
+The parser includes comprehensive test coverage:
+
+```rust
+#[test]
+fn test_parse_real_world_output() {
+    let input = r#"zone "internal.local" {
+        type primary;
+        file "/var/cache/bind/internal.local.zone";
+        allow-transfer { 10.244.1.18/32; 10.244.1.21/32; };
+        allow-update { key "bindy-operator"; };
+        also-notify { 10.244.1.18; 10.244.1.21; };
+    };"#;
+
+    let config = parse_showzone(input).unwrap();
+
+    assert_eq!(config.zone_name, "internal.local");
+    assert_eq!(config.zone_type, ZoneType::Primary);
+    assert_eq!(config.allow_transfer.unwrap().len(), 2);
+    assert_eq!(config.also_notify.unwrap().len(), 2);
+}
+
+#[test]
+fn test_parse_ip_addr_with_cidr() {
+    assert_eq!(
+        ip_addr("192.168.1.1/32").unwrap().1,
+        "192.168.1.1".parse::<IpAddr>().unwrap()
+    );
+}
+```
+
+### Limitations
+
+**Not Currently Parsed**:
+- Views and ACL names (e.g., `allow-transfer { "trusted"; };`)
+- Complex ACL expressions (e.g., `{ !10.0.0.1; any; }`)
+- Key definitions (only references are skipped)
+- Custom zone options beyond documented fields
+
+**Future Enhancements**:
+- Parser for `rndc zonestatus` output
+- Parser for `rndc status` output
+- Parser for `rndc.conf` files (see [roadmap](../../roadmaps/rndc-conf-parser.md))
+- Support for ACL names and expressions
+
 ## Best Practices
 
 1. **Validate Early** - Validate zone data before executing RNDC commands
@@ -546,9 +817,12 @@ tail -f /var/log/syslog | grep named
 5. **Use Timeouts** - Set reasonable timeouts for RNDC command execution
 6. **Share Volumes Correctly** - Ensure BIND9 and bindcar can both access zone files
 7. **Secure RNDC Keys** - Use Kubernetes secrets for rndc.key in production
+8. **Parse Before Modify** - Always parse showzone output before modifying zones
+9. **Test Parser Changes** - Validate parser against real BIND9 output
 
 ## Next Steps
 
 - [API Reference](../api-reference/index.md) - Complete API documentation
 - [Troubleshooting](../troubleshooting.md) - Common issues and solutions
 - [Examples](../examples.md) - Practical use cases
+- [RNDC Parser Roadmap](../../roadmaps/rndc-conf-parser.md) - Future parser enhancements

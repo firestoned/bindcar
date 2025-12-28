@@ -139,6 +139,8 @@ pub mod metrics;
 pub mod middleware;
 pub mod rate_limit;
 pub mod rndc;
+pub mod rndc_conf_parser;
+pub mod rndc_conf_types;
 pub mod rndc_parser;
 pub mod rndc_types;
 pub mod types;
@@ -163,6 +165,12 @@ pub use zones::{
 
 // RNDC configuration
 pub use rndc::{parse_rndc_conf, RndcConfig};
+
+// RNDC configuration parser
+pub use rndc_conf_parser::{parse_rndc_conf_file, parse_rndc_conf_str};
+
+// RNDC configuration types
+pub use rndc_conf_types::{KeyBlock, OptionsBlock, RndcConfFile, ServerAddress, ServerBlock};
 
 // Test modules
 #[cfg(test)]
