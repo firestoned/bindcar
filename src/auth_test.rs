@@ -172,8 +172,8 @@ async fn test_auth_error_serialization() {
 #[cfg(feature = "k8s-token-review")]
 mod k8s_token_review_tests {
     use crate::auth::{validate_token_with_k8s, TokenReviewConfig};
-    use std::env;
     use serial_test::serial;
+    use std::env;
 
     #[tokio::test]
     #[serial]
@@ -187,7 +187,10 @@ mod k8s_token_review_tests {
         let result = validate_token_with_k8s("test-token").await;
 
         // Outside a cluster, this should fail with a clear error message
-        assert!(result.is_err(), "Expected token validation to fail outside cluster");
+        assert!(
+            result.is_err(),
+            "Expected token validation to fail outside cluster"
+        );
 
         // We just need to confirm it failed - the error message can vary
 

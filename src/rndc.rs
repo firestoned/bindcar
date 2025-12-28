@@ -68,7 +68,7 @@ impl RndcExecutor {
             ));
         }
 
-        let client = RndcClient::new(server, &algorithm, secret);
+        let client = RndcClient::new(server, &algorithm, secret)?;
 
         Ok(Self { client })
     }

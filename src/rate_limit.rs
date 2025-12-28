@@ -6,9 +6,7 @@
 
 // Re-export commonly used types for convenience
 pub use tower_governor::{
-    governor::GovernorConfigBuilder,
-    key_extractor::SmartIpKeyExtractor,
-    GovernorLayer,
+    governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer,
 };
 
 /// Rate limiting configuration
@@ -90,8 +88,6 @@ impl RateLimitConfig {
     }
 }
 
-
-
 #[cfg(test)]
 mod rate_limit_test {
     use super::*;
@@ -129,7 +125,6 @@ mod rate_limit_test {
         assert!(invalid_config.validate().is_err());
     }
 
-
     #[test]
     fn test_rate_limit_config_from_env() {
         // Test with no env vars set - should use defaults
@@ -144,5 +139,4 @@ mod rate_limit_test {
         assert_eq!(config.burst_size, 10);
         assert!(config.enabled);
     }
-
 }

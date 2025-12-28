@@ -818,13 +818,17 @@ pub async fn get_zone(
 
     for line in status_output.lines() {
         if let Some(type_str) = line.strip_prefix("type:").or_else(|| {
-            line.contains("type:").then(|| line.split("type:").nth(1)).flatten()
+            line.contains("type:")
+                .then(|| line.split("type:").nth(1))
+                .flatten()
         }) {
             zone_type = type_str.trim().to_string();
         }
 
         if let Some(serial_str) = line.strip_prefix("serial:").or_else(|| {
-            line.contains("serial:").then(|| line.split("serial:").nth(1)).flatten()
+            line.contains("serial:")
+                .then(|| line.split("serial:").nth(1))
+                .flatten()
         }) {
             if let Ok(s) = serial_str.trim().parse::<u32>() {
                 serial = Some(s);
@@ -937,10 +941,7 @@ pub async fn modify_zone(
     // Join all parts into final configuration
     let zone_config = format!("{{ {}; }};", config_parts.join("; "));
 
-    info!(
-        "Modifying zone {} with config: {}",
-        zone_name, zone_config
-    );
+    info!("Modifying zone {} with config: {}", zone_name, zone_config);
 
     // Execute rndc modzone
     let output = state

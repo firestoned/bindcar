@@ -42,7 +42,7 @@ fn test_zone_config_to_zone_file() {
         ],
         also_notify: None,
         allow_transfer: None,
-    primaries: None,
+        primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -231,7 +231,7 @@ fn test_zone_config_special_characters_in_names() {
         }],
         also_notify: None,
         allow_transfer: None,
-    primaries: None,
+        primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -257,7 +257,7 @@ fn test_zone_config_zero_ttl() {
         records: vec![],
         also_notify: None,
         allow_transfer: None,
-    primaries: None,
+        primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -290,7 +290,7 @@ fn test_dns_record_mx_with_priority_zero() {
         records: vec![record],
         also_notify: None,
         allow_transfer: None,
-    primaries: None,
+        primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -330,7 +330,7 @@ fn test_multiple_records_same_name() {
         ],
         also_notify: None,
         allow_transfer: None,
-    primaries: None,
+        primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -363,7 +363,7 @@ fn test_zone_config_with_nameserver_glue_records() {
         records: vec![],
         also_notify: None,
         allow_transfer: None,
-    primaries: None,
+        primaries: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -398,7 +398,7 @@ fn test_zone_config_glue_records_serialization() {
         records: vec![],
         also_notify: None,
         allow_transfer: None,
-    primaries: None,
+        primaries: None,
     };
 
     // Test that it can be serialized to JSON
@@ -432,7 +432,7 @@ fn test_zone_config_without_nameserver_ips() {
         records: vec![],
         also_notify: None,
         allow_transfer: None,
-    primaries: None,
+        primaries: None,
     };
 
     let zone_file = config.to_zone_file();

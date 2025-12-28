@@ -147,7 +147,5 @@ pub fn update_zones_count(count: i64) {
 /// Record a rate limit check
 pub fn record_rate_limit(allowed: bool) {
     let result = if allowed { "allowed" } else { "rejected" };
-    RATE_LIMIT_REQUESTS_TOTAL
-        .with_label_values(&[result])
-        .inc();
+    RATE_LIMIT_REQUESTS_TOTAL.with_label_values(&[result]).inc();
 }

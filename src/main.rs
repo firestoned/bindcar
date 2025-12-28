@@ -20,8 +20,8 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use std::net::SocketAddr;
 use serde::Serialize;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
@@ -37,7 +37,9 @@ use bindcar::{
     types::{AppState, ErrorResponse},
     zones,
 };
-use tower_governor::{governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer};
+use tower_governor::{
+    governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer,
+};
 
 /// OpenAPI documentation structure
 #[derive(OpenApi)]
@@ -220,7 +222,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // get rndc configuration from environment or fallback to rndc.conf
-    let (rndc_server, rndc_algorithm, rndc_secret) = if let Ok(secret) = std::env::var("RNDC_SECRET") {
+    let (rndc_server, rndc_algorithm, rndc_secret) = if let Ok(secret) =
+        std::env::var("RNDC_SECRET")
+    {
         // environment variables provided
         let server = std::env::var("RNDC_SERVER").unwrap_or_else(|_| "127.0.0.1:953".to_string());
         let algorithm = std::env::var("RNDC_ALGORITHM").unwrap_or_else(|_| "sha256".to_string());
@@ -310,7 +314,8 @@ async fn main() -> anyhow::Result<()> {
     // conditionally apply rate limiting layer
     let api_routes = if rate_limit_config.enabled {
         // Calculate requests per second from period
-        let per_second = rate_limit_config.requests_per_period / rate_limit_config.period_secs.max(1) as u32;
+        let per_second =
+            rate_limit_config.requests_per_period / rate_limit_config.period_secs.max(1) as u32;
         let per_second = per_second.max(1); // Ensure at least 1 request per second
 
         // Build governor configuration
