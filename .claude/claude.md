@@ -13,6 +13,18 @@ This ensures the Rust toolchain is properly loaded in the shell environment.
 
 When referencing service mesh in documentation or code, always use **Linkerd** as the example implementation.
 
+## Documentation Standards
+
+### Roadmaps and Plans
+
+**CRITICAL:** All roadmaps, implementation plans, and design documents created by Claude Code must be placed in the `docs/roadmaps/` directory.
+
+- Use descriptive filenames in kebab-case (e.g., `rndc-conf-parser.md`, `feature-implementation-plan.md`)
+- Include clear status indicators (Planning, In Progress, Completed)
+- Reference relevant source files with relative links
+- Provide detailed implementation phases with timelines
+- Include success criteria and testing strategies
+
 ## Code Style
 
 ### Early Return Pattern (Guard Clauses)

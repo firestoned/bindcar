@@ -59,7 +59,7 @@ Content-Type: application/json
 | Code | Description |
 |------|-------------|
 | 400  | Invalid zone name or configuration |
-| 502  | RNDC command failed |
+| 500  | RNDC command failed |
 
 ### Example - Primary Zone
 
@@ -175,7 +175,7 @@ Authorization: Bearer <token>
 | Code | Description |
 |------|-------------|
 | 404  | Zone not found |
-| 502  | RNDC command failed |
+| 500  | RNDC command failed |
 
 ### Example
 
@@ -214,7 +214,7 @@ Authorization: Bearer <token>
 | Code | Description |
 |------|-------------|
 | 404  | Zone not found |
-| 502  | RNDC command failed |
+| 500  | RNDC command failed |
 
 ### Example
 
@@ -270,7 +270,7 @@ Content-Type: application/json
 |------|-------------|
 | 400  | Invalid request (empty request or invalid IP addresses) |
 | 404  | Zone not found |
-| 502  | RNDC command failed |
+| 500  | RNDC command failed |
 
 ### Examples
 

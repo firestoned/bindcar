@@ -95,7 +95,7 @@ kubectl exec -it dns-pod -c bindcar -- env | grep BIND_ALLOWED_TOKENS
 
 ## RNDC Command Failures
 
-### 502 Bad Gateway - Connection Refused
+### 500 Internal Server Error - Connection Refused
 
 **Symptom**:
 ```json
@@ -142,7 +142,7 @@ spec:
     image: ghcr.io/firestoned/bindcar:latest
 ```
 
-### 502 Bad Gateway - Permission Denied
+### 500 Internal Server Error - Permission Denied
 
 **Symptom**:
 ```json
@@ -222,7 +222,7 @@ kubectl exec dns-pod -c bind9 -- grep "example.com" /etc/bind/named.conf
 # Remove from named.conf and restart BIND9
 ```
 
-### 502 Bad Gateway - Zone File Syntax Error
+### 500 Internal Server Error - Zone File Syntax Error
 
 **Symptom**:
 ```json

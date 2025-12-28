@@ -296,7 +296,7 @@ pub struct ZoneListResponse {
     responses(
         (status = 201, description = "Zone created successfully", body = ZoneResponse),
         (status = 400, description = "Invalid request"),
-        (status = 502, description = "RNDC command failed"),
+        (status = 500, description = "RNDC command failed"),
         (status = 500, description = "Internal server error")
     ),
     tag = "zones"
@@ -431,7 +431,7 @@ pub async fn create_zone(
         .map_err(|e| {
             error!("RNDC addzone failed for {}: {}", request.zone_name, e);
             metrics::record_zone_operation("create", false);
-            ApiError::RndcError(format!("Failed to add zone: {}", e))
+            ApiError::RndcError(e.to_string())
         })?;
 
     info!("Zone {} created successfully", request.zone_name);
@@ -456,7 +456,7 @@ pub async fn create_zone(
     ),
     responses(
         (status = 200, description = "Zone deleted successfully", body = ZoneResponse),
-        (status = 502, description = "RNDC command failed")
+        (status = 500, description = "RNDC command failed")
     ),
     tag = "zones"
 )]
@@ -470,7 +470,7 @@ pub async fn delete_zone(
     let output = state.rndc.delzone(&zone_name).await.map_err(|e| {
         error!("RNDC delzone failed for {}: {}", zone_name, e);
         metrics::record_zone_operation("delete", false);
-        ApiError::RndcError(format!("Failed to delete zone: {}", e))
+        ApiError::RndcError(e.to_string())
     })?;
 
     // Optionally delete zone file
@@ -509,7 +509,7 @@ pub async fn delete_zone(
     ),
     responses(
         (status = 200, description = "Zone reloaded successfully", body = ZoneResponse),
-        (status = 502, description = "RNDC command failed")
+        (status = 500, description = "RNDC command failed")
     ),
     tag = "zones"
 )]
@@ -522,7 +522,7 @@ pub async fn reload_zone(
     let output = state.rndc.reload(&zone_name).await.map_err(|e| {
         error!("RNDC reload failed for {}: {}", zone_name, e);
         metrics::record_zone_operation("reload", false);
-        ApiError::RndcError(format!("Failed to reload zone: {}", e))
+        ApiError::RndcError(e.to_string())
     })?;
 
     info!("Zone {} reloaded successfully", zone_name);
@@ -545,7 +545,7 @@ pub async fn reload_zone(
     responses(
         (status = 200, description = "Zone status retrieved", body = ZoneResponse),
         (status = 404, description = "Zone not found"),
-        (status = 502, description = "RNDC command failed")
+        (status = 500, description = "RNDC command failed")
     ),
     tag = "zones"
 )]
@@ -560,7 +560,7 @@ pub async fn zone_status(
         if e.to_string().contains("not found") {
             ApiError::ZoneNotFound(zone_name.clone())
         } else {
-            ApiError::RndcError(format!("Failed to get zone status: {}", e))
+            ApiError::RndcError(e.to_string())
         }
     })?;
 
@@ -580,7 +580,7 @@ pub async fn zone_status(
     ),
     responses(
         (status = 200, description = "Zone frozen successfully", body = ZoneResponse),
-        (status = 502, description = "RNDC command failed")
+        (status = 500, description = "RNDC command failed")
     ),
     tag = "zones"
 )]
@@ -593,7 +593,7 @@ pub async fn freeze_zone(
     let output = state.rndc.freeze(&zone_name).await.map_err(|e| {
         error!("RNDC freeze failed for {}: {}", zone_name, e);
         metrics::record_zone_operation("freeze", false);
-        ApiError::RndcError(format!("Failed to freeze zone: {}", e))
+        ApiError::RndcError(e.to_string())
     })?;
 
     info!("Zone {} frozen successfully", zone_name);
@@ -615,7 +615,7 @@ pub async fn freeze_zone(
     ),
     responses(
         (status = 200, description = "Zone thawed successfully", body = ZoneResponse),
-        (status = 502, description = "RNDC command failed")
+        (status = 500, description = "RNDC command failed")
     ),
     tag = "zones"
 )]
@@ -628,7 +628,7 @@ pub async fn thaw_zone(
     let output = state.rndc.thaw(&zone_name).await.map_err(|e| {
         error!("RNDC thaw failed for {}: {}", zone_name, e);
         metrics::record_zone_operation("thaw", false);
-        ApiError::RndcError(format!("Failed to thaw zone: {}", e))
+        ApiError::RndcError(e.to_string())
     })?;
 
     info!("Zone {} thawed successfully", zone_name);
@@ -650,7 +650,7 @@ pub async fn thaw_zone(
     ),
     responses(
         (status = 200, description = "Notify sent successfully", body = ZoneResponse),
-        (status = 502, description = "RNDC command failed")
+        (status = 500, description = "RNDC command failed")
     ),
     tag = "zones"
 )]
@@ -663,7 +663,7 @@ pub async fn notify_zone(
     let output = state.rndc.notify(&zone_name).await.map_err(|e| {
         error!("RNDC notify failed for {}: {}", zone_name, e);
         metrics::record_zone_operation("notify", false);
-        ApiError::RndcError(format!("Failed to notify zone: {}", e))
+        ApiError::RndcError(e.to_string())
     })?;
 
     info!("Zone {} notify sent successfully", zone_name);
@@ -685,7 +685,7 @@ pub async fn notify_zone(
     ),
     responses(
         (status = 200, description = "Zone retransfer initiated", body = ZoneResponse),
-        (status = 502, description = "RNDC command failed")
+        (status = 500, description = "RNDC command failed")
     ),
     tag = "zones"
 )]
@@ -698,7 +698,7 @@ pub async fn retransfer_zone(
     let output = state.rndc.retransfer(&zone_name).await.map_err(|e| {
         error!("RNDC retransfer failed for {}: {}", zone_name, e);
         metrics::record_zone_operation("retransfer", false);
-        ApiError::RndcError(format!("Failed to retransfer zone: {}", e))
+        ApiError::RndcError(e.to_string())
     })?;
 
     info!("Zone {} retransfer initiated successfully", zone_name);
@@ -717,7 +717,7 @@ pub async fn retransfer_zone(
     path = "/api/v1/server/status",
     responses(
         (status = 200, description = "Server status retrieved", body = ServerStatusResponse),
-        (status = 502, description = "RNDC command failed")
+        (status = 500, description = "RNDC command failed")
     ),
     tag = "server"
 )]
@@ -728,7 +728,7 @@ pub async fn server_status(
 
     let output = state.rndc.status().await.map_err(|e| {
         error!("RNDC status failed: {}", e);
-        ApiError::RndcError(format!("Failed to get server status: {}", e))
+        ApiError::RndcError(e.to_string())
     })?;
 
     Ok(Json(ServerStatusResponse { status: output }))
@@ -784,7 +784,7 @@ pub async fn list_zones(State(state): State<AppState>) -> Result<Json<ZoneListRe
     responses(
         (status = 200, description = "Zone information", body = ZoneInfo),
         (status = 404, description = "Zone not found"),
-        (status = 502, description = "RNDC command failed")
+        (status = 500, description = "RNDC command failed")
     ),
     tag = "zones"
 )]
@@ -808,7 +808,7 @@ pub async fn get_zone(
         if e.to_string().contains("not found") {
             ApiError::ZoneNotFound(zone_name.clone())
         } else {
-            ApiError::RndcError(format!("Failed to get zone status: {}", e))
+            ApiError::RndcError(e.to_string())
         }
     })?;
 
@@ -860,7 +860,7 @@ pub async fn get_zone(
         (status = 200, description = "Zone modified successfully", body = ZoneResponse),
         (status = 400, description = "Invalid request"),
         (status = 404, description = "Zone not found"),
-        (status = 502, description = "RNDC command failed"),
+        (status = 500, description = "RNDC command failed"),
         (status = 500, description = "Internal server error")
     ),
     tag = "zones"
@@ -907,51 +907,83 @@ pub async fn modify_zone(
         return Err(ApiError::ZoneNotFound(zone_name.clone()));
     }
 
-    // Build zone configuration for rndc modzone
-    let mut config_parts = Vec::new();
+    // Get current zone configuration from BIND9
+    let showzone_output = state.rndc.showzone(&zone_name).await.map_err(|e| {
+        error!("Failed to get zone configuration for {}: {}", zone_name, e);
+        if e.to_string().contains("not found") {
+            ApiError::ZoneNotFound(zone_name.clone())
+        } else {
+            ApiError::RndcError(e.to_string())
+        }
+    })?;
 
-    // Add also-notify if provided
+    // Parse the zone configuration
+    let mut zone_config = crate::rndc_parser::parse_showzone(&showzone_output).map_err(|e| {
+        error!("Failed to parse zone configuration for {}: {}", zone_name, e);
+        ApiError::RndcError(format!("Failed to parse zone configuration: {}", e))
+    })?;
+
+    info!("Zone {} has type: {}", zone_name, zone_config.zone_type.as_str());
+
+    // Update the configuration with new values from the request
     if let Some(also_notify) = &request.also_notify {
-        if !also_notify.is_empty() {
-            let notify_list = also_notify
-                .iter()
-                .map(|ip| format!("{}; ", ip))
-                .collect::<String>();
-            config_parts.push(format!(r#"also-notify {{ {} }}"#, notify_list));
-        } else {
-            // Empty list means remove also-notify
-            config_parts.push("also-notify { }".to_string());
+        // Convert string IPs to IpAddr
+        let ip_addrs: Result<Vec<std::net::IpAddr>, _> = also_notify
+            .iter()
+            .map(|s| s.parse())
+            .collect();
+
+        match ip_addrs {
+            Ok(addrs) => {
+                zone_config.also_notify = if addrs.is_empty() {
+                    None
+                } else {
+                    Some(addrs)
+                };
+            }
+            Err(e) => {
+                metrics::record_zone_operation("modify", false);
+                return Err(ApiError::InvalidRequest(format!("Invalid IP address in also-notify: {}", e)));
+            }
         }
     }
 
-    // Add allow-transfer if provided
     if let Some(allow_transfer) = &request.allow_transfer {
-        if !allow_transfer.is_empty() {
-            let transfer_list = allow_transfer
-                .iter()
-                .map(|ip| format!("{}; ", ip))
-                .collect::<String>();
-            config_parts.push(format!(r#"allow-transfer {{ {} }}"#, transfer_list));
-        } else {
-            // Empty list means remove allow-transfer (or set to none)
-            config_parts.push("allow-transfer { }".to_string());
+        // Convert string IPs to IpAddr
+        let ip_addrs: Result<Vec<std::net::IpAddr>, _> = allow_transfer
+            .iter()
+            .map(|s| s.parse())
+            .collect();
+
+        match ip_addrs {
+            Ok(addrs) => {
+                zone_config.allow_transfer = if addrs.is_empty() {
+                    None
+                } else {
+                    Some(addrs)
+                };
+            }
+            Err(e) => {
+                metrics::record_zone_operation("modify", false);
+                return Err(ApiError::InvalidRequest(format!("Invalid IP address in allow-transfer: {}", e)));
+            }
         }
     }
 
-    // Join all parts into final configuration
-    let zone_config = format!("{{ {}; }};", config_parts.join("; "));
+    // Serialize the updated configuration back to RNDC format
+    let rndc_config_block = zone_config.to_rndc_block();
 
-    info!("Modifying zone {} with config: {}", zone_name, zone_config);
+    info!("Modifying zone {} with config: {}", zone_name, rndc_config_block);
 
     // Execute rndc modzone
     let output = state
         .rndc
-        .modzone(&zone_name, &zone_config)
+        .modzone(&zone_name, &rndc_config_block)
         .await
         .map_err(|e| {
             error!("RNDC modzone failed for {}: {}", zone_name, e);
             metrics::record_zone_operation("modify", false);
-            ApiError::RndcError(format!("Failed to modify zone: {}", e))
+            ApiError::RndcError(e.to_string())
         })?;
 
     info!("Zone {} modified successfully", zone_name);

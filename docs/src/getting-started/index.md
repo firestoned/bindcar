@@ -272,7 +272,7 @@ graph TD
     I --> J{Success?}
     J -->|Yes| K[200/201 Response]
     J -->|No| L{Error Type}
-    L -->|RNDC Error| M[502 Bad Gateway]
+    L -->|RNDC Error| M[500 Internal Server Error]
     L -->|Not Found| N[404 Not Found]
     L -->|Other| O[500 Internal Error]
 ```
@@ -291,7 +291,7 @@ graph TD
     FS -->|Failed| E500[500 Internal Error]
     FS -->|Success| RNDC{RNDC Command}
     
-    RNDC -->|Failed| E502[502 Bad Gateway]
+    RNDC -->|Failed| E500[500 Internal Server Error]
     RNDC -->|Not Found| E404[404 Not Found]
     RNDC -->|Success| Success[200/201 Success]
     
@@ -299,7 +299,7 @@ graph TD
     style E401 fill:#ffebee
     style E404 fill:#ffebee
     style E500 fill:#ffebee
-    style E502 fill:#ffebee
+    style E500 fill:#ffebee
     style Success fill:#e8f5e9
 ```
 

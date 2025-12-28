@@ -41,7 +41,7 @@ fn test_record_http_request() {
 fn test_record_http_request_various_methods() {
     let methods = vec!["GET", "POST", "PUT", "DELETE", "PATCH"];
     let paths = vec!["/api/v1/zones", "/api/v1/health", "/metrics"];
-    let statuses = vec![200, 201, 400, 404, 500, 502];
+    let statuses = vec![200, 201, 400, 404, 500];
 
     for method in &methods {
         for path in &paths {

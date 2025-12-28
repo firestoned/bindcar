@@ -60,7 +60,7 @@ docker-push: ## Push Docker image to registry
 	docker push $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 
 .PHONY: docker-push-kind
-docker-push-kind: docker-build-local ## Push Docker image to local kind
+docker-push-kind: docker-build
 	kind load docker-image $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG) --name $(KIND_CLUSTER)
 
 .PHONY: docker-buildx

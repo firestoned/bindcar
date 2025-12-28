@@ -70,7 +70,7 @@ fn test_api_error_rndc_error() {
     );
 
     let response = error.into_response();
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 #[test]

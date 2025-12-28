@@ -55,7 +55,7 @@ sequenceDiagram
 | 401  | Unauthorized - Missing or invalid token |
 | 404  | Not Found - Zone doesn't exist |
 | 500  | Internal Server Error |
-| 502  | Bad Gateway - RNDC command failed |
+| 500  | Bad Gateway - RNDC command failed |
 
 ## Endpoints Overview
 

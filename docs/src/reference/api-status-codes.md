@@ -274,7 +274,7 @@ Client IP is extracted from (in order):
 
 **Note**: Details may be limited to avoid exposing internal implementation
 
-### 502 Bad Gateway
+### 500 Internal Server Error
 
 **When Returned**:
 - RNDC command execution failed
@@ -362,7 +362,7 @@ graph TD
     H -->|GET/DELETE + Not Exists| J[404 Not Found]
     H -->|OK| K{RNDC Available?}
     
-    K -->|No| L[502 Bad Gateway]
+    K -->|No| L[500 Internal Server Error]
     K -->|Yes| M{RNDC Success?}
     
     M -->|Failed| L
@@ -380,11 +380,11 @@ graph TD
 
 | Endpoint | Success | Error Codes |
 |----------|---------|-------------|
-| /api/v1/zones | 201 Created | 400, 401, 409, 413, 415, 422, 429, 502, 503 |
-| /api/v1/zones/{name}/reload | 200 OK | 401, 404, 429, 502, 503 |
-| /api/v1/zones/{name}/freeze | 200 OK | 401, 404, 429, 502, 503 |
-| /api/v1/zones/{name}/thaw | 200 OK | 401, 404, 429, 502, 503 |
-| /api/v1/zones/{name}/notify | 200 OK | 401, 404, 429, 502, 503 |
+| /api/v1/zones | 201 Created | 400, 401, 409, 413, 415, 422, 429, 500, 503 |
+| /api/v1/zones/{name}/reload | 200 OK | 401, 404, 429, 500, 503 |
+| /api/v1/zones/{name}/freeze | 200 OK | 401, 404, 429, 500, 503 |
+| /api/v1/zones/{name}/thaw | 200 OK | 401, 404, 429, 500, 503 |
+| /api/v1/zones/{name}/notify | 200 OK | 401, 404, 429, 500, 503 |
 
 ### GET Endpoints
 
@@ -392,16 +392,16 @@ graph TD
 |----------|---------|-------------|
 | /api/v1/health | 200 OK | 503 Service Unavailable |
 | /api/v1/ready | 200 OK | 503 Service Unavailable |
-| /api/v1/zones | 200 OK | 401, 429, 502, 503 |
-| /api/v1/zones/{name} | 200 OK | 401, 404, 429, 502, 503 |
-| /api/v1/zones/{name}/status | 200 OK | 401, 404, 429, 502, 503 |
-| /api/v1/server/status | 200 OK | 401, 429, 502, 503 |
+| /api/v1/zones | 200 OK | 401, 429, 500, 503 |
+| /api/v1/zones/{name} | 200 OK | 401, 404, 429, 500, 503 |
+| /api/v1/zones/{name}/status | 200 OK | 401, 404, 429, 500, 503 |
+| /api/v1/server/status | 200 OK | 401, 429, 500, 503 |
 
 ### DELETE Endpoints
 
 | Endpoint | Success | Error Codes |
 |----------|---------|-------------|
-| /api/v1/zones/{name} | 204 No Content | 401, 404, 429, 502, 503 |
+| /api/v1/zones/{name} | 204 No Content | 401, 404, 429, 500, 503 |
 
 ## Best Practices
 
@@ -441,7 +441,7 @@ case $status in
     sleep 60
     exit 1
     ;;
-  502)
+  500)
     echo "RNDC error: $body"
     exit 1
     ;;
@@ -476,7 +476,7 @@ def create_zone(zone_data, max_retries=3):
             # Rate limited - back off exponentially
             time.sleep(60 * (2 ** attempt))
             continue
-        elif response.status_code in [502, 503]:
+        elif response.status_code in [500, 503]:
             # Retry on server errors
             time.sleep(2 ** attempt)
             continue
