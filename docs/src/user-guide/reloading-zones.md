@@ -36,7 +36,7 @@ curl -X POST http://localhost:8080/api/v1/zones/example.com/reload \
 - `200 OK` - Zone reloaded successfully
 - `401 Unauthorized` - Missing/invalid token
 - `404 Not Found` - Zone doesn't exist
-- `502 Bad Gateway` - RNDC reload command failed
+- `500 Internal Server Error` - RNDC reload command failed
 
 ## Workflow
 

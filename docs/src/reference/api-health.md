@@ -115,7 +115,7 @@ Authorization: Bearer <token>
 |------|-------------|
 | 200  | Status retrieved successfully |
 | 401  | Unauthorized |
-| 502  | RNDC command failed |
+| 500  | RNDC command failed |
 
 ### Example
 
@@ -145,7 +145,7 @@ flowchart TD
     E -->|No| K[Return 401 Unauthorized]
     J --> L{Success?}
     L -->|Yes| M[Return 200 + Status]
-    L -->|No| N[Return 502 Bad Gateway]
+    L -->|No| N[Return 500 Internal Server Error]
 ```
 
 ---

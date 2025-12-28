@@ -313,7 +313,7 @@ Zone already exists:
 
 **Solution**: Delete existing zone first or use a different zone name
 
-### 502 Bad Gateway
+### 500 Internal Server Error
 
 RNDC command failed:
 

@@ -52,7 +52,7 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, error_message) = match &self {
             ApiError::ZoneFileError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-            ApiError::RndcError(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
+            ApiError::RndcError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             ApiError::InvalidRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
             ApiError::ZoneNotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
             ApiError::InternalError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),

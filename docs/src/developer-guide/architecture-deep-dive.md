@@ -98,7 +98,7 @@ sequenceDiagram
         BIND9-->>RNDC: Exit code 1
         RNDC-->>ZoneMgr: Error
         ZoneMgr-->>Handler: Error response
-        Handler-->>Client: 502 Bad Gateway
+        Handler-->>Client: 500 Internal Server Error
     end
 ```
 
@@ -198,7 +198,7 @@ graph TD
     Auth -->|Valid| Processing{Processing}
     Processing -->|Zone exists| E409[409 Conflict]
     Processing -->|Zone not found| E404[404 Not Found]
-    Processing -->|RNDC error| E502[502 Bad Gateway]
+    Processing -->|RNDC error| E500[500 Internal Server Error]
     Processing -->|File I/O error| E500[500 Internal Error]
     Processing -->|Success| S200[200/201/204 Success]
 
@@ -206,7 +206,7 @@ graph TD
     style E401 fill:#ffe1e1
     style E409 fill:#ffe1e1
     style E404 fill:#ffe1e1
-    style E502 fill:#ffe1e1
+    style E500 fill:#ffe1e1
     style E500 fill:#ffe1e1
     style S200 fill:#e1ffe1
 ```
@@ -220,7 +220,7 @@ graph TD
 | NotFoundError | 404 Not Found | Zone doesn't exist |
 | ConflictError | 409 Conflict | Zone already exists |
 | InternalError | 500 Internal Server Error | File I/O failures |
-| RndcError | 502 Bad Gateway | RNDC command failures |
+| RndcError | 500 Internal Server Error | RNDC command failures |
 
 ## Next Steps
 

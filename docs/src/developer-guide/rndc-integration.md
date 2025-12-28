@@ -267,13 +267,13 @@ flowchart TD
 
     ExecRNDC --> RNDCSuccess{RNDC<br/>Success?}
     RNDCSuccess -->|Fail| Cleanup[Delete zone file]
-    Cleanup --> Error502[502 Bad Gateway]
+    Cleanup --> Error500[500 Internal Server Error]
     RNDCSuccess -->|Success| Success201[201 Created]
 
     style Error400 fill:#ffe1e1
     style Error409 fill:#ffe1e1
     style Error500 fill:#ffe1e1
-    style Error502 fill:#ffe1e1
+    style Error500 fill:#ffe1e1
     style Success201 fill:#e1ffe1
 ```
 
@@ -344,9 +344,9 @@ bindcar maps RNDC errors to HTTP status codes:
 |------------|-------------|---------|
 | `zone already exists` | 409 Conflict | Zone exists |
 | `not found` | 404 Not Found | Zone doesn't exist |
-| `permission denied` | 502 Bad Gateway | RNDC permission issue |
-| `syntax error` | 502 Bad Gateway | Invalid zone file |
-| Connection refused | 502 Bad Gateway | BIND9 not running |
+| `permission denied` | 500 Internal Server Error | RNDC permission issue |
+| `syntax error` | 500 Internal Server Error | Invalid zone file |
+| Connection refused | 500 Internal Server Error | BIND9 not running |
 
 ### Error Response Format
 
@@ -469,7 +469,7 @@ Native RNDC protocol has minimal overhead:
 
 ### RNDC Connection Issues
 
-**Symptom**: 502 errors, "connection refused" or "Failed to execute RNDC command"
+**Symptom**: 500 errors, "connection refused" or "Failed to execute RNDC command"
 
 **Causes**:
 - BIND9 not running
@@ -500,7 +500,7 @@ docker logs bindcar | grep -i rndc
 
 ### Permission Errors
 
-**Symptom**: 502 errors, "permission denied"
+**Symptom**: 500 errors, "permission denied"
 
 **Causes**:
 - Zone directory not writable

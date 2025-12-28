@@ -30,7 +30,7 @@ curl http://localhost:8080/api/v1/zones/example.com/status \
 - `200 OK` - Status retrieved successfully
 - `401 Unauthorized` - Missing/invalid token
 - `404 Not Found` - Zone doesn't exist
-- `502 Bad Gateway` - RNDC command failed
+- `500 Internal Server Error` - RNDC command failed
 
 ## Get Zone Info
 

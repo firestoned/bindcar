@@ -197,6 +197,18 @@ impl RndcExecutor {
         let command = format!("modzone {} {}", zone_name, zone_config);
         self.execute(&command).await
     }
+
+    /// Show zone configuration
+    ///
+    /// # Arguments
+    /// * `zone_name` - Name of the zone (e.g., "example.com")
+    ///
+    /// # Returns
+    /// The zone configuration in BIND9 format
+    pub async fn showzone(&self, zone_name: &str) -> Result<String> {
+        let command = format!("showzone {}", zone_name);
+        self.execute(&command).await
+    }
 }
 
 impl Clone for RndcExecutor {

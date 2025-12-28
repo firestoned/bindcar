@@ -22,7 +22,7 @@ Found a bug? Please [open an issue](https://github.com/firestoned/bindcar/issues
 
 Example:
 ```markdown
-### Bug Report: Zone deletion fails with 502 error
+### Bug Report: Zone deletion fails with 500 error
 
 **Environment:**
 - bindcar: v0.1.0
@@ -32,10 +32,10 @@ Example:
 **Steps to reproduce:**
 1. Create zone: `POST /api/v1/zones` with example.com
 2. Delete zone: `DELETE /api/v1/zones/example.com`
-3. Observe 502 error
+3. Observe 500 error
 
 **Expected:** Zone deleted successfully (204)
-**Actual:** 502 Bad Gateway
+**Actual:** 500 Internal Server Error
 
 **Logs:**
 ```
@@ -320,7 +320,7 @@ Write clear, descriptive commit messages:
 ```bash
 # Good commit messages
 git commit -m "Add DNSSEC support for zone signing"
-git commit -m "Fix zone deletion 502 error when BIND9 restarts"
+git commit -m "Fix zone deletion 500 error when BIND9 restarts"
 git commit -m "Update documentation for authentication setup"
 
 # Bad commit messages (avoid these)
@@ -359,7 +359,7 @@ git push origin feature/my-feature
 Use clear, descriptive titles:
 
 - `Add DNSSEC zone signing support`
-- `Fix zone deletion 502 error`
+- `Fix zone deletion 500 error`
 - `Update installation documentation`
 - `Refactor RNDC executor for better error handling`
 

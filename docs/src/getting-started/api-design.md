@@ -153,7 +153,7 @@ graph TD
     E4xx --> E404[404 Not Found<br/>Zone Doesn't Exist]
     
     E5xx --> E500[500 Internal Error<br/>Server Failure]
-    E5xx --> E502[502 Bad Gateway<br/>RNDC Command Failed]
+    E5xx --> E500[500 Internal Server Error<br/>RNDC Command Failed]
     E5xx --> E503[503 Service Unavailable<br/>Not Ready]
     
     style S200 fill:#c8e6c9
@@ -162,7 +162,7 @@ graph TD
     style E401 fill:#ffebee
     style E404 fill:#ffebee
     style E500 fill:#ffebee
-    style E502 fill:#ffebee
+    style E500 fill:#ffebee
     style E503 fill:#ffebee
 ```
 
@@ -259,7 +259,7 @@ graph TD
     Type -->|Not Found| Client
     
     Type -->|File I/O| Server[Server Error 5xx]
-    Type -->|RNDC Failed| Gateway[Bad Gateway 502]
+    Type -->|RNDC Failed| Gateway[Bad Gateway 500]
     Type -->|Unexpected| Server
     
     Client --> Log1[Log Warning]
