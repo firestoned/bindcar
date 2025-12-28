@@ -6,7 +6,9 @@
 //! This demonstrates how bindy can import bindcar as a dependency and use the
 //! request/response types without maintaining duplicate definitions.
 
-use bindcar::{CreateZoneRequest, DnsRecord, SoaRecord, ZoneConfig, ZoneResponse, ZONE_TYPE_PRIMARY};
+use bindcar::{
+    CreateZoneRequest, DnsRecord, SoaRecord, ZoneConfig, ZoneResponse, ZONE_TYPE_PRIMARY,
+};
 use std::collections::HashMap;
 
 fn main() {
@@ -113,21 +115,22 @@ fn main() {
             "ns2.example.com.".to_string(),
         ],
         name_server_ips: ns_ips_glue, // Provide IPs for glue records
-        records: vec![
-            DnsRecord {
-                name: "@".to_string(),
-                record_type: "A".to_string(),
-                value: "192.0.2.1".to_string(),
-                ttl: None,
-                priority: None,
-            },
-        ],
+        records: vec![DnsRecord {
+            name: "@".to_string(),
+            record_type: "A".to_string(),
+            value: "192.0.2.1".to_string(),
+            ttl: None,
+            priority: None,
+        }],
         also_notify: None,
         allow_transfer: None,
         primaries: None,
     };
 
-    println!("Zone file with glue records:\n{}", zone_with_glue.to_zone_file());
+    println!(
+        "Zone file with glue records:\n{}",
+        zone_with_glue.to_zone_file()
+    );
 
     println!("\n=== Integration Notes ===\n");
     println!("To use these types in bindy, add to Cargo.toml:");

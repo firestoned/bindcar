@@ -41,9 +41,9 @@ use k8s_openapi::api::authentication::v1::TokenReview;
 #[cfg(feature = "k8s-token-review")]
 use kube::{Api, Client};
 #[cfg(feature = "k8s-token-review")]
-use tracing::error;
-#[cfg(feature = "k8s-token-review")]
 use std::env;
+#[cfg(feature = "k8s-token-review")]
+use tracing::error;
 
 /// Error response for authentication failures
 #[derive(Serialize)]
@@ -117,7 +117,8 @@ impl TokenReviewConfig {
         if self.allowed_service_accounts.is_empty() {
             return true;
         }
-        self.allowed_service_accounts.contains(&username.to_string())
+        self.allowed_service_accounts
+            .contains(&username.to_string())
     }
 
     /// Extract namespace from service account username
@@ -264,7 +265,9 @@ pub(crate) async fn validate_token_with_k8s(token: &str) -> Result<(), String> {
         })?;
 
     // Check if token is authenticated
-    let status = result.status.ok_or_else(|| "TokenReview status not available".to_string())?;
+    let status = result
+        .status
+        .ok_or_else(|| "TokenReview status not available".to_string())?;
 
     if status.authenticated != Some(true) {
         let error_msg = status
@@ -288,8 +291,14 @@ pub(crate) async fn validate_token_with_k8s(token: &str) -> Result<(), String> {
     // Validate namespace restriction
     if let Some(namespace) = TokenReviewConfig::extract_namespace(username) {
         if !config.is_namespace_allowed(&namespace) {
-            warn!("ServiceAccount from unauthorized namespace: {} (from {})", namespace, username);
-            return Err(format!("ServiceAccount from unauthorized namespace: {}", namespace));
+            warn!(
+                "ServiceAccount from unauthorized namespace: {} (from {})",
+                namespace, username
+            );
+            return Err(format!(
+                "ServiceAccount from unauthorized namespace: {}",
+                namespace
+            ));
         }
         debug!("Namespace {} is allowed", namespace);
     }

@@ -397,3 +397,24 @@ jobs:
         with:
           cargo-audit-version: "0.22.0"
           upload-artifact-name: cargo-audit-report-release
+
+  publish-crate:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs: [extract-version, build, security]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Update Cargo.toml version
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ needs.extract-version.outputs.version }}"/' Cargo.toml
+          echo "Updated Cargo.toml to version ${{ needs.extract-version.outputs.version }}"
+          grep '^version = ' Cargo.toml
+
+      - name: Publish crate to crates.io
+        uses: firestoned/github-actions/rust/publish-crate@v1.3.2
+        with:
+          token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
