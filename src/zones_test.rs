@@ -750,3 +750,149 @@ fn test_secondary_zone_with_all_transfer_fields() {
     assert_eq!(also_notify.len(), 1);
     assert_eq!(allow_transfer.len(), 2);
 }
+
+// Tests for ModifyZoneRequest
+
+#[test]
+fn test_modify_zone_request_with_both_fields() {
+    let json = r#"{
+        "alsoNotify": ["10.244.2.101", "10.244.2.102"],
+        "allowTransfer": ["10.244.2.103", "10.244.2.104"]
+    }"#;
+
+    let request: ModifyZoneRequest = serde_json::from_str(json).unwrap();
+    assert!(request.also_notify.is_some());
+    assert!(request.allow_transfer.is_some());
+
+    let also_notify = request.also_notify.unwrap();
+    let allow_transfer = request.allow_transfer.unwrap();
+
+    assert_eq!(also_notify.len(), 2);
+    assert_eq!(also_notify[0], "10.244.2.101");
+    assert_eq!(also_notify[1], "10.244.2.102");
+
+    assert_eq!(allow_transfer.len(), 2);
+    assert_eq!(allow_transfer[0], "10.244.2.103");
+    assert_eq!(allow_transfer[1], "10.244.2.104");
+}
+
+#[test]
+fn test_modify_zone_request_only_also_notify() {
+    let json = r#"{
+        "alsoNotify": ["10.244.2.101"]
+    }"#;
+
+    let request: ModifyZoneRequest = serde_json::from_str(json).unwrap();
+    assert!(request.also_notify.is_some());
+    assert!(request.allow_transfer.is_none());
+
+    let also_notify = request.also_notify.unwrap();
+    assert_eq!(also_notify.len(), 1);
+    assert_eq!(also_notify[0], "10.244.2.101");
+}
+
+#[test]
+fn test_modify_zone_request_only_allow_transfer() {
+    let json = r#"{
+        "allowTransfer": ["10.244.2.101", "10.244.2.102", "10.244.2.103"]
+    }"#;
+
+    let request: ModifyZoneRequest = serde_json::from_str(json).unwrap();
+    assert!(request.also_notify.is_none());
+    assert!(request.allow_transfer.is_some());
+
+    let allow_transfer = request.allow_transfer.unwrap();
+    assert_eq!(allow_transfer.len(), 3);
+    assert_eq!(allow_transfer[0], "10.244.2.101");
+    assert_eq!(allow_transfer[1], "10.244.2.102");
+    assert_eq!(allow_transfer[2], "10.244.2.103");
+}
+
+#[test]
+fn test_modify_zone_request_with_empty_arrays() {
+    let json = r#"{
+        "alsoNotify": [],
+        "allowTransfer": []
+    }"#;
+
+    let request: ModifyZoneRequest = serde_json::from_str(json).unwrap();
+    assert!(request.also_notify.is_some());
+    assert!(request.allow_transfer.is_some());
+
+    assert_eq!(request.also_notify.unwrap().len(), 0);
+    assert_eq!(request.allow_transfer.unwrap().len(), 0);
+}
+
+#[test]
+fn test_modify_zone_request_empty_json() {
+    let json = r#"{}"#;
+
+    let request: ModifyZoneRequest = serde_json::from_str(json).unwrap();
+    assert!(request.also_notify.is_none());
+    assert!(request.allow_transfer.is_none());
+}
+
+#[test]
+fn test_modify_zone_request_serialization() {
+    let request = ModifyZoneRequest {
+        also_notify: Some(vec!["10.244.2.101".to_string()]),
+        allow_transfer: Some(vec!["10.244.2.102".to_string()]),
+    };
+
+    let json = serde_json::to_string(&request).unwrap();
+    assert!(json.contains("alsoNotify"));
+    assert!(json.contains("allowTransfer"));
+    assert!(json.contains("10.244.2.101"));
+    assert!(json.contains("10.244.2.102"));
+}
+
+#[test]
+fn test_modify_zone_request_serialization_skip_none() {
+    let request = ModifyZoneRequest {
+        also_notify: Some(vec!["10.244.2.101".to_string()]),
+        allow_transfer: None,
+    };
+
+    let json = serde_json::to_string(&request).unwrap();
+    assert!(json.contains("alsoNotify"));
+    assert!(!json.contains("allowTransfer")); // Should be skipped when None
+}
+
+#[test]
+fn test_modify_zone_request_with_ipv6_addresses() {
+    let json = r#"{
+        "alsoNotify": ["2001:db8::1", "2001:db8::2"],
+        "allowTransfer": ["2001:db8::3"]
+    }"#;
+
+    let request: ModifyZoneRequest = serde_json::from_str(json).unwrap();
+    assert!(request.also_notify.is_some());
+    assert!(request.allow_transfer.is_some());
+
+    let also_notify = request.also_notify.unwrap();
+    let allow_transfer = request.allow_transfer.unwrap();
+
+    assert_eq!(also_notify.len(), 2);
+    assert_eq!(also_notify[0], "2001:db8::1");
+    assert_eq!(allow_transfer[0], "2001:db8::3");
+}
+
+#[test]
+fn test_modify_zone_request_with_mixed_ip_versions() {
+    let json = r#"{
+        "alsoNotify": ["10.244.2.101", "2001:db8::1"],
+        "allowTransfer": ["192.168.1.1", "fe80::1"]
+    }"#;
+
+    let request: ModifyZoneRequest = serde_json::from_str(json).unwrap();
+    let also_notify = request.also_notify.unwrap();
+    let allow_transfer = request.allow_transfer.unwrap();
+
+    assert_eq!(also_notify.len(), 2);
+    assert_eq!(also_notify[0], "10.244.2.101");
+    assert_eq!(also_notify[1], "2001:db8::1");
+
+    assert_eq!(allow_transfer.len(), 2);
+    assert_eq!(allow_transfer[0], "192.168.1.1");
+    assert_eq!(allow_transfer[1], "fe80::1");
+}

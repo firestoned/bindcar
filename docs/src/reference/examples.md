@@ -755,6 +755,204 @@ if __name__ == "__main__":
     create_internal_dns_zone()
 ```
 
+## Zone Configuration Updates
+
+### Modifying Zone Transfer Settings
+
+Update `also-notify` and `allow-transfer` settings without recreating the zone.
+
+```bash
+#!/bin/bash
+set -e
+
+TOKEN="your-secret-token"
+BASE_URL="http://localhost:8080/api/v1"
+ZONE="example.com"
+
+# Add secondary DNS servers to also-notify list
+echo "Adding secondary servers to also-notify..."
+curl -X PATCH "$BASE_URL/zones/$ZONE" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alsoNotify": ["10.244.2.101", "10.244.2.102"],
+    "allowTransfer": ["10.244.2.101", "10.244.2.102"]
+  }'
+
+echo -e "\n\nVerifying zone configuration..."
+curl "$BASE_URL/zones/$ZONE/status" \
+  -H "Authorization: Bearer $TOKEN"
+
+echo -e "\n\nNotifying secondary servers..."
+curl -X POST "$BASE_URL/zones/$ZONE/notify" \
+  -H "Authorization: Bearer $TOKEN"
+
+echo -e "\n\nDone!"
+```
+
+### Python: Update Zone Transfer Configuration
+
+```python
+#!/usr/bin/env python3
+import requests
+import json
+
+BASE_URL = "http://localhost:8080/api/v1"
+TOKEN = "your-secret-token"
+
+headers = {
+    "Authorization": f"Bearer {TOKEN}",
+    "Content-Type": "application/json"
+}
+
+def modify_zone_transfer_config(zone_name, also_notify=None, allow_transfer=None):
+    """Update zone transfer configuration."""
+    url = f"{BASE_URL}/zones/{zone_name}"
+
+    data = {}
+    if also_notify is not None:
+        data["alsoNotify"] = also_notify
+    if allow_transfer is not None:
+        data["allowTransfer"] = allow_transfer
+
+    if not data:
+        print("Error: At least one field must be provided")
+        return None
+
+    response = requests.patch(url, headers=headers, json=data)
+
+    if response.status_code == 200:
+        result = response.json()
+        print(f"✓ Modified zone: {zone_name}")
+        print(f"  Message: {result.get('message')}")
+        return result
+    else:
+        print(f"✗ Failed to modify {zone_name}: {response.text}")
+        return None
+
+# Example 1: Add secondary servers
+print("Example 1: Add secondary servers")
+modify_zone_transfer_config(
+    zone_name="example.com",
+    also_notify=["10.244.2.101", "10.244.2.102"],
+    allow_transfer=["10.244.2.101", "10.244.2.102"]
+)
+
+# Example 2: Update only also-notify
+print("\nExample 2: Update only also-notify")
+modify_zone_transfer_config(
+    zone_name="example.com",
+    also_notify=["10.244.2.101", "10.244.2.102", "10.244.2.103"]
+)
+
+# Example 3: Clear also-notify
+print("\nExample 3: Clear also-notify")
+modify_zone_transfer_config(
+    zone_name="example.com",
+    also_notify=[]
+)
+
+# Example 4: IPv6 addresses
+print("\nExample 4: IPv6 addresses")
+modify_zone_transfer_config(
+    zone_name="example.com",
+    also_notify=["2001:db8::1", "2001:db8::2"],
+    allow_transfer=["2001:db8::1", "2001:db8::2"]
+)
+```
+
+### Automated Secondary Server Management
+
+```python
+#!/usr/bin/env python3
+import requests
+import json
+from typing import List
+
+BASE_URL = "http://localhost:8080/api/v1"
+TOKEN = "your-secret-token"
+
+headers = {
+    "Authorization": f"Bearer {TOKEN}",
+    "Content-Type": "application/json"
+}
+
+class ZoneManager:
+    """Manage zone transfer configurations."""
+
+    def __init__(self, base_url: str, token: str):
+        self.base_url = base_url
+        self.headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+    def get_secondary_servers(self) -> List[str]:
+        """Get list of secondary DNS servers from your infrastructure."""
+        # In production, this would query your infrastructure
+        # For example: Kubernetes API, Consul, etcd, etc.
+        return [
+            "10.244.2.101",
+            "10.244.2.102",
+            "10.244.2.103"
+        ]
+
+    def update_zone_secondaries(self, zone_name: str) -> bool:
+        """Update zone to use current secondary servers."""
+        secondaries = self.get_secondary_servers()
+
+        if not secondaries:
+            print(f"No secondary servers found for {zone_name}")
+            return False
+
+        url = f"{self.base_url}/zones/{zone_name}"
+        data = {
+            "alsoNotify": secondaries,
+            "allowTransfer": secondaries
+        }
+
+        response = requests.patch(url, headers=self.headers, json=data)
+
+        if response.status_code == 200:
+            print(f"✓ Updated {zone_name} with {len(secondaries)} secondaries")
+            return True
+        else:
+            print(f"✗ Failed to update {zone_name}: {response.text}")
+            return False
+
+    def sync_all_zones(self) -> None:
+        """Update all zones with current secondary servers."""
+        # Get all zones
+        response = requests.get(
+            f"{self.base_url}/zones",
+            headers=self.headers
+        )
+
+        if response.status_code != 200:
+            print(f"Failed to list zones: {response.text}")
+            return
+
+        zones = response.json().get("zones", [])
+        print(f"Found {len(zones)} zones to update")
+
+        success_count = 0
+        for zone in zones:
+            if self.update_zone_secondaries(zone):
+                success_count += 1
+
+        print(f"\n✓ Updated {success_count}/{len(zones)} zones")
+
+# Usage
+if __name__ == "__main__":
+    manager = ZoneManager(BASE_URL, TOKEN)
+
+    # Option 1: Update a specific zone
+    manager.update_zone_secondaries("example.com")
+
+    # Option 2: Sync all zones (useful for automation)
+    # manager.sync_all_zones()
+```
+
 ## Monitoring Integration
 
 ### Prometheus Blackbox Exporter

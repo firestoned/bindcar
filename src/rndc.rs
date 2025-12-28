@@ -187,6 +187,16 @@ impl RndcExecutor {
         let command = format!("retransfer {}", zone_name);
         self.execute(&command).await
     }
+
+    /// Modify a zone configuration
+    ///
+    /// # Arguments
+    /// * `zone_name` - Name of the zone (e.g., "example.com")
+    /// * `zone_config` - Zone configuration block (e.g., "{ also-notify { 10.0.0.1; }; allow-transfer { 10.0.0.2; }; }")
+    pub async fn modzone(&self, zone_name: &str, zone_config: &str) -> Result<String> {
+        let command = format!("modzone {} {}", zone_name, zone_config);
+        self.execute(&command).await
+    }
 }
 
 impl Clone for RndcExecutor {

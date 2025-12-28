@@ -45,6 +45,7 @@ use tower_governor::{governor::GovernorConfigBuilder, key_extractor::SmartIpKeyE
     paths(
         zones::create_zone,
         zones::delete_zone,
+        zones::modify_zone,
         zones::reload_zone,
         zones::zone_status,
         zones::freeze_zone,
@@ -58,6 +59,7 @@ use tower_governor::{governor::GovernorConfigBuilder, key_extractor::SmartIpKeyE
     components(
         schemas(
             zones::CreateZoneRequest,
+            zones::ModifyZoneRequest,
             zones::ZoneResponse,
             zones::ServerStatusResponse,
             zones::ZoneInfo,
@@ -285,7 +287,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/zones", post(zones::create_zone).get(zones::list_zones))
         .route(
             "/zones/{name}",
-            get(zones::get_zone).delete(zones::delete_zone),
+            get(zones::get_zone)
+                .delete(zones::delete_zone)
+                .patch(zones::modify_zone),
         )
         .route("/zones/{name}/reload", post(zones::reload_zone))
         .route("/zones/{name}/status", get(zones::zone_status))
