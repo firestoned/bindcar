@@ -234,6 +234,21 @@ pub struct CreateZoneRequest {
     pub update_key_name: Option<String>,
 }
 
+/// Request to modify a zone configuration
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ModifyZoneRequest {
+    /// IP addresses of secondary servers to notify when zone changes (BIND9 also-notify)
+    /// Example: ["10.244.2.101", "10.244.2.102"]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub also_notify: Option<Vec<String>>,
+
+    /// IP addresses allowed to transfer the zone (BIND9 allow-transfer)
+    /// Example: ["10.244.2.101", "10.244.2.102"]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_transfer: Option<Vec<String>>,
+}
+
 /// Response from zone operations
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ZoneResponse {
@@ -822,5 +837,128 @@ pub async fn get_zone(
         zone_type,
         serial,
         file_path: Some(zone_file_path.display().to_string()),
+    }))
+}
+
+/// Modify a zone configuration
+///
+/// This endpoint allows updating zone configuration parameters such as
+/// also-notify and allow-transfer IP addresses without recreating the zone.
+/// It uses the `rndc modzone` command to dynamically update the zone configuration.
+#[utoipa::path(
+    patch,
+    path = "/api/v1/zones/{name}",
+    request_body = ModifyZoneRequest,
+    params(
+        ("name" = String, Path, description = "Zone name to modify")
+    ),
+    responses(
+        (status = 200, description = "Zone modified successfully", body = ZoneResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 404, description = "Zone not found"),
+        (status = 502, description = "RNDC command failed"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "zones"
+)]
+pub async fn modify_zone(
+    State(state): State<AppState>,
+    Path(zone_name): Path<String>,
+    Json(request): Json<ModifyZoneRequest>,
+) -> Result<Json<ZoneResponse>, ApiError> {
+    info!("Modifying zone: {}", zone_name);
+
+    // Validate that at least one field is being updated
+    if request.also_notify.is_none() && request.allow_transfer.is_none() {
+        metrics::record_zone_operation("modify", false);
+        return Err(ApiError::InvalidRequest(
+            "At least one field (alsoNotify or allowTransfer) must be provided".to_string(),
+        ));
+    }
+
+    // Check if zone exists by checking for zone file or querying status
+    let zone_file_name = format!("{}.zone", zone_name);
+    let zone_file_path = PathBuf::from(&state.zone_dir).join(&zone_file_name);
+
+    // For secondary zones, there may not be a zone file, so we should check status instead
+    let zone_exists = if zone_file_path.exists() {
+        true
+    } else {
+        // Try to get zone status to see if it exists
+        match state.rndc.zonestatus(&zone_name).await {
+            Ok(_) => true,
+            Err(e) => {
+                if e.to_string().contains("not found") {
+                    false
+                } else {
+                    // Some other error, but zone might exist
+                    true
+                }
+            }
+        }
+    };
+
+    if !zone_exists {
+        metrics::record_zone_operation("modify", false);
+        return Err(ApiError::ZoneNotFound(zone_name.clone()));
+    }
+
+    // Build zone configuration for rndc modzone
+    let mut config_parts = Vec::new();
+
+    // Add also-notify if provided
+    if let Some(also_notify) = &request.also_notify {
+        if !also_notify.is_empty() {
+            let notify_list = also_notify
+                .iter()
+                .map(|ip| format!("{}; ", ip))
+                .collect::<String>();
+            config_parts.push(format!(r#"also-notify {{ {} }}"#, notify_list));
+        } else {
+            // Empty list means remove also-notify
+            config_parts.push("also-notify { }".to_string());
+        }
+    }
+
+    // Add allow-transfer if provided
+    if let Some(allow_transfer) = &request.allow_transfer {
+        if !allow_transfer.is_empty() {
+            let transfer_list = allow_transfer
+                .iter()
+                .map(|ip| format!("{}; ", ip))
+                .collect::<String>();
+            config_parts.push(format!(r#"allow-transfer {{ {} }}"#, transfer_list));
+        } else {
+            // Empty list means remove allow-transfer (or set to none)
+            config_parts.push("allow-transfer { }".to_string());
+        }
+    }
+
+    // Join all parts into final configuration
+    let zone_config = format!("{{ {}; }};", config_parts.join("; "));
+
+    info!(
+        "Modifying zone {} with config: {}",
+        zone_name, zone_config
+    );
+
+    // Execute rndc modzone
+    let output = state
+        .rndc
+        .modzone(&zone_name, &zone_config)
+        .await
+        .map_err(|e| {
+            error!("RNDC modzone failed for {}: {}", zone_name, e);
+            metrics::record_zone_operation("modify", false);
+            ApiError::RndcError(format!("Failed to modify zone: {}", e))
+        })?;
+
+    info!("Zone {} modified successfully", zone_name);
+    metrics::record_zone_operation("modify", true);
+
+    Ok(Json(ZoneResponse {
+        success: true,
+        message: format!("Zone {} modified successfully", zone_name),
+        details: Some(output),
     }))
 }

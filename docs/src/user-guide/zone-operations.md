@@ -9,15 +9,17 @@ Overview of zone management operations available through the bindcar API.
 1. **Create Zone** - Create a new DNS zone
 2. **List Zones** - Get all zones
 3. **Get Zone** - Get specific zone information
-4. **Delete Zone** - Remove a zone
-5. **Reload Zone** - Reload zone from file
-6. **Zone Status** - Get zone status from BIND9
+4. **Modify Zone** - Update zone configuration (also-notify, allow-transfer)
+5. **Delete Zone** - Remove a zone
+6. **Reload Zone** - Reload zone from file
+7. **Zone Status** - Get zone status from BIND9
 
 ### Zone Management
 
-7. **Freeze Zone** - Disable dynamic updates
-8. **Thaw Zone** - Enable dynamic updates
-9. **Notify Secondaries** - Trigger zone transfer notifications
+8. **Freeze Zone** - Disable dynamic updates
+9. **Thaw Zone** - Enable dynamic updates
+10. **Notify Secondaries** - Trigger zone transfer notifications
+11. **Retransfer Zone** - Force zone retransfer from primary
 
 ## Quick Reference
 
@@ -26,12 +28,14 @@ Overview of zone management operations available through the bindcar API.
 | Create Zone | POST | `/api/v1/zones` | Yes |
 | List Zones | GET | `/api/v1/zones` | Yes |
 | Get Zone | GET | `/api/v1/zones/{name}` | Yes |
+| Modify Zone | PATCH | `/api/v1/zones/{name}` | Yes |
 | Delete Zone | DELETE | `/api/v1/zones/{name}` | Yes |
 | Reload Zone | POST | `/api/v1/zones/{name}/reload` | Yes |
 | Zone Status | GET | `/api/v1/zones/{name}/status` | Yes |
 | Freeze Zone | POST | `/api/v1/zones/{name}/freeze` | Yes |
 | Thaw Zone | POST | `/api/v1/zones/{name}/thaw` | Yes |
 | Notify Secondaries | POST | `/api/v1/zones/{name}/notify` | Yes |
+| Retransfer Zone | POST | `/api/v1/zones/{name}/retransfer` | Yes |
 
 ## Common Workflows
 
@@ -66,7 +70,24 @@ curl http://localhost:8080/api/v1/zones/example.com \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-### Updating a Zone
+### Modifying Zone Configuration
+
+```bash
+# 1. Update zone transfer settings (also-notify, allow-transfer)
+curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alsoNotify": ["10.244.2.101", "10.244.2.102"],
+    "allowTransfer": ["10.244.2.101", "10.244.2.102"]
+  }'
+
+# 2. Verify changes were applied
+curl http://localhost:8080/api/v1/zones/example.com/status \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Updating Zone Records
 
 ```bash
 # 1. Modify zone file directly on filesystem

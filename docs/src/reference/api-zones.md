@@ -225,6 +225,129 @@ curl -X DELETE http://localhost:8080/api/v1/zones/example.com \
 
 ---
 
+## Modify Zone
+
+**PATCH** `/api/v1/zones/{name}`
+
+Modifies zone configuration parameters such as `also-notify` and `allow-transfer` IP addresses without recreating the zone. This endpoint uses the `rndc modzone` command to dynamically update the zone configuration in BIND9.
+
+### Request
+
+```http
+PATCH /api/v1/zones/example.com HTTP/1.1
+Host: localhost:8080
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "alsoNotify": ["10.244.2.101", "10.244.2.102"],
+  "allowTransfer": ["10.244.2.101", "10.244.2.102"]
+}
+```
+
+### Request Body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `alsoNotify` | array[string] | No | IP addresses of secondary servers to notify when zone changes |
+| `allowTransfer` | array[string] | No | IP addresses allowed to transfer the zone |
+
+**Note**: At least one field must be provided. Both fields are optional, but the request cannot be empty.
+
+### Response
+
+```json
+{
+  "success": true,
+  "message": "Zone example.com modified successfully",
+  "details": "zone example.com/IN: reconfigured"
+}
+```
+
+### Errors
+
+| Code | Description |
+|------|-------------|
+| 400  | Invalid request (empty request or invalid IP addresses) |
+| 404  | Zone not found |
+| 502  | RNDC command failed |
+
+### Examples
+
+#### Update both also-notify and allow-transfer
+
+```bash
+curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alsoNotify": ["10.244.2.101", "10.244.2.102"],
+    "allowTransfer": ["10.244.2.101", "10.244.2.102"]
+  }'
+```
+
+#### Update only also-notify
+
+```bash
+curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alsoNotify": ["10.244.2.101"]
+  }'
+```
+
+#### Update only allow-transfer
+
+```bash
+curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allowTransfer": ["10.244.2.103", "10.244.2.104"]
+  }'
+```
+
+#### Clear also-notify (set to empty)
+
+```bash
+curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alsoNotify": []
+  }'
+```
+
+#### Using IPv6 addresses
+
+```bash
+curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alsoNotify": ["2001:db8::1", "2001:db8::2"],
+    "allowTransfer": ["2001:db8::3"]
+  }'
+```
+
+### Use Cases
+
+- **Zone Replication**: Add or update secondary DNS servers that should receive zone transfer notifications
+- **Access Control**: Control which servers are allowed to perform zone transfers
+- **Dynamic Updates**: Modify zone transfer settings without deleting and recreating the zone
+- **High Availability**: Update secondary server lists as your infrastructure changes
+
+### Notes
+
+- This operation works with both primary and secondary zones
+- Changes take effect immediately without requiring a zone reload
+- For secondary zones, the zone file may not exist; the endpoint checks zone status to verify existence
+- Empty arrays can be used to clear/remove existing settings
+- Both IPv4 and IPv6 addresses are supported
+
+---
+
 ## Reload Zone
 
 **POST** `/api/v1/zones/{name}/reload`
