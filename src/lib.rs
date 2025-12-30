@@ -183,6 +183,10 @@ mod middleware_test;
 mod rndc_test;
 #[cfg(test)]
 mod rndc_parser_tests;
+
+#[cfg(test)]
+mod rndc_types_tests;
+
 #[cfg(test)]
 mod types_test;
 #[cfg(test)]

@@ -15,7 +15,10 @@
 //! assert_eq!(config.zone_name, "example.com");
 //! ```
 
-use crate::rndc_types::{DnsClass, PrimarySpec, ZoneConfig, ZoneType};
+use crate::rndc_types::{
+    AutoDnssecMode, CheckNamesMode, DnsClass, ForwardMode, ForwarderSpec, MasterfileFormat,
+    NotifyMode, PrimarySpec, ZoneConfig, ZoneType,
+};
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_until, take_while1},
@@ -148,13 +151,69 @@ fn primary_list(input: &str) -> IResult<&str, Vec<PrimarySpec>> {
 /// Statement types within a zone configuration
 #[derive(Debug)]
 enum ZoneStatement {
+    // Core
     Type(ZoneType),
     File(String),
+
+    // Primary/Secondary
     Primaries(Vec<PrimarySpec>),
     AlsoNotify(Vec<IpAddr>),
+    Notify(NotifyMode),
+
+    // Access Control
+    AllowQuery(Vec<IpAddr>),
     AllowTransfer(Vec<IpAddr>),
     AllowUpdate(Vec<IpAddr>),
-    AllowUpdateRaw(String), // Raw allow-update directive for key-based updates
+    AllowUpdateRaw(String),
+    AllowUpdateForwarding(Vec<IpAddr>),
+    AllowNotify(Vec<IpAddr>),
+
+    // Transfer Control
+    MaxTransferTimeIn(u32),
+    MaxTransferTimeOut(u32),
+    MaxTransferIdleIn(u32),
+    MaxTransferIdleOut(u32),
+    TransferSource(IpAddr),
+    TransferSourceV6(IpAddr),
+    NotifySource(IpAddr),
+    NotifySourceV6(IpAddr),
+
+    // Dynamic Updates
+    UpdatePolicy(String),
+    Journal(String),
+    IxfrFromDifferences(bool),
+
+    // DNSSEC
+    InlineSigning(bool),
+    AutoDnssec(AutoDnssecMode),
+    KeyDirectory(String),
+    SigValidityInterval(u32),
+    DnskeySigValidity(u32),
+
+    // Forwarding
+    Forward(ForwardMode),
+    Forwarders(Vec<ForwarderSpec>),
+
+    // Zone Maintenance
+    CheckNames(CheckNamesMode),
+    CheckMx(CheckNamesMode),
+    CheckIntegrity(bool),
+    MasterfileFormat(MasterfileFormat),
+    MaxZoneTtl(u32),
+
+    // Refresh/Retry
+    MaxRefreshTime(u32),
+    MinRefreshTime(u32),
+    MaxRetryTime(u32),
+    MinRetryTime(u32),
+
+    // Miscellaneous
+    MultiMaster(bool),
+    RequestIxfr(bool),
+    RequestExpire(bool),
+
+    // Catch-all for unknown options
+    Unknown(String, String), // (option_name, raw_value)
 }
 
 /// Parse zone type statement: type primary;
@@ -266,6 +325,32 @@ fn parse_allow_update_statement(input: &str) -> IResult<&str, ZoneStatement> {
     }
 }
 
+/// Parse an unknown/generic zone statement (catch-all)
+/// Format: option-name value; or option-name { ... };
+fn parse_unknown_statement(input: &str) -> IResult<&str, ZoneStatement> {
+    // Parse the option name
+    let (input, option_name) = ws(identifier)(input)?;
+
+    // Capture starting position for value
+    let start_input = input;
+
+    // Try to parse value - could be a simple value or a block
+    let (input, _value) = alt((
+        // Block value: { ... };
+        delimited(ws(char('{')), take_until("}"), ws(char('}'))),
+        // Simple value (anything until semicolon)
+        take_until(";"),
+    ))(input)?;
+
+    // Calculate raw value
+    let value_len = start_input.len() - input.len();
+    let raw_value = start_input[..value_len].trim().to_string();
+
+    let (input, _) = semicolon(input)?;
+
+    Ok((input, ZoneStatement::Unknown(option_name.to_string(), raw_value)))
+}
+
 /// Parse any zone statement
 fn parse_zone_statement(input: &str) -> IResult<&str, ZoneStatement> {
     alt((
@@ -275,6 +360,8 @@ fn parse_zone_statement(input: &str) -> IResult<&str, ZoneStatement> {
         parse_also_notify_statement,
         parse_allow_transfer_statement,
         parse_allow_update_statement,
+        // Catch-all for unknown options (must be last)
+        parse_unknown_statement,
     ))(input)
 }
 
@@ -316,13 +403,71 @@ fn parse_zone_config_internal(input: &str) -> IResult<&str, ZoneConfig> {
 
     for stmt in statements {
         match stmt {
+            // Core
             ZoneStatement::Type(t) => config.zone_type = t,
             ZoneStatement::File(f) => config.file = Some(f),
+
+            // Primary/Secondary
             ZoneStatement::Primaries(p) => config.primaries = Some(p),
             ZoneStatement::AlsoNotify(a) => config.also_notify = Some(a),
+            ZoneStatement::Notify(n) => config.notify = Some(n),
+
+            // Access Control
+            ZoneStatement::AllowQuery(a) => config.allow_query = Some(a),
             ZoneStatement::AllowTransfer(a) => config.allow_transfer = Some(a),
             ZoneStatement::AllowUpdate(a) => config.allow_update = Some(a),
             ZoneStatement::AllowUpdateRaw(raw) => config.allow_update_raw = Some(raw),
+            ZoneStatement::AllowUpdateForwarding(a) => config.allow_update_forwarding = Some(a),
+            ZoneStatement::AllowNotify(a) => config.allow_notify = Some(a),
+
+            // Transfer Control
+            ZoneStatement::MaxTransferTimeIn(v) => config.max_transfer_time_in = Some(v),
+            ZoneStatement::MaxTransferTimeOut(v) => config.max_transfer_time_out = Some(v),
+            ZoneStatement::MaxTransferIdleIn(v) => config.max_transfer_idle_in = Some(v),
+            ZoneStatement::MaxTransferIdleOut(v) => config.max_transfer_idle_out = Some(v),
+            ZoneStatement::TransferSource(ip) => config.transfer_source = Some(ip),
+            ZoneStatement::TransferSourceV6(ip) => config.transfer_source_v6 = Some(ip),
+            ZoneStatement::NotifySource(ip) => config.notify_source = Some(ip),
+            ZoneStatement::NotifySourceV6(ip) => config.notify_source_v6 = Some(ip),
+
+            // Dynamic Updates
+            ZoneStatement::UpdatePolicy(p) => config.update_policy = Some(p),
+            ZoneStatement::Journal(j) => config.journal = Some(j),
+            ZoneStatement::IxfrFromDifferences(v) => config.ixfr_from_differences = Some(v),
+
+            // DNSSEC
+            ZoneStatement::InlineSigning(v) => config.inline_signing = Some(v),
+            ZoneStatement::AutoDnssec(m) => config.auto_dnssec = Some(m),
+            ZoneStatement::KeyDirectory(d) => config.key_directory = Some(d),
+            ZoneStatement::SigValidityInterval(v) => config.sig_validity_interval = Some(v),
+            ZoneStatement::DnskeySigValidity(v) => config.dnskey_sig_validity = Some(v),
+
+            // Forwarding
+            ZoneStatement::Forward(m) => config.forward = Some(m),
+            ZoneStatement::Forwarders(f) => config.forwarders = Some(f),
+
+            // Zone Maintenance
+            ZoneStatement::CheckNames(m) => config.check_names = Some(m),
+            ZoneStatement::CheckMx(m) => config.check_mx = Some(m),
+            ZoneStatement::CheckIntegrity(v) => config.check_integrity = Some(v),
+            ZoneStatement::MasterfileFormat(f) => config.masterfile_format = Some(f),
+            ZoneStatement::MaxZoneTtl(v) => config.max_zone_ttl = Some(v),
+
+            // Refresh/Retry
+            ZoneStatement::MaxRefreshTime(v) => config.max_refresh_time = Some(v),
+            ZoneStatement::MinRefreshTime(v) => config.min_refresh_time = Some(v),
+            ZoneStatement::MaxRetryTime(v) => config.max_retry_time = Some(v),
+            ZoneStatement::MinRetryTime(v) => config.min_retry_time = Some(v),
+
+            // Miscellaneous
+            ZoneStatement::MultiMaster(v) => config.multi_master = Some(v),
+            ZoneStatement::RequestIxfr(v) => config.request_ixfr = Some(v),
+            ZoneStatement::RequestExpire(v) => config.request_expire = Some(v),
+
+            // Catch-all
+            ZoneStatement::Unknown(key, value) => {
+                config.raw_options.insert(key, value);
+            }
         }
     }
 

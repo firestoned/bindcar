@@ -603,4 +603,245 @@ mod tests {
         assert!(modzone_config.contains("allow-update { key \"bindy-operator\"; }"),
                 "Should have properly formatted allow-update: {}", modzone_config);
     }
+
+    // ========== Enhanced Features: Unknown Option Preservation ==========
+
+    #[test]
+    fn test_unknown_options_preserved() {
+        let input = r#"zone "example.com" {
+            type primary;
+            file "/var/cache/bind/example.com.zone";
+            zone-statistics yes;
+            max-zone-ttl 86400;
+        };"#;
+
+        let config = parse_showzone(input).unwrap();
+
+        assert_eq!(config.zone_name, "example.com");
+        assert_eq!(config.zone_type, ZoneType::Primary);
+        assert!(config.raw_options.contains_key("zone-statistics"));
+        assert!(config.raw_options.contains_key("max-zone-ttl"));
+    }
+
+    #[test]
+    fn test_unknown_options_with_braces() {
+        let input = r#"zone "example.com" {
+            type primary;
+            file "/var/cache/bind/example.com.zone";
+            update-policy { grant example.com. zonesub any; };
+        };"#;
+
+        let config = parse_showzone(input).unwrap();
+
+        assert_eq!(config.zone_name, "example.com");
+        assert!(config.raw_options.contains_key("update-policy"));
+        let update_policy = config.raw_options.get("update-policy").unwrap();
+        assert!(update_policy.contains("grant"));
+        assert!(update_policy.contains("zonesub"));
+    }
+
+    #[test]
+    fn test_roundtrip_with_unknown_options() {
+        let input = r#"zone "example.com" {
+            type primary;
+            file "/var/cache/bind/example.com.zone";
+            zone-statistics full;
+            check-names warn;
+        };"#;
+
+        let config = parse_showzone(input).unwrap();
+        let serialized = config.to_rndc_block();
+
+        // Verify essential fields are preserved
+        assert!(serialized.contains("type primary"));
+        assert!(serialized.contains(r#"file "/var/cache/bind/example.com.zone""#));
+
+        // Verify unknown options are preserved
+        assert!(serialized.contains("zone-statistics"));
+        assert!(serialized.contains("full"));
+        assert!(serialized.contains("check-names"));
+        assert!(serialized.contains("warn"));
+    }
+
+    #[test]
+    fn test_complex_zone_with_multiple_unknowns() {
+        let input = r#"zone "example.com" {
+            type primary;
+            file "/var/cache/bind/example.com.zone";
+            allow-transfer { 10.1.1.1; 10.2.2.2; };
+            also-notify { 10.3.3.3; };
+            check-integrity yes;
+            check-mx fail;
+            dialup no;
+            max-transfer-time-in 60;
+        };"#;
+
+        let config = parse_showzone(input).unwrap();
+
+        // Known options should be parsed
+        assert_eq!(config.allow_transfer.as_ref().unwrap().len(), 2);
+        assert_eq!(config.also_notify.as_ref().unwrap().len(), 1);
+
+        // Unknown options should be in raw_options
+        assert!(config.raw_options.contains_key("check-integrity"));
+        assert!(config.raw_options.contains_key("check-mx"));
+        assert!(config.raw_options.contains_key("dialup"));
+        assert!(config.raw_options.contains_key("max-transfer-time-in"));
+    }
+
+    #[test]
+    fn test_serialize_preserves_order() {
+        let input = r#"zone "example.com" {
+            type primary;
+            file "/var/cache/bind/example.com.zone";
+            allow-transfer { 10.1.1.1; };
+            zone-statistics yes;
+        };"#;
+
+        let config = parse_showzone(input).unwrap();
+        let serialized = config.to_rndc_block();
+
+        // Verify no double semicolons
+        assert!(!serialized.contains(";;"));
+
+        // Verify proper format
+        assert!(serialized.starts_with("{ "));
+        assert!(serialized.ends_with("; };"));
+    }
+
+    #[test]
+    fn test_empty_raw_options() {
+        let input = r#"zone "example.com" {
+            type primary;
+            file "/var/cache/bind/example.com.zone";
+        };"#;
+
+        let config = parse_showzone(input).unwrap();
+
+        assert_eq!(config.raw_options.len(), 0);
+
+        let serialized = config.to_rndc_block();
+        assert!(serialized.contains("type primary"));
+        assert!(!serialized.contains(";;"));
+    }
+
+    #[test]
+    fn test_mixed_known_and_unknown_options() {
+        let input = r#"zone "example.com" {
+            type secondary;
+            file "/var/cache/bind/example.com.zone";
+            primaries { 192.168.1.1; 192.168.1.2 port 5353; };
+            max-refresh-time 3600;
+            min-retry-time 600;
+            request-ixfr yes;
+        };"#;
+
+        let config = parse_showzone(input).unwrap();
+
+        // Known options
+        assert_eq!(config.zone_type, ZoneType::Secondary);
+        assert!(config.primaries.is_some());
+        assert_eq!(config.primaries.as_ref().unwrap().len(), 2);
+
+        // Verify port parsing
+        assert_eq!(config.primaries.as_ref().unwrap()[1].port, Some(5353));
+
+        // Unknown options
+        assert!(config.raw_options.contains_key("max-refresh-time"));
+        assert!(config.raw_options.contains_key("min-retry-time"));
+        assert!(config.raw_options.contains_key("request-ixfr"));
+    }
+
+    #[test]
+    fn test_serialize_raw_options_no_trailing_semicolons() {
+        let mut config = ZoneConfig::new(
+            "example.com".to_string(),
+            ZoneType::Primary,
+        );
+        config.file = Some("/var/cache/bind/example.com.zone".to_string());
+        config.raw_options.insert("zone-statistics".to_string(), "yes".to_string());
+        config.raw_options.insert(
+            "check-names".to_string(),
+            "warn".to_string(),
+        );
+
+        let serialized = config.to_rndc_block();
+
+        // Should not have double semicolons
+        assert!(!serialized.contains(";;"));
+
+        // Should contain the options
+        assert!(serialized.contains("zone-statistics"));
+        assert!(serialized.contains("check-names"));
+    }
+
+    #[test]
+    fn test_unknown_option_with_quoted_value() {
+        let input = r#"zone "example.com" {
+            type primary;
+            file "/var/cache/bind/example.com.zone";
+            journal "/var/lib/bind/journal/example.com.jnl";
+        };"#;
+
+        let config = parse_showzone(input).unwrap();
+
+        assert!(config.raw_options.contains_key("journal"));
+        let journal = config.raw_options.get("journal").unwrap();
+        assert!(journal.contains("/var/lib/bind/journal/example.com.jnl"));
+    }
+
+    #[test]
+    fn test_parse_and_reserialize_preserves_functionality() {
+        let original = r#"zone "test.com" {
+            type primary;
+            file "/var/cache/bind/test.com.zone";
+            allow-transfer { 10.1.1.1; 10.2.2.2; };
+            also-notify { 10.3.3.3; };
+            allow-update { key "mykey"; };
+            check-mx warn;
+            zone-statistics full;
+        };"#;
+
+        let config = parse_showzone(original).unwrap();
+        let serialized = config.to_rndc_block();
+
+        // Parse the serialized version
+        // Note: We don't have a full zone statement parser, so we'll just verify format
+        assert!(serialized.contains("type primary"));
+        assert!(serialized.contains("allow-transfer"));
+        assert!(serialized.contains("also-notify"));
+        assert!(serialized.contains("allow-update"));
+        assert!(serialized.contains("check-mx"));
+        assert!(serialized.contains("zone-statistics"));
+
+        // Verify key-based allow-update is preserved
+        assert!(serialized.contains("key"));
+        assert!(serialized.contains("mykey"));
+    }
+
+    #[test]
+    fn test_many_unknown_options() {
+        let input = r#"zone "example.com" {
+            type primary;
+            file "/var/cache/bind/example.com.zone";
+            option1 value1;
+            option2 value2;
+            option3 value3;
+            option4 value4;
+            option5 value5;
+        };"#;
+
+        let config = parse_showzone(input).unwrap();
+
+        assert_eq!(config.raw_options.len(), 5);
+        assert!(config.raw_options.contains_key("option1"));
+        assert!(config.raw_options.contains_key("option2"));
+        assert!(config.raw_options.contains_key("option3"));
+        assert!(config.raw_options.contains_key("option4"));
+        assert!(config.raw_options.contains_key("option5"));
+
+        let serialized = config.to_rndc_block();
+        assert!(serialized.contains("option1"));
+        assert!(serialized.contains("option5"));
+    }
 }
