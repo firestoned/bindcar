@@ -229,7 +229,7 @@ curl -X DELETE http://localhost:8080/api/v1/zones/example.com \
 
 **PATCH** `/api/v1/zones/{name}`
 
-Modifies zone configuration parameters such as `also-notify` and `allow-transfer` IP addresses without recreating the zone. This endpoint uses the `rndc modzone` command to dynamically update the zone configuration in BIND9.
+Modifies zone configuration parameters such as `also-notify`, `allow-transfer`, and `allow-update` IP addresses without recreating the zone. This endpoint uses the `rndc modzone` command to dynamically update the zone configuration in BIND9.
 
 ### Request
 
@@ -241,7 +241,8 @@ Content-Type: application/json
 
 {
   "alsoNotify": ["10.244.2.101", "10.244.2.102"],
-  "allowTransfer": ["10.244.2.101", "10.244.2.102"]
+  "allowTransfer": ["10.244.2.101", "10.244.2.102"],
+  "allowUpdate": ["10.244.2.101", "10.244.2.102"]
 }
 ```
 
@@ -251,8 +252,9 @@ Content-Type: application/json
 |-------|------|----------|-------------|
 | `alsoNotify` | array[string] | No | IP addresses of secondary servers to notify when zone changes |
 | `allowTransfer` | array[string] | No | IP addresses allowed to transfer the zone |
+| `allowUpdate` | array[string] | No | IP addresses allowed to perform dynamic updates to the zone |
 
-**Note**: At least one field must be provided. Both fields are optional, but the request cannot be empty.
+**Note**: At least one field must be provided. All fields are optional, but the request cannot be empty.
 
 ### Response
 
@@ -319,6 +321,17 @@ curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
   }'
 ```
 
+#### Update only allow-update
+
+```bash
+curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allowUpdate": ["10.244.2.101", "10.244.2.102"]
+  }'
+```
+
 #### Using IPv6 addresses
 
 ```bash
@@ -327,7 +340,8 @@ curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
   -H "Content-Type: application/json" \
   -d '{
     "alsoNotify": ["2001:db8::1", "2001:db8::2"],
-    "allowTransfer": ["2001:db8::3"]
+    "allowTransfer": ["2001:db8::3"],
+    "allowUpdate": ["2001:db8::1"]
   }'
 ```
 
@@ -335,7 +349,8 @@ curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
 
 - **Zone Replication**: Add or update secondary DNS servers that should receive zone transfer notifications
 - **Access Control**: Control which servers are allowed to perform zone transfers
-- **Dynamic Updates**: Modify zone transfer settings without deleting and recreating the zone
+- **Dynamic Updates**: Enable or restrict which servers can perform dynamic DNS updates (RFC 2136)
+- **Modify Configuration**: Modify zone transfer and update settings without deleting and recreating the zone
 - **High Availability**: Update secondary server lists as your infrastructure changes
 
 ### Notes
@@ -345,6 +360,7 @@ curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
 - For secondary zones, the zone file may not exist; the endpoint checks zone status to verify existence
 - Empty arrays can be used to clear/remove existing settings
 - Both IPv4 and IPv6 addresses are supported
+- The `allow-update` field is typically used with primary zones to control which hosts can perform dynamic DNS updates
 
 ---
 

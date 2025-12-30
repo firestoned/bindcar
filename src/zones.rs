@@ -18,7 +18,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use utoipa::ToSchema;
 
 use crate::{
@@ -247,6 +247,11 @@ pub struct ModifyZoneRequest {
     /// Example: ["10.244.2.101", "10.244.2.102"]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_transfer: Option<Vec<String>>,
+
+    /// IP addresses allowed to update the zone dynamically (BIND9 allow-update)
+    /// Example: ["10.244.2.101", "10.244.2.102"]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_update: Option<Vec<String>>,
 }
 
 /// Response from zone operations
@@ -306,6 +311,11 @@ pub async fn create_zone(
     Json(request): Json<CreateZoneRequest>,
 ) -> Result<(StatusCode, Json<ZoneResponse>), ApiError> {
     info!("Creating zone: {}", request.zone_name);
+
+    // Debug log the full request payload
+    if let Ok(json_payload) = serde_json::to_string_pretty(&request) {
+        debug!("POST /api/v1/zones payload: {}", json_payload);
+    }
 
     // Validate zone name
     if request.zone_name.is_empty() {
@@ -872,11 +882,16 @@ pub async fn modify_zone(
 ) -> Result<Json<ZoneResponse>, ApiError> {
     info!("Modifying zone: {}", zone_name);
 
+    // Debug log the full request payload
+    if let Ok(json_payload) = serde_json::to_string_pretty(&request) {
+        debug!("PATCH /api/v1/zones/{} payload: {}", zone_name, json_payload);
+    }
+
     // Validate that at least one field is being updated
-    if request.also_notify.is_none() && request.allow_transfer.is_none() {
+    if request.also_notify.is_none() && request.allow_transfer.is_none() && request.allow_update.is_none() {
         metrics::record_zone_operation("modify", false);
         return Err(ApiError::InvalidRequest(
-            "At least one field (alsoNotify or allowTransfer) must be provided".to_string(),
+            "At least one field (alsoNotify, allowTransfer, or allowUpdate) must be provided".to_string(),
         ));
     }
 
@@ -966,6 +981,30 @@ pub async fn modify_zone(
             Err(e) => {
                 metrics::record_zone_operation("modify", false);
                 return Err(ApiError::InvalidRequest(format!("Invalid IP address in allow-transfer: {}", e)));
+            }
+        }
+    }
+
+    if let Some(allow_update) = &request.allow_update {
+        // Convert string IPs to IpAddr
+        let ip_addrs: Result<Vec<std::net::IpAddr>, _> = allow_update
+            .iter()
+            .map(|s| s.parse())
+            .collect();
+
+        match ip_addrs {
+            Ok(addrs) => {
+                zone_config.allow_update = if addrs.is_empty() {
+                    None
+                } else {
+                    Some(addrs)
+                };
+                // Clear the raw directive since we're setting explicit IPs
+                zone_config.allow_update_raw = None;
+            }
+            Err(e) => {
+                metrics::record_zone_operation("modify", false);
+                return Err(ApiError::InvalidRequest(format!("Invalid IP address in allow-update: {}", e)));
             }
         }
     }

@@ -182,6 +182,8 @@ mod middleware_test;
 #[cfg(test)]
 mod rndc_test;
 #[cfg(test)]
+mod rndc_parser_tests;
+#[cfg(test)]
 mod types_test;
 #[cfg(test)]
 mod zones_test;
