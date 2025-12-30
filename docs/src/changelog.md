@@ -9,12 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Enhanced Zone Configuration Support** - Full BIND9 zone option preservation
-  - Added 30+ new structured fields to `ZoneConfig` (notify, forwarders, DNSSEC, transfer control, etc.)
-  - Added 6 new enum types: `ForwarderSpec`, `NotifyMode`, `ForwardMode`, `AutoDnssecMode`, `CheckNamesMode`, `MasterfileFormat`
-  - Added `raw_options: HashMap<String, String>` catch-all for unknown BIND9 options
-  - Catch-all parser automatically preserves any unrecognized BIND9 zone options
+  - Added 30+ new structured fields to `ZoneConfig` (organized by category: access control, transfer control, DNSSEC, forwarding, zone maintenance, etc.)
+  - Added 6 new enum types: `NotifyMode`, `ForwardMode`, `AutoDnssecMode`, `CheckNamesMode`, `MasterfileFormat`, `ForwarderSpec`
+  - Added `raw_options: HashMap<String, String>` catch-all for unrecognized BIND9 zone options
+  - Catch-all parser automatically preserves any unknown BIND9 zone options
   - Full round-trip preservation: parse → modify → serialize with zero data loss
   - Support for TSIG key references in `allow-update` via `allow_update_raw` field
+  - 43 comprehensive tests for new types and serialization in `rndc_types_tests.rs`
+  - 11 tests for unknown option preservation in `rndc_parser_tests.rs`
 - Comprehensive RNDC output parser using nom combinators
 - Support for parsing `rndc showzone` output into structured ZoneConfig
 - CIDR notation handling in IP address lists (e.g., `10.0.0.1/32`)
@@ -23,14 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Zone modification via PATCH /api/v1/zones/{name} for `also-notify`, `allow-transfer`, and `allow-update`
 
 ### Changed
-- **ZoneConfig Structure** - Enhanced with 30+ optional fields organized by category
-- **Parser** - Now preserves all unknown options in `raw_options` HashMap
-- **Serializer** - Extended to serialize all new fields and raw options
+- **ZoneConfig Structure** - Enhanced with 30+ optional fields organized by category (all backward compatible)
+- **Parser** - Now preserves all unknown options in `raw_options` HashMap via catch-all parser
+- **Serializer** - Extended `to_rndc_block()` to serialize all new fields and raw options
 - Zone modification now uses `rndc showzone` instead of `rndc zonestatus` for full configuration retrieval
 - RNDC errors now return 500 Internal Server Error (was 502 Bad Gateway)
 - Raw RNDC error messages returned to clients (no wrapper text)
 
 ### Fixed
+- PATCH operations now preserve key-based `allow-update` directives through `allow_update_raw` field
+- Fixed double semicolon bug in serialization of raw directives (now strips trailing semicolons before joining)
 - `rndc modzone` now sends complete zone definition including type (was causing "zone type not specified" errors)
 - Parser handles real-world BIND9 output with CIDR notation and TSIG keys
 - PATCH operations now preserve key-based `allow-update` directives when modifying other fields
@@ -38,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 - Added comprehensive RNDC parser documentation in developer guide
+- Enhanced RNDC parser docs with new ZoneConfig fields and unknown option preservation
 - Added parser architecture diagrams and usage examples
 - Documented CIDR stripping rationale and key-based ACL handling
 - Created roadmap for BIND9 full zone configuration support
