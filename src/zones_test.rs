@@ -837,13 +837,16 @@ fn test_modify_zone_request_serialization() {
     let request = ModifyZoneRequest {
         also_notify: Some(vec!["10.244.2.101".to_string()]),
         allow_transfer: Some(vec!["10.244.2.102".to_string()]),
+        allow_update: Some(vec!["10.244.2.103".to_string()]),
     };
 
     let json = serde_json::to_string(&request).unwrap();
     assert!(json.contains("alsoNotify"));
     assert!(json.contains("allowTransfer"));
+    assert!(json.contains("allowUpdate"));
     assert!(json.contains("10.244.2.101"));
     assert!(json.contains("10.244.2.102"));
+    assert!(json.contains("10.244.2.103"));
 }
 
 #[test]
@@ -851,11 +854,13 @@ fn test_modify_zone_request_serialization_skip_none() {
     let request = ModifyZoneRequest {
         also_notify: Some(vec!["10.244.2.101".to_string()]),
         allow_transfer: None,
+        allow_update: None,
     };
 
     let json = serde_json::to_string(&request).unwrap();
     assert!(json.contains("alsoNotify"));
     assert!(!json.contains("allowTransfer")); // Should be skipped when None
+    assert!(!json.contains("allowUpdate")); // Should be skipped when None
 }
 
 #[test]

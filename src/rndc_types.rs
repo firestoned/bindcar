@@ -104,6 +104,9 @@ pub struct ZoneConfig {
     pub also_notify: Option<Vec<IpAddr>>,
     pub allow_transfer: Option<Vec<IpAddr>>,
     pub allow_update: Option<Vec<IpAddr>>,
+    /// Raw allow-update directive (e.g., "{ key \"name\"; }")
+    /// Used to preserve key-based allow-update when no IPs are specified
+    pub allow_update_raw: Option<String>,
 }
 
 impl ZoneConfig {
@@ -118,6 +121,7 @@ impl ZoneConfig {
             also_notify: None,
             allow_transfer: None,
             allow_update: None,
+            allow_update_raw: None,
         }
     }
 
@@ -178,8 +182,13 @@ impl ZoneConfig {
             }
         }
 
-        // Allow-update
-        if let Some(ref allow_update) = self.allow_update {
+        // Allow-update (prefer raw directive if present, otherwise use IP list)
+        if let Some(ref raw) = self.allow_update_raw {
+            // Raw directive includes the full "{ ... };" but we only want "{ ... }"
+            // Strip all trailing semicolons and whitespace
+            let raw_trimmed = raw.trim_end().trim_end_matches(';').trim();
+            parts.push(format!("allow-update {}", raw_trimmed));
+        } else if let Some(ref allow_update) = self.allow_update {
             if !allow_update.is_empty() {
                 let update_list = allow_update
                     .iter()

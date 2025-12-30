@@ -57,6 +57,7 @@ RUST_LOG=debug
 
 Includes:
 - HTTP request details
+- POST/PATCH request payloads (full JSON body)
 - RNDC command output
 - Token validation (tokens not logged)
 
@@ -103,6 +104,24 @@ Common fields:
   "zone_type": "primary"
 }
 ```
+
+### POST Payload Debug Logging
+
+When `RUST_LOG=debug` is enabled, POST and PATCH request payloads are logged:
+
+```json
+{
+  "timestamp": "2024-12-03T10:30:45Z",
+  "level": "debug",
+  "target": "bindcar::zones",
+  "message": "POST /api/v1/zones payload: {\n  \"zoneName\": \"example.com\",\n  \"zoneType\": \"primary\",\n  \"zoneConfig\": {\n    \"ttl\": 3600,\n    \"soa\": {...}\n  }\n}"
+}
+```
+
+This is useful for:
+- Troubleshooting malformed requests
+- Debugging serialization issues
+- Auditing zone configuration changes
 
 ### HTTP Request
 
