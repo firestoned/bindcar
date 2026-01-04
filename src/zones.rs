@@ -301,6 +301,7 @@ pub struct ZoneListResponse {
     responses(
         (status = 201, description = "Zone created successfully", body = ZoneResponse),
         (status = 400, description = "Invalid request"),
+        (status = 409, description = "Zone already exists"),
         (status = 500, description = "RNDC command failed"),
         (status = 500, description = "Internal server error")
     ),
@@ -441,7 +442,14 @@ pub async fn create_zone(
         .map_err(|e| {
             error!("RNDC addzone failed for {}: {}", request.zone_name, e);
             metrics::record_zone_operation("create", false);
-            ApiError::RndcError(e.to_string())
+
+            // Check if zone already exists
+            let error_msg = e.to_string();
+            if error_msg.contains("already exists") {
+                ApiError::ZoneAlreadyExists(request.zone_name.clone())
+            } else {
+                ApiError::RndcError(error_msg)
+            }
         })?;
 
     info!("Zone {} created successfully", request.zone_name);

@@ -44,6 +44,9 @@ pub enum ApiError {
     #[error("Zone not found: {0}")]
     ZoneNotFound(String),
 
+    #[error("Zone already exists: {0}")]
+    ZoneAlreadyExists(String),
+
     #[error("Internal server error: {0}")]
     InternalError(String),
 }
@@ -55,6 +58,7 @@ impl IntoResponse for ApiError {
             ApiError::RndcError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             ApiError::InvalidRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
             ApiError::ZoneNotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
+            ApiError::ZoneAlreadyExists(_) => (StatusCode::CONFLICT, self.to_string()),
             ApiError::InternalError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
         };
 

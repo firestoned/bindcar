@@ -150,6 +150,7 @@ fn primary_list(input: &str) -> IResult<&str, Vec<PrimarySpec>> {
 
 /// Statement types within a zone configuration
 #[derive(Debug)]
+#[allow(dead_code)]
 enum ZoneStatement {
     // Core
     Type(ZoneType),
