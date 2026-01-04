@@ -6,7 +6,6 @@
 #[cfg(test)]
 mod tests {
     use crate::rndc_types::*;
-    use std::collections::HashMap;
 
     // ========== Enum Tests ==========
 

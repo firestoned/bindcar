@@ -92,6 +92,15 @@ fn test_api_error_zone_not_found() {
 }
 
 #[test]
+fn test_api_error_zone_already_exists() {
+    let error = ApiError::ZoneAlreadyExists("example.com".to_string());
+    assert_eq!(error.to_string(), "Zone already exists: example.com");
+
+    let response = error.into_response();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+#[test]
 fn test_api_error_internal_error() {
     let error = ApiError::InternalError("Database connection failed".to_string());
     assert_eq!(
@@ -110,6 +119,7 @@ fn test_api_error_display() {
         ApiError::RndcError("rndc error".to_string()),
         ApiError::InvalidRequest("invalid".to_string()),
         ApiError::ZoneNotFound("test.com".to_string()),
+        ApiError::ZoneAlreadyExists("test.com".to_string()),
         ApiError::InternalError("internal".to_string()),
     ];
 
