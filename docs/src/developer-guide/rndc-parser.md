@@ -41,10 +41,10 @@ Parse `rndc showzone <zone>` output:
 use bindcar::rndc_parser::parse_showzone;
 
 let output = r#"zone "example.com" {
-    type primary;
-    file "/var/cache/bind/example.com.zone";
-    allow-transfer { 10.0.0.1/32; 10.0.0.2/32; };
-    also-notify { 10.0.0.1; 10.0.0.2; };
+type primary;
+file "/var/cache/bind/example.com.zone";
+allow-transfer { 10.0.0.1/32; 10.0.0.2/32; };
+also-notify { 10.0.0.1; 10.0.0.2; };
 };"#;
 
 let config = parse_showzone(output)?;
@@ -61,21 +61,21 @@ Primary data structure representing a BIND9 zone configuration:
 
 ```rust
 pub struct ZoneConfig {
-    // Core fields
-    pub zone_name: String,
-    pub class: DnsClass,
-    pub zone_type: ZoneType,
-    pub file: Option<String>,
+// Core fields
+pub zone_name: String,
+pub class: DnsClass,
+pub zone_type: ZoneType,
+pub file: Option<String>,
 
-    // Primary/Secondary options
-    pub primaries: Option<Vec<PrimarySpec>>,
-    pub also_notify: Option<Vec<IpAddr>>,
-    pub notify: Option<NotifyMode>,
+// Primary/Secondary options
+pub primaries: Option<Vec<PrimarySpec>>,
+pub also_notify: Option<Vec<IpAddr>>,
+pub notify: Option<NotifyMode>,
 
-    // Access Control options
-    pub allow_query: Option<Vec<IpAddr>>,
-    pub allow_transfer: Option<Vec<IpAddr>>,
-    pub allow_update: Option<Vec<IpAddr>>,
+// Access Control options
+pub allow_query: Option<Vec<IpAddr>>,
+pub allow_transfer: Option<Vec<IpAddr>>,
+pub allow_update: Option<Vec<IpAddr>>,
     pub allow_update_raw: Option<String>,      // Raw directive for key-based updates
     pub allow_update_forwarding: Option<Vec<IpAddr>>,
     pub allow_notify: Option<Vec<IpAddr>>,
@@ -158,6 +158,79 @@ Primary server specification for secondary zones:
 pub struct PrimarySpec {
     pub address: IpAddr,      // Primary server IP
     pub port: Option<u16>,    // Custom port (default: 53)
+}
+```
+
+### ForwarderSpec
+
+Forwarder specification for forward zones:
+
+```rust
+pub struct ForwarderSpec {
+    pub address: IpAddr,
+    pub port: Option<u16>,
+    pub tls_config: Option<String>,
+}
+```
+
+### NotifyMode
+
+NOTIFY mode for zone transfer notifications:
+
+```rust
+pub enum NotifyMode {
+    Yes,          // Send NOTIFY to all NS records and also-notify list
+    No,           // Do not send NOTIFY
+    Explicit,     // Send NOTIFY only to also-notify list
+    MasterOnly,   // Send NOTIFY only from primary servers (legacy term)
+    PrimaryOnly,  // Send NOTIFY only from primary servers (modern term)
+}
+```
+
+### ForwardMode
+
+Forwarding mode for forward zones:
+
+```rust
+pub enum ForwardMode {
+    Only,   // Forward queries and do not attempt direct resolution
+    First,  // Forward queries, fall back to direct resolution if no answer
+}
+```
+
+### AutoDnssecMode
+
+Automatic DNSSEC signing mode:
+
+```rust
+pub enum AutoDnssecMode {
+    Off,       // DNSSEC signing disabled
+    Maintain,  // Maintain existing signatures
+    Create,    // Create new signatures automatically
+}
+```
+
+### CheckNamesMode
+
+Check-names policy for zone data validation:
+
+```rust
+pub enum CheckNamesMode {
+    Fail,    // Reject zones with invalid names
+    Warn,    // Accept but log warnings
+    Ignore,  // Accept without warnings
+}
+```
+
+### MasterfileFormat
+
+Zone file format:
+
+```rust
+pub enum MasterfileFormat {
+    Text,  // Standard text format
+    Raw,   // Binary format (faster loading)
+    Map,   // Memory-mapped format
 }
 ```
 
@@ -250,6 +323,126 @@ assert_eq!(config.primaries, Some(vec![
     PrimarySpec { address: "192.0.2.2".parse()?, port: Some(5353) },
 ]));
 ```
+
+## Enhanced Features (v0.6.0+)
+
+### Unknown Option Preservation
+
+The parser includes a catch-all mechanism that preserves all unknown BIND9 zone options:
+
+```rust
+let input = r#"zone "example.com" {
+    type primary;
+    file "/var/cache/bind/example.com.zone";
+    zone-statistics full;
+    max-zone-ttl 86400;
+    custom-option "custom-value";
+};"#;
+
+let config = parse_showzone(input)?;
+
+// Unknown options preserved in raw_options HashMap
+assert_eq!(config.raw_options.get("zone-statistics"), Some(&"full".to_string()));
+assert_eq!(config.raw_options.get("max-zone-ttl"), Some(&"86400".to_string()));
+assert_eq!(config.raw_options.get("custom-option"), Some(&"\"custom-value\"".to_string()));
+
+// Serialization preserves all options
+let serialized = config.to_rndc_block();
+assert!(serialized.contains("zone-statistics full"));
+assert!(serialized.contains("max-zone-ttl 86400"));
+assert!(serialized.contains("custom-option \"custom-value\""));
+```
+
+**Benefits:**
+- **Future-Proof**: New BIND9 options automatically supported without code changes
+- **No Data Loss**: Complete round-trip preservation of all configuration
+- **Graceful Degradation**: Unrecognized options preserved verbatim
+- **BIND9 Compatibility**: Works across all BIND9 versions
+
+### Block-Style Option Preservation
+
+The parser handles complex block-style options:
+
+```rust
+let input = r#"zone "example.com" {
+    type primary;
+    update-policy { grant example.com. zonesub any; };
+    acl-list { 10.0.0.0/8; 192.168.0.0/16; };
+};"#;
+
+let config = parse_showzone(input)?;
+
+// Block-style options preserved with full syntax
+assert!(config.raw_options.contains_key("update-policy"));
+let update_policy = config.raw_options.get("update-policy").unwrap();
+assert!(update_policy.contains("grant"));
+assert!(update_policy.contains("zonesub"));
+```
+
+### Comprehensive Zone Configuration
+
+Parse zones with 30+ structured fields plus catch-all:
+
+```rust
+let input = r#"zone "internal.local" {
+    type primary;
+    file "/var/cache/bind/internal.local.zone";
+
+    // Access control
+    allow-transfer { 10.244.1.18/32; 10.244.1.21/32; };
+    allow-update { key "bindy-operator"; };
+    also-notify { 10.244.1.18; 10.244.1.21; };
+    notify yes;
+
+    // DNSSEC
+    auto-dnssec maintain;
+    inline-signing yes;
+
+    // Transfer control
+    max-transfer-time-in 3600;
+
+    // Zone maintenance
+    max-zone-ttl 86400;
+    zone-statistics full;
+
+    // Custom options
+    custom-bind-option "value";
+};"#;
+
+let config = parse_showzone(input)?;
+
+// Structured fields
+assert_eq!(config.zone_type, ZoneType::Primary);
+assert_eq!(config.notify, Some(NotifyMode::Yes));
+assert_eq!(config.auto_dnssec, Some(AutoDnssecMode::Maintain));
+assert_eq!(config.inline_signing, Some(true));
+assert_eq!(config.max_transfer_time_in, Some(3600));
+assert_eq!(config.max_zone_ttl, Some(86400));
+
+// Raw directive preserved
+assert!(config.allow_update_raw.is_some());
+assert!(config.allow_update_raw.unwrap().contains("key"));
+
+// Unknown options preserved
+assert_eq!(config.raw_options.get("zone-statistics"), Some(&"full".to_string()));
+assert_eq!(config.raw_options.get("custom-bind-option"), Some(&"\"value\"".to_string()));
+```
+
+**Supported Structured Fields (30+)**:
+
+**Access Control**: `allow-query`, `allow-transfer`, `allow-update`, `allow-update-forwarding`, `allow-notify`
+
+**Transfer Control**: `max-transfer-time-in`, `max-transfer-time-out`, `max-transfer-idle-in`, `max-transfer-idle-out`, `transfer-source`, `transfer-source-v6`, `alt-transfer-source`, `alt-transfer-source-v6`
+
+**DNSSEC**: `auto-dnssec`, `dnssec-dnskey-kskonly`, `dnssec-loadkeys-interval`, `dnssec-update-mode`, `inline-signing`
+
+**Forwarding**: `forwarders`, `forward`
+
+**Zone Maintenance**: `max-journal-size`, `max-records`, `max-zone-ttl`, `serial-update-method`, `zone-statistics`
+
+**Refresh/Retry**: `max-refresh-time`, `min-refresh-time`, `max-retry-time`, `min-retry-time`
+
+**Miscellaneous**: `check-names`, `masterfile-format`, `masterfile-style`, `notify`, `update-policy`, `sig-validity-interval`, `sig-signing-signatures`
 
 ## Round-Trip Serialization
 
