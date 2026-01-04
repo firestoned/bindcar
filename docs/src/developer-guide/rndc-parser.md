@@ -61,16 +61,77 @@ Primary data structure representing a BIND9 zone configuration:
 
 ```rust
 pub struct ZoneConfig {
-    pub zone_name: String,              // Zone domain name
-    pub class: DnsClass,                // IN, CH, or HS
-    pub zone_type: ZoneType,            // Primary, Secondary, etc.
-    pub file: Option<String>,           // Zone file path
-    pub primaries: Option<Vec<PrimarySpec>>, // Primary server IPs (for secondaries)
-    pub also_notify: Option<Vec<IpAddr>>,    // Notify targets
-    pub allow_transfer: Option<Vec<IpAddr>>, // Transfer ACL
-    pub allow_update: Option<Vec<IpAddr>>,   // Update ACL (IP-based only)
+    // Core fields
+    pub zone_name: String,
+    pub class: DnsClass,
+    pub zone_type: ZoneType,
+    pub file: Option<String>,
+
+    // Primary/Secondary options
+    pub primaries: Option<Vec<PrimarySpec>>,
+    pub also_notify: Option<Vec<IpAddr>>,
+    pub notify: Option<NotifyMode>,
+
+    // Access Control options
+    pub allow_query: Option<Vec<IpAddr>>,
+    pub allow_transfer: Option<Vec<IpAddr>>,
+    pub allow_update: Option<Vec<IpAddr>>,
+    pub allow_update_raw: Option<String>,      // Raw directive for key-based updates
+    pub allow_update_forwarding: Option<Vec<IpAddr>>,
+    pub allow_notify: Option<Vec<IpAddr>>,
+
+    // Transfer Control options
+    pub max_transfer_time_in: Option<u32>,
+    pub max_transfer_time_out: Option<u32>,
+    pub transfer_source: Option<IpAddr>,
+    pub transfer_source_v6: Option<IpAddr>,
+    pub notify_source: Option<IpAddr>,
+    pub notify_source_v6: Option<IpAddr>,
+    // ... (and more transfer control options)
+
+    // Dynamic Update options
+    pub update_policy: Option<String>,
+    pub journal: Option<String>,
+    pub ixfr_from_differences: Option<bool>,
+
+    // DNSSEC options
+    pub inline_signing: Option<bool>,
+    pub auto_dnssec: Option<AutoDnssecMode>,
+    pub key_directory: Option<String>,
+    // ... (and more DNSSEC options)
+
+    // Forwarding options
+    pub forward: Option<ForwardMode>,
+    pub forwarders: Option<Vec<ForwarderSpec>>,
+
+    // Zone Maintenance options
+    pub check_names: Option<CheckNamesMode>,
+    pub check_mx: Option<CheckNamesMode>,
+    pub masterfile_format: Option<MasterfileFormat>,
+    pub max_zone_ttl: Option<u32>,
+
+    // Refresh/Retry options
+    pub max_refresh_time: Option<u32>,
+    pub min_refresh_time: Option<u32>,
+    pub max_retry_time: Option<u32>,
+    pub min_retry_time: Option<u32>,
+
+    // Miscellaneous options
+    pub multi_master: Option<bool>,
+    pub request_ixfr: Option<bool>,
+    pub request_expire: Option<bool>,
+
+    // Generic catch-all for unrecognized options
+    pub raw_options: HashMap<String, String>,
 }
 ```
+
+**Key Features:**
+
+- **30+ Structured Fields**: Supports common BIND9 zone options with proper typing
+- **Catch-All HashMap**: `raw_options` preserves unknown/custom BIND9 options
+- **Full Round-Trip**: All options preserved during parse → modify → serialize cycle
+- **Backward Compatible**: All new fields are `Option<T>`
 
 ### ZoneType
 
@@ -376,25 +437,92 @@ cargo test rndc_parser --lib -- --nocapture
 cargo test test_parse_exact_production_output --lib
 ```
 
+## Enhanced Features (v0.6.0+)
+
+### Unknown Option Preservation
+
+The parser now includes a catch-all mechanism that preserves all unknown BIND9 options:
+
+```rust
+let input = r#"zone "example.com" {
+    type primary;
+    file "/var/cache/bind/example.com.zone";
+    zone-statistics full;
+    check-names warn;
+    custom-option { custom value; };
+};"#;
+
+let config = parse_showzone(input)?;
+
+// Unknown options preserved in raw_options HashMap
+assert_eq!(config.raw_options.get("zone-statistics"), Some(&"full".to_string()));
+assert_eq!(config.raw_options.get("check-names"), Some(&"warn".to_string()));
+assert_eq!(config.raw_options.get("custom-option"), Some(&"{ custom value; }".to_string()));
+
+// Serialization preserves all options
+let serialized = config.to_rndc_block();
+assert!(serialized.contains("zone-statistics full"));
+assert!(serialized.contains("check-names warn"));
+assert!(serialized.contains("custom-option { custom value; }"));
+```
+
+**Benefits:**
+
+- **Future-Proof**: New BIND9 options automatically supported
+- **No Data Loss**: Complete round-trip preservation
+- **Custom Options**: Support for non-standard BIND9 configurations
+- **Gradual Migration**: Add structured parsing for popular options over time
+
+### Key-Based Access Control
+
+Enhanced handling of TSIG key references in `allow-update`:
+
+```rust
+let input = r#"zone "example.com" {
+    allow-update { key "bindy-operator"; };
+};"#;
+
+let config = parse_showzone(input)?;
+
+// Raw directive preserved
+assert_eq!(config.allow_update_raw, Some("{ key \"bindy-operator\"; };".to_string()));
+assert_eq!(config.allow_update, None);
+
+// Serialization preserves key reference
+let serialized = config.to_rndc_block();
+assert!(serialized.contains("allow-update { key \"bindy-operator\"; }"));
+```
+
+**Key Features:**
+
+- Key references preserved in `allow_update_raw` field
+- PATCH operations preserve keys when modifying other fields
+- Explicit IP setting clears raw directive
+- No accidental modification of key-based permissions
+
 ## Limitations
 
-### Not Currently Supported
+### Not Currently Supported (Structured Parsing)
 
-- **ACL Names**: `allow-transfer { "trusted"; };`
-- **Complex ACLs**: `{ !10.0.0.1; any; };`
-- **Key Definitions**: Only key references are handled
-- **Custom Options**: Zone options beyond documented fields
+While all options are preserved via `raw_options`, structured parsing is not yet implemented for:
+
+- **ACL Names**: `allow-transfer { "trusted"; };` (preserved as raw)
+- **Complex ACLs**: `{ !10.0.0.1; any; };` (preserved as raw)
+- **Update Policy**: Complex grammar (preserved as raw string in `update_policy`)
 - **Views**: View-specific zone configurations
+- **Forwarders with TLS**: `forwarders { 10.1.1.1 tls tls-config; };` (structured type exists, parser pending)
+
+**Note**: All these options are preserved and round-trip correctly through `raw_options` or dedicated raw fields (`allow_update_raw`, `update_policy`).
 
 ### Future Enhancements
 
-See the [RNDC Parser Roadmap](../../roadmaps/rndc-conf-parser.md) for planned features:
+See the [BIND9 Full Zone Config Support Roadmap](../../roadmaps/bind9-full-zone-config-support.md) for details:
 
+- Structured parsers for common options (notify, forwarders, transfer timeouts)
+- ACL name resolution
+- View-aware zone configurations
 - Parser for `rndc zonestatus` output
 - Parser for `rndc status` output
-- Parser for `rndc.conf` configuration files
-- Support for ACL names and expressions
-- View-aware zone configurations
 
 ## Implementation Details
 
