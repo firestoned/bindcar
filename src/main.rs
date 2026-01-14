@@ -222,50 +222,62 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // get rndc configuration from environment or fallback to rndc.conf
-    let (rndc_server, rndc_algorithm, rndc_secret) = if let Ok(secret) =
-        std::env::var("RNDC_SECRET")
-    {
-        // environment variables provided
-        let server = std::env::var("RNDC_SERVER").unwrap_or_else(|_| "127.0.0.1:953".to_string());
-        let algorithm = std::env::var("RNDC_ALGORITHM").unwrap_or_else(|_| "sha256".to_string());
-        info!("using rndc configuration from environment variables");
-        info!("rndc server: {}", server);
-        info!("rndc algorithm: {}", algorithm);
-        (server, algorithm, secret)
+    // Each parameter is checked independently - env var takes priority, then rndc.conf
+
+    // Try to parse rndc.conf file first to have fallback values
+    let config_paths = vec!["/etc/bind/rndc.conf", "/etc/rndc.conf"];
+    let mut parsed_config = None;
+
+    for path in &config_paths {
+        match bindcar::rndc::parse_rndc_conf(path) {
+            Ok(cfg) => {
+                info!("successfully parsed rndc configuration from {}", path);
+                parsed_config = Some(cfg);
+                break;
+            }
+            Err(e) => {
+                debug!("failed to parse {}: {}", path, e);
+            }
+        }
+    }
+
+    // Check each parameter independently: env var first, then rndc.conf, then hardcoded default
+    let rndc_server = if let Ok(server) = std::env::var("RNDC_SERVER") {
+        info!("using RNDC_SERVER from environment: {}", server);
+        server
+    } else if let Some(ref cfg) = parsed_config {
+        info!("using server from rndc.conf: {}", cfg.server);
+        cfg.server.clone()
     } else {
-        // try to parse from rndc.conf files
-        info!("RNDC_SECRET not set, attempting to parse rndc.conf");
+        let default = "127.0.0.1:953".to_string();
+        warn!("using default RNDC_SERVER: {}", default);
+        default
+    };
 
-        let config_paths = vec!["/etc/bind/rndc.conf", "/etc/rndc.conf"];
-        let mut config = None;
+    let rndc_algorithm = if let Ok(algorithm) = std::env::var("RNDC_ALGORITHM") {
+        info!("using RNDC_ALGORITHM from environment: {}", algorithm);
+        algorithm
+    } else if let Some(ref cfg) = parsed_config {
+        info!("using algorithm from rndc.conf: {}", cfg.algorithm);
+        cfg.algorithm.clone()
+    } else {
+        let default = "sha256".to_string();
+        warn!("using default RNDC_ALGORITHM: {}", default);
+        default
+    };
 
-        for path in &config_paths {
-            match bindcar::rndc::parse_rndc_conf(path) {
-                Ok(cfg) => {
-                    info!("successfully parsed rndc configuration from {}", path);
-                    config = Some(cfg);
-                    break;
-                }
-                Err(e) => {
-                    debug!("failed to parse {}: {}", path, e);
-                }
-            }
-        }
-
-        match config {
-            Some(cfg) => {
-                info!("rndc server: {}", cfg.server);
-                info!("rndc algorithm: {}", cfg.algorithm);
-                (cfg.server, cfg.algorithm, cfg.secret)
-            }
-            None => {
-                error!("rndc configuration not found!");
-                error!("either set RNDC_SECRET environment variable or ensure /etc/bind/rndc.conf exists");
-                return Err(anyhow::anyhow!(
-                    "rndc configuration required: set RNDC_SECRET env var or create /etc/bind/rndc.conf"
-                ));
-            }
-        }
+    let rndc_secret = if let Ok(secret) = std::env::var("RNDC_SECRET") {
+        info!("using RNDC_SECRET from environment");
+        secret
+    } else if let Some(ref cfg) = parsed_config {
+        info!("using secret from rndc.conf");
+        cfg.secret.clone()
+    } else {
+        error!("rndc configuration not found!");
+        error!("either set RNDC_SECRET environment variable or ensure /etc/bind/rndc.conf exists");
+        return Err(anyhow::anyhow!(
+            "rndc configuration required: set RNDC_SECRET env var or create /etc/bind/rndc.conf"
+        ));
     };
 
     // verify zone directory exists

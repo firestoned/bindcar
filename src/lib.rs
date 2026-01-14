@@ -180,13 +180,13 @@ mod metrics_test;
 #[cfg(test)]
 mod middleware_test;
 #[cfg(test)]
+mod rate_limit_test;
+#[cfg(test)]
 mod rndc_test;
 #[cfg(test)]
 mod rndc_parser_tests;
-
 #[cfg(test)]
 mod rndc_types_tests;
-
 #[cfg(test)]
 mod types_test;
 #[cfg(test)]
