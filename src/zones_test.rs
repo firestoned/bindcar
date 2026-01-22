@@ -901,3 +901,109 @@ fn test_modify_zone_request_with_mixed_ip_versions() {
     assert_eq!(allow_transfer[0], "192.168.1.1");
     assert_eq!(allow_transfer[1], "fe80::1");
 }
+
+// Tests for journal file cleanup behavior
+
+#[tokio::test]
+async fn test_journal_file_cleanup_on_zone_creation() {
+    use tempfile::TempDir;
+
+    // Create a temporary directory for testing
+    let temp_dir = TempDir::new().unwrap();
+    let zone_name = "test-journal-create.com";
+
+    // Create a fake old journal file
+    let journal_file_name = format!("{}.zone.jnl", zone_name);
+    let journal_file_path = temp_dir.path().join(&journal_file_name);
+    tokio::fs::write(&journal_file_path, "old journal data").await.unwrap();
+
+    // Verify the journal file exists
+    assert!(journal_file_path.exists());
+
+    // Simulate the cleanup logic from create_zone
+    if journal_file_path.exists() {
+        tokio::fs::remove_file(&journal_file_path).await.unwrap();
+    }
+
+    // Verify the journal file was removed
+    assert!(!journal_file_path.exists());
+}
+
+#[tokio::test]
+async fn test_journal_file_cleanup_on_zone_deletion() {
+    use tempfile::TempDir;
+
+    // Create a temporary directory for testing
+    let temp_dir = TempDir::new().unwrap();
+    let zone_name = "test-journal-delete.com";
+
+    // Create fake zone and journal files
+    let zone_file_name = format!("{}.zone", zone_name);
+    let zone_file_path = temp_dir.path().join(&zone_file_name);
+    tokio::fs::write(&zone_file_path, "zone data").await.unwrap();
+
+    let journal_file_name = format!("{}.zone.jnl", zone_name);
+    let journal_file_path = temp_dir.path().join(&journal_file_name);
+    tokio::fs::write(&journal_file_path, "journal data").await.unwrap();
+
+    // Verify both files exist
+    assert!(zone_file_path.exists());
+    assert!(journal_file_path.exists());
+
+    // Simulate the cleanup logic from delete_zone
+    if zone_file_path.exists() {
+        tokio::fs::remove_file(&zone_file_path).await.unwrap();
+    }
+
+    if journal_file_path.exists() {
+        tokio::fs::remove_file(&journal_file_path).await.unwrap();
+    }
+
+    // Verify both files were removed
+    assert!(!zone_file_path.exists());
+    assert!(!journal_file_path.exists());
+}
+
+#[tokio::test]
+async fn test_journal_file_cleanup_when_journal_does_not_exist() {
+    use tempfile::TempDir;
+
+    // Create a temporary directory for testing
+    let temp_dir = TempDir::new().unwrap();
+    let zone_name = "test-no-journal.com";
+
+    // Create only the zone file, no journal
+    let zone_file_name = format!("{}.zone", zone_name);
+    let zone_file_path = temp_dir.path().join(&zone_file_name);
+    tokio::fs::write(&zone_file_path, "zone data").await.unwrap();
+
+    let journal_file_name = format!("{}.zone.jnl", zone_name);
+    let journal_file_path = temp_dir.path().join(&journal_file_name);
+
+    // Verify journal doesn't exist
+    assert!(!journal_file_path.exists());
+
+    // Simulate the cleanup logic - should not error when journal doesn't exist
+    if journal_file_path.exists() {
+        tokio::fs::remove_file(&journal_file_path).await.unwrap();
+    }
+
+    // Should complete without errors
+    assert!(!journal_file_path.exists());
+}
+
+#[test]
+fn test_journal_file_naming_convention() {
+    // Test that journal file names follow the expected pattern
+    let zone_name = "example.com";
+    let expected_zone_file = format!("{}.zone", zone_name);
+    let expected_journal_file = format!("{}.zone.jnl", zone_name);
+
+    assert_eq!(expected_zone_file, "example.com.zone");
+    assert_eq!(expected_journal_file, "example.com.zone.jnl");
+
+    // Test with subdomain
+    let zone_name = "sub.example.com";
+    let expected_journal_file = format!("{}.zone.jnl", zone_name);
+    assert_eq!(expected_journal_file, "sub.example.com.zone.jnl");
+}

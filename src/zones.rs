@@ -367,6 +367,21 @@ pub async fn create_zone(
             zone_content.len()
         );
 
+        // Clean up any existing journal file to prevent sync issues
+        let journal_file_name = format!("{}.zone.jnl", request.zone_name);
+        let journal_file_path = PathBuf::from(&state.zone_dir).join(&journal_file_name);
+        if journal_file_path.exists() {
+            if let Err(e) = tokio::fs::remove_file(&journal_file_path).await {
+                error!(
+                    "Failed to remove old journal file {}: {}",
+                    journal_file_path.display(),
+                    e
+                );
+            } else {
+                info!("Removed old journal file: {}", journal_file_path.display());
+            }
+        }
+
         tokio::fs::write(&zone_file_path, &zone_content)
             .await
             .map_err(|e| {
@@ -491,7 +506,7 @@ pub async fn delete_zone(
         ApiError::RndcError(e.to_string())
     })?;
 
-    // Optionally delete zone file
+    // Delete zone file
     let zone_file_name = format!("{}.zone", zone_name);
     let zone_file_path = PathBuf::from(&state.zone_dir).join(&zone_file_name);
 
@@ -505,6 +520,23 @@ pub async fn delete_zone(
             // Don't fail the request if file deletion fails - zone is already removed from BIND9
         } else {
             info!("Deleted zone file: {}", zone_file_path.display());
+        }
+    }
+
+    // Delete journal file if it exists
+    let journal_file_name = format!("{}.zone.jnl", zone_name);
+    let journal_file_path = PathBuf::from(&state.zone_dir).join(&journal_file_name);
+
+    if journal_file_path.exists() {
+        if let Err(e) = tokio::fs::remove_file(&journal_file_path).await {
+            error!(
+                "Failed to delete journal file {}: {}",
+                journal_file_path.display(),
+                e
+            );
+            // Don't fail the request if file deletion fails
+        } else {
+            info!("Deleted journal file: {}", journal_file_path.display());
         }
     }
 

@@ -34,9 +34,13 @@ curl -X DELETE http://localhost:8080/api/v1/zones/example.com \
 
 ## What Gets Deleted
 
-1. Zone removed from BIND9 (via `rndc delzone`)
-2. Zone file deleted from filesystem
-3. Any associated journal files removed
+When you delete a zone, bindcar automatically cleans up all related files:
+
+1. **Zone removal from BIND9** - Executes `rndc delzone` to remove the zone from memory
+2. **Zone file deletion** - Removes the `.zone` file from the filesystem (e.g., `example.com.zone`)
+3. **Journal file cleanup** - Automatically removes BIND9 journal files (`.zone.jnl`) to prevent "journal out of sync" errors on zone recreation
+
+This ensures complete cleanup and prevents any stale files from interfering with future zone operations.
 
 ## Workflow
 
