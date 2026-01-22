@@ -44,9 +44,12 @@ When you create a zone, bindcar performs these steps:
 
 1. **Validate Request** - Check zone name format and required fields
 2. **Generate Zone File** - Create BIND9-format zone file with SOA record
-3. **Write to Disk** - Save zone file to `BIND_ZONE_DIR`
-4. **Execute RNDC** - Run `rndc addzone` to register zone with BIND9
-5. **Return Success** - Send 201 Created response with zone details
+3. **Clean Journal Files** - Remove any existing `.zone.jnl` files to prevent "journal out of sync" errors
+4. **Write to Disk** - Save zone file to `BIND_ZONE_DIR`
+5. **Execute RNDC** - Run `rndc addzone` to register zone with BIND9
+6. **Return Success** - Send 201 Created response with zone details
+
+**Note**: The automatic journal cleanup in step 3 ensures that recreating zones (after deletion) works reliably without manual intervention.
 
 ```mermaid
 sequenceDiagram
