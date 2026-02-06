@@ -13,9 +13,9 @@ use std::net::IpAddr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DnsClass {
     #[default]
-    IN,  // Internet
-    CH,  // Chaos
-    HS,  // Hesiod
+    IN, // Internet
+    CH, // Chaos
+    HS, // Hesiod
 }
 
 impl DnsClass {
@@ -543,7 +543,10 @@ impl ZoneConfig {
             parts.push(format!(r#"journal "{}""#, journal));
         }
         if let Some(val) = self.ixfr_from_differences {
-            parts.push(format!("ixfr-from-differences {}", if val { "yes" } else { "no" }));
+            parts.push(format!(
+                "ixfr-from-differences {}",
+                if val { "yes" } else { "no" }
+            ));
         }
 
         // DNSSEC options
@@ -594,7 +597,10 @@ impl ZoneConfig {
             parts.push(format!("check-mx {}", mode.as_str()));
         }
         if let Some(val) = self.check_integrity {
-            parts.push(format!("check-integrity {}", if val { "yes" } else { "no" }));
+            parts.push(format!(
+                "check-integrity {}",
+                if val { "yes" } else { "no" }
+            ));
         }
         if let Some(format) = self.masterfile_format {
             parts.push(format!("masterfile-format {}", format.as_str()));

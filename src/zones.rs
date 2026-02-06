@@ -151,6 +151,28 @@ pub struct ZoneConfig {
     /// Required for secondary zone types
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primaries: Option<Vec<String>>,
+
+    /// DNSSEC policy name to apply to this zone (BIND9 9.16+)
+    ///
+    /// Specifies the name of a `dnssec-policy` block defined in `named.conf.options`.
+    /// When set, BIND9 will automatically sign the zone using the specified policy.
+    ///
+    /// Example: `"default"`, `"high-security"`
+    ///
+    /// Requires `inline_signing` to be enabled for DNSSEC to function.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dnssec_policy: Option<String>,
+
+    /// Enable inline signing for DNSSEC (BIND9 inline-signing)
+    ///
+    /// When `true`, BIND9 will sign the zone inline rather than requiring pre-signed zone files.
+    /// This is required for DNSSEC with dynamic zones and modern BIND9 configurations.
+    ///
+    /// Should be set to `true` when `dnssec_policy` is specified.
+    ///
+    /// Default: `false`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inline_signing: Option<bool>,
 }
 
 impl ZoneConfig {
@@ -444,6 +466,19 @@ pub async fn create_zone(
                 .collect::<String>();
             config_parts.push(format!(r#"allow-transfer {{ {} }}"#, transfer_list));
         }
+    }
+
+    // Add DNSSEC policy if specified (BIND9 9.16+)
+    if let Some(dnssec_policy) = &request.zone_config.dnssec_policy {
+        config_parts.push(format!(r#"dnssec-policy "{}""#, dnssec_policy));
+    }
+
+    // Add inline-signing if specified (required for DNSSEC with dynamic zones)
+    if let Some(inline_signing) = request.zone_config.inline_signing {
+        config_parts.push(format!(
+            r#"inline-signing {}"#,
+            if inline_signing { "yes" } else { "no" }
+        ));
     }
 
     // Join all parts into final configuration
@@ -924,14 +959,21 @@ pub async fn modify_zone(
 
     // Debug log the full request payload
     if let Ok(json_payload) = serde_json::to_string_pretty(&request) {
-        debug!("PATCH /api/v1/zones/{} payload: {}", zone_name, json_payload);
+        debug!(
+            "PATCH /api/v1/zones/{} payload: {}",
+            zone_name, json_payload
+        );
     }
 
     // Validate that at least one field is being updated
-    if request.also_notify.is_none() && request.allow_transfer.is_none() && request.allow_update.is_none() {
+    if request.also_notify.is_none()
+        && request.allow_transfer.is_none()
+        && request.allow_update.is_none()
+    {
         metrics::record_zone_operation("modify", false);
         return Err(ApiError::InvalidRequest(
-            "At least one field (alsoNotify, allowTransfer, or allowUpdate) must be provided".to_string(),
+            "At least one field (alsoNotify, allowTransfer, or allowUpdate) must be provided"
+                .to_string(),
         ));
     }
 
@@ -974,77 +1016,75 @@ pub async fn modify_zone(
 
     // Parse the zone configuration
     let mut zone_config = crate::rndc_parser::parse_showzone(&showzone_output).map_err(|e| {
-        error!("Failed to parse zone configuration for {}: {}", zone_name, e);
+        error!(
+            "Failed to parse zone configuration for {}: {}",
+            zone_name, e
+        );
         ApiError::RndcError(format!("Failed to parse zone configuration: {}", e))
     })?;
 
-    info!("Zone {} has type: {}", zone_name, zone_config.zone_type.as_str());
+    info!(
+        "Zone {} has type: {}",
+        zone_name,
+        zone_config.zone_type.as_str()
+    );
 
     // Update the configuration with new values from the request
     if let Some(also_notify) = &request.also_notify {
         // Convert string IPs to IpAddr
-        let ip_addrs: Result<Vec<std::net::IpAddr>, _> = also_notify
-            .iter()
-            .map(|s| s.parse())
-            .collect();
+        let ip_addrs: Result<Vec<std::net::IpAddr>, _> =
+            also_notify.iter().map(|s| s.parse()).collect();
 
         match ip_addrs {
             Ok(addrs) => {
-                zone_config.also_notify = if addrs.is_empty() {
-                    None
-                } else {
-                    Some(addrs)
-                };
+                zone_config.also_notify = if addrs.is_empty() { None } else { Some(addrs) };
             }
             Err(e) => {
                 metrics::record_zone_operation("modify", false);
-                return Err(ApiError::InvalidRequest(format!("Invalid IP address in also-notify: {}", e)));
+                return Err(ApiError::InvalidRequest(format!(
+                    "Invalid IP address in also-notify: {}",
+                    e
+                )));
             }
         }
     }
 
     if let Some(allow_transfer) = &request.allow_transfer {
         // Convert string IPs to IpAddr
-        let ip_addrs: Result<Vec<std::net::IpAddr>, _> = allow_transfer
-            .iter()
-            .map(|s| s.parse())
-            .collect();
+        let ip_addrs: Result<Vec<std::net::IpAddr>, _> =
+            allow_transfer.iter().map(|s| s.parse()).collect();
 
         match ip_addrs {
             Ok(addrs) => {
-                zone_config.allow_transfer = if addrs.is_empty() {
-                    None
-                } else {
-                    Some(addrs)
-                };
+                zone_config.allow_transfer = if addrs.is_empty() { None } else { Some(addrs) };
             }
             Err(e) => {
                 metrics::record_zone_operation("modify", false);
-                return Err(ApiError::InvalidRequest(format!("Invalid IP address in allow-transfer: {}", e)));
+                return Err(ApiError::InvalidRequest(format!(
+                    "Invalid IP address in allow-transfer: {}",
+                    e
+                )));
             }
         }
     }
 
     if let Some(allow_update) = &request.allow_update {
         // Convert string IPs to IpAddr
-        let ip_addrs: Result<Vec<std::net::IpAddr>, _> = allow_update
-            .iter()
-            .map(|s| s.parse())
-            .collect();
+        let ip_addrs: Result<Vec<std::net::IpAddr>, _> =
+            allow_update.iter().map(|s| s.parse()).collect();
 
         match ip_addrs {
             Ok(addrs) => {
-                zone_config.allow_update = if addrs.is_empty() {
-                    None
-                } else {
-                    Some(addrs)
-                };
+                zone_config.allow_update = if addrs.is_empty() { None } else { Some(addrs) };
                 // Clear the raw directive since we're setting explicit IPs
                 zone_config.allow_update_raw = None;
             }
             Err(e) => {
                 metrics::record_zone_operation("modify", false);
-                return Err(ApiError::InvalidRequest(format!("Invalid IP address in allow-update: {}", e)));
+                return Err(ApiError::InvalidRequest(format!(
+                    "Invalid IP address in allow-update: {}",
+                    e
+                )));
             }
         }
     }
@@ -1052,7 +1092,10 @@ pub async fn modify_zone(
     // Serialize the updated configuration back to RNDC format
     let rndc_config_block = zone_config.to_rndc_block();
 
-    info!("Modifying zone {} with config: {}", zone_name, rndc_config_block);
+    info!(
+        "Modifying zone {} with config: {}",
+        zone_name, rndc_config_block
+    );
 
     // Execute rndc modzone
     let output = state

@@ -43,6 +43,8 @@ fn test_zone_config_to_zone_file() {
         also_notify: None,
         allow_transfer: None,
         primaries: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -198,6 +200,8 @@ fn test_zone_config_empty_name_servers() {
         also_notify: None,
         allow_transfer: None,
         primaries: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -232,6 +236,8 @@ fn test_zone_config_special_characters_in_names() {
         also_notify: None,
         allow_transfer: None,
         primaries: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -258,6 +264,8 @@ fn test_zone_config_zero_ttl() {
         also_notify: None,
         allow_transfer: None,
         primaries: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -291,6 +299,8 @@ fn test_dns_record_mx_with_priority_zero() {
         also_notify: None,
         allow_transfer: None,
         primaries: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -331,6 +341,8 @@ fn test_multiple_records_same_name() {
         also_notify: None,
         allow_transfer: None,
         primaries: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -364,6 +376,8 @@ fn test_zone_config_with_nameserver_glue_records() {
         also_notify: None,
         allow_transfer: None,
         primaries: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -399,6 +413,8 @@ fn test_zone_config_glue_records_serialization() {
         also_notify: None,
         allow_transfer: None,
         primaries: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     // Test that it can be serialized to JSON
@@ -433,6 +449,8 @@ fn test_zone_config_without_nameserver_ips() {
         also_notify: None,
         allow_transfer: None,
         primaries: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     let zone_file = config.to_zone_file();
@@ -915,7 +933,9 @@ async fn test_journal_file_cleanup_on_zone_creation() {
     // Create a fake old journal file
     let journal_file_name = format!("{}.zone.jnl", zone_name);
     let journal_file_path = temp_dir.path().join(&journal_file_name);
-    tokio::fs::write(&journal_file_path, "old journal data").await.unwrap();
+    tokio::fs::write(&journal_file_path, "old journal data")
+        .await
+        .unwrap();
 
     // Verify the journal file exists
     assert!(journal_file_path.exists());
@@ -940,11 +960,15 @@ async fn test_journal_file_cleanup_on_zone_deletion() {
     // Create fake zone and journal files
     let zone_file_name = format!("{}.zone", zone_name);
     let zone_file_path = temp_dir.path().join(&zone_file_name);
-    tokio::fs::write(&zone_file_path, "zone data").await.unwrap();
+    tokio::fs::write(&zone_file_path, "zone data")
+        .await
+        .unwrap();
 
     let journal_file_name = format!("{}.zone.jnl", zone_name);
     let journal_file_path = temp_dir.path().join(&journal_file_name);
-    tokio::fs::write(&journal_file_path, "journal data").await.unwrap();
+    tokio::fs::write(&journal_file_path, "journal data")
+        .await
+        .unwrap();
 
     // Verify both files exist
     assert!(zone_file_path.exists());
@@ -975,7 +999,9 @@ async fn test_journal_file_cleanup_when_journal_does_not_exist() {
     // Create only the zone file, no journal
     let zone_file_name = format!("{}.zone", zone_name);
     let zone_file_path = temp_dir.path().join(&zone_file_name);
-    tokio::fs::write(&zone_file_path, "zone data").await.unwrap();
+    tokio::fs::write(&zone_file_path, "zone data")
+        .await
+        .unwrap();
 
     let journal_file_name = format!("{}.zone.jnl", zone_name);
     let journal_file_path = temp_dir.path().join(&journal_file_name);
