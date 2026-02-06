@@ -25,8 +25,14 @@ fn test_quoted_string() {
 
 #[test]
 fn test_quoted_string_with_escapes() {
-    assert_eq!(quoted_string(r#""hello\"world""#).unwrap().1, "hello\"world");
-    assert_eq!(quoted_string(r#""line1\nline2""#).unwrap().1, "line1\nline2");
+    assert_eq!(
+        quoted_string(r#""hello\"world""#).unwrap().1,
+        "hello\"world"
+    );
+    assert_eq!(
+        quoted_string(r#""line1\nline2""#).unwrap().1,
+        "line1\nline2"
+    );
 }
 
 #[test]
@@ -284,7 +290,10 @@ fn test_error_display() {
     assert_eq!(error.to_string(), "Missing required field: algorithm");
 
     let error = RndcConfParseError::CircularInclude("/path/to/file".to_string());
-    assert_eq!(error.to_string(), "Circular include detected: /path/to/file");
+    assert_eq!(
+        error.to_string(),
+        "Circular include detected: /path/to/file"
+    );
 }
 
 // File-based parsing tests

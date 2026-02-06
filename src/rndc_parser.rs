@@ -101,10 +101,7 @@ pub(crate) fn ip_addr(input: &str) -> IResult<&str, IpAddr> {
     };
 
     // Check for optional CIDR suffix (e.g., /32 or /128) and consume it
-    let (input, _) = opt(preceded(
-        char('/'),
-        take_while1(|c: char| c.is_numeric()),
-    ))(input)?;
+    let (input, _) = opt(preceded(char('/'), take_while1(|c: char| c.is_numeric())))(input)?;
 
     Ok((input, addr))
 }
@@ -224,10 +221,7 @@ fn parse_type_statement(input: &str) -> IResult<&str, ZoneStatement> {
     let (input, _) = semicolon(input)?;
 
     let zone_type = ZoneType::parse(type_str).ok_or_else(|| {
-        nom::Err::Error(nom::error::Error::new(
-            input,
-            nom::error::ErrorKind::Verify,
-        ))
+        nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Verify))
     })?;
 
     Ok((input, ZoneStatement::Type(zone_type)))
@@ -320,7 +314,10 @@ fn parse_allow_update_statement(input: &str) -> IResult<&str, ZoneStatement> {
         // Extract raw content from start to end
         let raw_len = start_input.len() - input.len();
         let raw_content = &start_input[..raw_len];
-        Ok((input, ZoneStatement::AllowUpdateRaw(raw_content.to_string())))
+        Ok((
+            input,
+            ZoneStatement::AllowUpdateRaw(raw_content.to_string()),
+        ))
     } else {
         Ok((input, ZoneStatement::AllowUpdate(addrs)))
     }
@@ -349,7 +346,10 @@ fn parse_unknown_statement(input: &str) -> IResult<&str, ZoneStatement> {
 
     let (input, _) = semicolon(input)?;
 
-    Ok((input, ZoneStatement::Unknown(option_name.to_string(), raw_value)))
+    Ok((
+        input,
+        ZoneStatement::Unknown(option_name.to_string(), raw_value),
+    ))
 }
 
 /// Parse any zone statement
@@ -392,11 +392,8 @@ fn parse_zone_config_internal(input: &str) -> IResult<&str, ZoneConfig> {
     };
 
     // Parse zone block
-    let (input, statements) = delimited(
-        ws(char('{')),
-        many0(parse_zone_statement),
-        ws(tag("};"))
-    )(input)?;
+    let (input, statements) =
+        delimited(ws(char('{')), many0(parse_zone_statement), ws(tag("};")))(input)?;
 
     // Build ZoneConfig from statements
     let mut config = ZoneConfig::new(zone_name, ZoneType::Primary); // Default type

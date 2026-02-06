@@ -81,6 +81,8 @@
 //!         also_notify: None,
 //!         allow_transfer: None,
 //!         primaries: None,
+//!         dnssec_policy: None,
+//!         inline_signing: None,
 //!     },
 //!     update_key_name: None,
 //! };
@@ -182,9 +184,9 @@ mod middleware_test;
 #[cfg(test)]
 mod rate_limit_test;
 #[cfg(test)]
-mod rndc_test;
-#[cfg(test)]
 mod rndc_parser_tests;
+#[cfg(test)]
+mod rndc_test;
 #[cfg(test)]
 mod rndc_types_tests;
 #[cfg(test)]

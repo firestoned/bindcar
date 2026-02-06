@@ -57,6 +57,8 @@ fn main() {
         also_notify: None,
         allow_transfer: None,
         primaries: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     let request = CreateZoneRequest {
@@ -125,6 +127,8 @@ fn main() {
         also_notify: None,
         allow_transfer: None,
         primaries: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     println!(

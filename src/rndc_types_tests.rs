@@ -42,7 +42,10 @@ mod tests {
         assert_eq!(ZoneType::parse("forward"), Some(ZoneType::Forward));
         assert_eq!(ZoneType::parse("hint"), Some(ZoneType::Hint));
         assert_eq!(ZoneType::parse("mirror"), Some(ZoneType::Mirror));
-        assert_eq!(ZoneType::parse("delegation-only"), Some(ZoneType::Delegation));
+        assert_eq!(
+            ZoneType::parse("delegation-only"),
+            Some(ZoneType::Delegation)
+        );
         assert_eq!(ZoneType::parse("redirect"), Some(ZoneType::Redirect));
     }
 
@@ -72,8 +75,14 @@ mod tests {
         assert_eq!(NotifyMode::parse("yes"), Some(NotifyMode::Yes));
         assert_eq!(NotifyMode::parse("no"), Some(NotifyMode::No));
         assert_eq!(NotifyMode::parse("explicit"), Some(NotifyMode::Explicit));
-        assert_eq!(NotifyMode::parse("master-only"), Some(NotifyMode::MasterOnly));
-        assert_eq!(NotifyMode::parse("primary-only"), Some(NotifyMode::PrimaryOnly));
+        assert_eq!(
+            NotifyMode::parse("master-only"),
+            Some(NotifyMode::MasterOnly)
+        );
+        assert_eq!(
+            NotifyMode::parse("primary-only"),
+            Some(NotifyMode::PrimaryOnly)
+        );
         assert_eq!(NotifyMode::parse("invalid"), None);
     }
 
@@ -100,8 +109,14 @@ mod tests {
     #[test]
     fn test_auto_dnssec_mode_parse() {
         assert_eq!(AutoDnssecMode::parse("off"), Some(AutoDnssecMode::Off));
-        assert_eq!(AutoDnssecMode::parse("maintain"), Some(AutoDnssecMode::Maintain));
-        assert_eq!(AutoDnssecMode::parse("create"), Some(AutoDnssecMode::Create));
+        assert_eq!(
+            AutoDnssecMode::parse("maintain"),
+            Some(AutoDnssecMode::Maintain)
+        );
+        assert_eq!(
+            AutoDnssecMode::parse("create"),
+            Some(AutoDnssecMode::Create)
+        );
         assert_eq!(AutoDnssecMode::parse("invalid"), None);
     }
 
@@ -116,7 +131,10 @@ mod tests {
     fn test_check_names_mode_parse() {
         assert_eq!(CheckNamesMode::parse("fail"), Some(CheckNamesMode::Fail));
         assert_eq!(CheckNamesMode::parse("warn"), Some(CheckNamesMode::Warn));
-        assert_eq!(CheckNamesMode::parse("ignore"), Some(CheckNamesMode::Ignore));
+        assert_eq!(
+            CheckNamesMode::parse("ignore"),
+            Some(CheckNamesMode::Ignore)
+        );
         assert_eq!(CheckNamesMode::parse("invalid"), None);
     }
 
@@ -129,7 +147,10 @@ mod tests {
 
     #[test]
     fn test_masterfile_format_parse() {
-        assert_eq!(MasterfileFormat::parse("text"), Some(MasterfileFormat::Text));
+        assert_eq!(
+            MasterfileFormat::parse("text"),
+            Some(MasterfileFormat::Text)
+        );
         assert_eq!(MasterfileFormat::parse("raw"), Some(MasterfileFormat::Raw));
         assert_eq!(MasterfileFormat::parse("map"), Some(MasterfileFormat::Map));
         assert_eq!(MasterfileFormat::parse("invalid"), None);
@@ -251,9 +272,7 @@ mod tests {
     #[test]
     fn test_to_rndc_block_with_allow_transfer() {
         let mut config = ZoneConfig::new("test.com".to_string(), ZoneType::Primary);
-        config.allow_transfer = Some(vec![
-            "10.1.1.1".parse().unwrap(),
-        ]);
+        config.allow_transfer = Some(vec!["10.1.1.1".parse().unwrap()]);
 
         let block = config.to_rndc_block();
 
@@ -263,9 +282,7 @@ mod tests {
     #[test]
     fn test_to_rndc_block_with_allow_update_ips() {
         let mut config = ZoneConfig::new("test.com".to_string(), ZoneType::Primary);
-        config.allow_update = Some(vec![
-            "10.2.2.2".parse().unwrap(),
-        ]);
+        config.allow_update = Some(vec!["10.2.2.2".parse().unwrap()]);
 
         let block = config.to_rndc_block();
 
@@ -280,7 +297,7 @@ mod tests {
         let block = config.to_rndc_block();
 
         assert!(block.contains("allow-update { key \"update-key\"; }"));
-        assert!(!block.contains(";;"));  // No double semicolons
+        assert!(!block.contains(";;")); // No double semicolons
     }
 
     #[test]
@@ -323,8 +340,12 @@ mod tests {
     #[test]
     fn test_to_rndc_block_with_raw_options() {
         let mut config = ZoneConfig::new("test.com".to_string(), ZoneType::Primary);
-        config.raw_options.insert("zone-statistics".to_string(), "full".to_string());
-        config.raw_options.insert("check-names".to_string(), "warn".to_string());
+        config
+            .raw_options
+            .insert("zone-statistics".to_string(), "full".to_string());
+        config
+            .raw_options
+            .insert("check-names".to_string(), "warn".to_string());
 
         let block = config.to_rndc_block();
 
@@ -336,8 +357,12 @@ mod tests {
     #[test]
     fn test_to_rndc_block_raw_options_no_double_semicolons() {
         let mut config = ZoneConfig::new("test.com".to_string(), ZoneType::Primary);
-        config.raw_options.insert("option1".to_string(), "value1;".to_string());  // Has trailing semicolon
-        config.raw_options.insert("option2".to_string(), "value2".to_string());   // No trailing semicolon
+        config
+            .raw_options
+            .insert("option1".to_string(), "value1;".to_string()); // Has trailing semicolon
+        config
+            .raw_options
+            .insert("option2".to_string(), "value2".to_string()); // No trailing semicolon
 
         let block = config.to_rndc_block();
 
@@ -358,7 +383,9 @@ mod tests {
         config.max_transfer_time_in = Some(3600);
         config.inline_signing = Some(true);
         config.check_names = Some(CheckNamesMode::Warn);
-        config.raw_options.insert("zone-statistics".to_string(), "yes".to_string());
+        config
+            .raw_options
+            .insert("zone-statistics".to_string(), "yes".to_string());
 
         let block = config.to_rndc_block();
 
@@ -403,12 +430,17 @@ mod tests {
     fn test_zone_config_clone() {
         let mut config1 = ZoneConfig::new("test.com".to_string(), ZoneType::Primary);
         config1.file = Some("/var/cache/bind/test.com.zone".to_string());
-        config1.raw_options.insert("test".to_string(), "value".to_string());
+        config1
+            .raw_options
+            .insert("test".to_string(), "value".to_string());
 
         let config2 = config1.clone();
 
         assert_eq!(config1, config2);
-        assert_eq!(config2.file, Some("/var/cache/bind/test.com.zone".to_string()));
+        assert_eq!(
+            config2.file,
+            Some("/var/cache/bind/test.com.zone".to_string())
+        );
         assert_eq!(config2.raw_options.get("test"), Some(&"value".to_string()));
     }
 

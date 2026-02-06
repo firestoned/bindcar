@@ -67,11 +67,15 @@ mod tests {
 
     #[test]
     fn test_parse_primary_zone() {
-        let input = r#"zone "example.com" { type primary; file "/var/cache/bind/example.com.zone"; };"#;
+        let input =
+            r#"zone "example.com" { type primary; file "/var/cache/bind/example.com.zone"; };"#;
         let config = parse_showzone(input).unwrap();
         assert_eq!(config.zone_name, "example.com");
         assert_eq!(config.zone_type, ZoneType::Primary);
-        assert_eq!(config.file, Some("/var/cache/bind/example.com.zone".to_string()));
+        assert_eq!(
+            config.file,
+            Some("/var/cache/bind/example.com.zone".to_string())
+        );
     }
 
     #[test]
@@ -91,7 +95,10 @@ mod tests {
         let input = r#"zone "example.com" { type primary; file "/var/cache/bind/example.com.zone"; also-notify { 10.244.2.101; 10.244.2.102; }; };"#;
         let config = parse_showzone(input).unwrap();
         assert_eq!(config.also_notify.as_ref().unwrap().len(), 2);
-        assert_eq!(config.also_notify.as_ref().unwrap()[0], "10.244.2.101".parse::<IpAddr>().unwrap());
+        assert_eq!(
+            config.also_notify.as_ref().unwrap()[0],
+            "10.244.2.101".parse::<IpAddr>().unwrap()
+        );
     }
 
     #[test]
@@ -99,8 +106,14 @@ mod tests {
         let input = r#"zone "example.com" { type primary; file "/var/cache/bind/example.com.zone"; allow-transfer { 10.1.1.1; 10.2.2.2; }; };"#;
         let config = parse_showzone(input).unwrap();
         assert_eq!(config.allow_transfer.as_ref().unwrap().len(), 2);
-        assert_eq!(config.allow_transfer.as_ref().unwrap()[0], "10.1.1.1".parse::<IpAddr>().unwrap());
-        assert_eq!(config.allow_transfer.as_ref().unwrap()[1], "10.2.2.2".parse::<IpAddr>().unwrap());
+        assert_eq!(
+            config.allow_transfer.as_ref().unwrap()[0],
+            "10.1.1.1".parse::<IpAddr>().unwrap()
+        );
+        assert_eq!(
+            config.allow_transfer.as_ref().unwrap()[1],
+            "10.2.2.2".parse::<IpAddr>().unwrap()
+        );
     }
 
     // ========== Allow-Update Parsing Tests ==========
@@ -227,7 +240,10 @@ mod tests {
         );
         assert!(serialized.contains("10.1.1.1"), "Should include first IP");
         assert!(serialized.contains("10.2.2.2"), "Should include second IP");
-        assert!(!serialized.contains("key"), "Should not include 'key' keyword");
+        assert!(
+            !serialized.contains("key"),
+            "Should not include 'key' keyword"
+        );
     }
 
     #[test]
@@ -241,11 +257,18 @@ mod tests {
         let serialized = config.to_rndc_block();
 
         // Should not have double semicolons
-        assert!(!serialized.contains(";;"), "Should not have ';;' anywhere: {}", serialized);
+        assert!(
+            !serialized.contains(";;"),
+            "Should not have ';;' anywhere: {}",
+            serialized
+        );
 
         // Should have proper format
-        assert!(serialized.contains("allow-update { key \"bindy-operator\"; }"),
-                "Should have properly formatted allow-update: {}", serialized);
+        assert!(
+            serialized.contains("allow-update { key \"bindy-operator\"; }"),
+            "Should have properly formatted allow-update: {}",
+            serialized
+        );
     }
 
     // ========== PATCH Operation Tests ==========
@@ -431,7 +454,10 @@ mod tests {
         let serialized = config.to_rndc_block();
 
         // Verify key is gone, IP is present
-        assert!(serialized.contains("allow-update"), "Should have allow-update");
+        assert!(
+            serialized.contains("allow-update"),
+            "Should have allow-update"
+        );
         assert!(!serialized.contains("key"), "Should not have key reference");
         assert!(serialized.contains("10.1.1.1"), "Should have IP address");
     }
@@ -463,9 +489,18 @@ mod tests {
         let serialized = config.to_rndc_block();
 
         // Verify the serialized output contains the allow-update directive
-        assert!(serialized.contains("allow-update"), "Serialized config should contain allow-update");
-        assert!(serialized.contains("key"), "Serialized config should preserve key reference");
-        assert!(serialized.contains("bindy-operator"), "Serialized config should preserve key name");
+        assert!(
+            serialized.contains("allow-update"),
+            "Serialized config should contain allow-update"
+        );
+        assert!(
+            serialized.contains("key"),
+            "Serialized config should preserve key reference"
+        );
+        assert!(
+            serialized.contains("bindy-operator"),
+            "Serialized config should preserve key name"
+        );
     }
 
     // ========== Real-World Production Tests ==========
@@ -478,22 +513,41 @@ mod tests {
 
         assert_eq!(config.zone_name, "internal.local");
         assert_eq!(config.zone_type, ZoneType::Primary);
-        assert_eq!(config.file, Some("/var/cache/bind/internal.local.zone".to_string()));
+        assert_eq!(
+            config.file,
+            Some("/var/cache/bind/internal.local.zone".to_string())
+        );
 
         // Verify allow-transfer parsed correctly (CIDR notation stripped)
         assert_eq!(config.allow_transfer.as_ref().unwrap().len(), 2);
-        assert_eq!(config.allow_transfer.as_ref().unwrap()[0], "10.244.1.18".parse::<IpAddr>().unwrap());
-        assert_eq!(config.allow_transfer.as_ref().unwrap()[1], "10.244.1.21".parse::<IpAddr>().unwrap());
+        assert_eq!(
+            config.allow_transfer.as_ref().unwrap()[0],
+            "10.244.1.18".parse::<IpAddr>().unwrap()
+        );
+        assert_eq!(
+            config.allow_transfer.as_ref().unwrap()[1],
+            "10.244.1.21".parse::<IpAddr>().unwrap()
+        );
 
         // Verify allow-update parsed (key references are captured in raw)
         if let Some(allow_update) = &config.allow_update {
-            assert_eq!(allow_update.len(), 0, "Should not extract IPs from key-based allow-update");
+            assert_eq!(
+                allow_update.len(),
+                0,
+                "Should not extract IPs from key-based allow-update"
+            );
         }
 
         // Verify also-notify parsed correctly
         assert_eq!(config.also_notify.as_ref().unwrap().len(), 2);
-        assert_eq!(config.also_notify.as_ref().unwrap()[0], "10.244.1.18".parse::<IpAddr>().unwrap());
-        assert_eq!(config.also_notify.as_ref().unwrap()[1], "10.244.1.21".parse::<IpAddr>().unwrap());
+        assert_eq!(
+            config.also_notify.as_ref().unwrap()[0],
+            "10.244.1.18".parse::<IpAddr>().unwrap()
+        );
+        assert_eq!(
+            config.also_notify.as_ref().unwrap()[1],
+            "10.244.1.21".parse::<IpAddr>().unwrap()
+        );
     }
 
     #[test]
@@ -503,31 +557,57 @@ mod tests {
 
         // Test parsing succeeds
         let result = parse_showzone(input);
-        assert!(result.is_ok(), "Failed to parse production output: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse production output: {:?}",
+            result.err()
+        );
 
         let config = result.unwrap();
 
         // Verify all fields
         assert_eq!(config.zone_name, "internal.local");
         assert_eq!(config.zone_type, ZoneType::Primary);
-        assert_eq!(config.file, Some("/var/cache/bind/internal.local.zone".to_string()));
+        assert_eq!(
+            config.file,
+            Some("/var/cache/bind/internal.local.zone".to_string())
+        );
 
         // Verify allow-transfer (CIDR /32 should be stripped)
-        let allow_transfer = config.allow_transfer.as_ref().expect("allow-transfer should be present");
+        let allow_transfer = config
+            .allow_transfer
+            .as_ref()
+            .expect("allow-transfer should be present");
         assert_eq!(allow_transfer.len(), 2);
         assert_eq!(allow_transfer[0].to_string(), "10.244.1.18");
         assert_eq!(allow_transfer[1].to_string(), "10.244.1.21");
 
         // Verify also-notify
-        let also_notify = config.also_notify.as_ref().expect("also-notify should be present");
+        let also_notify = config
+            .also_notify
+            .as_ref()
+            .expect("also-notify should be present");
         assert_eq!(also_notify.len(), 2);
         assert_eq!(also_notify[0].to_string(), "10.244.1.18");
         assert_eq!(also_notify[1].to_string(), "10.244.1.21");
 
         // Verify allow-update raw directive is captured (key-based updates)
-        assert!(config.allow_update_raw.is_some(), "allow-update-raw should be present for key-based updates");
-        assert!(config.allow_update_raw.as_ref().unwrap().contains("key"), "Raw directive should contain 'key' keyword");
-        assert!(config.allow_update_raw.as_ref().unwrap().contains("bindy-operator"), "Raw directive should contain key name");
+        assert!(
+            config.allow_update_raw.is_some(),
+            "allow-update-raw should be present for key-based updates"
+        );
+        assert!(
+            config.allow_update_raw.as_ref().unwrap().contains("key"),
+            "Raw directive should contain 'key' keyword"
+        );
+        assert!(
+            config
+                .allow_update_raw
+                .as_ref()
+                .unwrap()
+                .contains("bindy-operator"),
+            "Raw directive should contain key name"
+        );
     }
 
     #[test]
@@ -545,7 +625,10 @@ mod tests {
             config.allow_update_raw.is_some(),
             "Must capture raw allow-update"
         );
-        assert!(config.allow_transfer.is_some(), "Must capture allow-transfer");
+        assert!(
+            config.allow_transfer.is_some(),
+            "Must capture allow-transfer"
+        );
         assert!(config.also_notify.is_some(), "Must capture also-notify");
 
         // Simulate PATCH: only update allow-transfer
@@ -593,15 +676,30 @@ mod tests {
         // NOT: { ... allow-update { key "..."; };; };  (double semicolon)
 
         // Verify no syntax errors (double semicolons)
-        assert!(!modzone_config.contains(";; }"), "Should not have ';; }}' at end: {}", modzone_config);
-        assert!(!modzone_config.contains(";;"), "Should not have ';;' anywhere: {}", modzone_config);
+        assert!(
+            !modzone_config.contains(";; }"),
+            "Should not have ';; }}' at end: {}",
+            modzone_config
+        );
+        assert!(
+            !modzone_config.contains(";;"),
+            "Should not have ';;' anywhere: {}",
+            modzone_config
+        );
 
         // Verify proper ending
-        assert!(modzone_config.ends_with("};"), "Should end with '}};': {}", modzone_config);
+        assert!(
+            modzone_config.ends_with("};"),
+            "Should end with '}};': {}",
+            modzone_config
+        );
 
         // Verify the allow-update section is properly formatted
-        assert!(modzone_config.contains("allow-update { key \"bindy-operator\"; }"),
-                "Should have properly formatted allow-update: {}", modzone_config);
+        assert!(
+            modzone_config.contains("allow-update { key \"bindy-operator\"; }"),
+            "Should have properly formatted allow-update: {}",
+            modzone_config
+        );
     }
 
     // ========== Enhanced Features: Unknown Option Preservation ==========
@@ -754,16 +852,14 @@ mod tests {
 
     #[test]
     fn test_serialize_raw_options_no_trailing_semicolons() {
-        let mut config = ZoneConfig::new(
-            "example.com".to_string(),
-            ZoneType::Primary,
-        );
+        let mut config = ZoneConfig::new("example.com".to_string(), ZoneType::Primary);
         config.file = Some("/var/cache/bind/example.com.zone".to_string());
-        config.raw_options.insert("zone-statistics".to_string(), "yes".to_string());
-        config.raw_options.insert(
-            "check-names".to_string(),
-            "warn".to_string(),
-        );
+        config
+            .raw_options
+            .insert("zone-statistics".to_string(), "yes".to_string());
+        config
+            .raw_options
+            .insert("check-names".to_string(), "warn".to_string());
 
         let serialized = config.to_rndc_block();
 
