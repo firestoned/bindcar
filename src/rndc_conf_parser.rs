@@ -26,9 +26,7 @@
 //! assert_eq!(config.keys.len(), 1);
 //! ```
 
-use crate::rndc_conf_types::{
-    KeyBlock, OptionsBlock, RndcConfFile, ServerAddress, ServerBlock,
-};
+use crate::rndc_conf_types::{KeyBlock, OptionsBlock, RndcConfFile, ServerAddress, ServerBlock};
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_until, take_while, take_while1},
@@ -186,9 +184,8 @@ fn ipv4_addr(input: &str) -> IResult<&str, IpAddr> {
 
 /// Parse an IPv6 address
 fn ipv6_addr(input: &str) -> IResult<&str, IpAddr> {
-    let (input, addr_str) = recognize(take_while1(|c: char| {
-        c.is_ascii_hexdigit() || c == ':'
-    }))(input)?;
+    let (input, addr_str) =
+        recognize(take_while1(|c: char| c.is_ascii_hexdigit() || c == ':'))(input)?;
 
     // Must contain at least two colons to be valid IPv6
     if !addr_str.contains("::") && addr_str.matches(':').count() < 2 {
@@ -264,11 +261,7 @@ fn parse_key_field(input: &str) -> IResult<&str, KeyField> {
 fn parse_key_block(input: &str) -> IResult<&str, (String, KeyBlock)> {
     let (input, _) = ws(tag("key"))(input)?;
     let (input, name) = ws(quoted_string)(input)?;
-    let (input, fields) = delimited(
-        ws(char('{')),
-        many0(parse_key_field),
-        ws(tag("};")),
-    )(input)?;
+    let (input, fields) = delimited(ws(char('{')), many0(parse_key_field), ws(tag("};")))(input)?;
 
     let mut algorithm = None;
     let mut secret = None;
@@ -339,11 +332,8 @@ fn parse_server_field(input: &str) -> IResult<&str, ServerField> {
 fn parse_server_block(input: &str) -> IResult<&str, (String, ServerBlock)> {
     let (input, _) = ws(tag("server"))(input)?;
     let (input, addr) = ws(server_address)(input)?;
-    let (input, fields) = delimited(
-        ws(char('{')),
-        many0(parse_server_field),
-        ws(tag("};")),
-    )(input)?;
+    let (input, fields) =
+        delimited(ws(char('{')), many0(parse_server_field), ws(tag("};")))(input)?;
 
     let mut server = ServerBlock::new(addr.clone());
 
@@ -405,11 +395,8 @@ fn parse_option_field(input: &str) -> IResult<&str, OptionField> {
 /// Parse options block: options { default-server localhost; };
 fn parse_options_block(input: &str) -> IResult<&str, OptionsBlock> {
     let (input, _) = ws(tag("options"))(input)?;
-    let (input, fields) = delimited(
-        ws(char('{')),
-        many0(parse_option_field),
-        ws(tag("};")),
-    )(input)?;
+    let (input, fields) =
+        delimited(ws(char('{')), many0(parse_option_field), ws(tag("};")))(input)?;
 
     let mut options = OptionsBlock::new();
 
