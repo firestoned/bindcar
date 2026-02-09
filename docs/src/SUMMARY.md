@@ -42,6 +42,7 @@
 - [Security](./advanced/security.md)
   - [Authentication & Authorization](./advanced/auth.md)
   - [Access Control](./advanced/access-control.md)
+  - [DNSSEC](./advanced/dnssec.md)
 - [Performance](./advanced/performance.md)
   - [Tuning](./advanced/tuning.md)
 - [Integration](./advanced/integration.md)
