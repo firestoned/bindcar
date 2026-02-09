@@ -108,6 +108,59 @@ curl -X POST http://localhost:8080/api/v1/zones \
 
 **Note**: Secondary zones require the `primaries` field with at least one IP address of the primary server(s).
 
+### Example - DNSSEC-Enabled Zone
+
+```bash
+curl -X POST http://localhost:8080/api/v1/zones \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "zoneName": "secure.example.com",
+    "zoneType": "primary",
+    "zoneConfig": {
+      "ttl": 3600,
+      "soa": {
+        "primaryNs": "ns1.secure.example.com.",
+        "adminEmail": "admin.secure.example.com.",
+        "serial": 2025020601
+      },
+      "nameServers": ["ns1.secure.example.com."],
+      "nameServerIps": {},
+      "records": [
+        {
+          "name": "@",
+          "type": "A",
+          "value": "192.0.2.1"
+        }
+      ],
+      "dnssecPolicy": "default",
+      "inlineSigning": true
+    }
+  }'
+```
+
+**DNSSEC Fields**:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `dnssecPolicy` | string | No | Name of DNSSEC policy defined in BIND9 configuration (requires BIND9 9.16+) |
+| `inlineSigning` | boolean | No | Enable automatic inline signing (required when using `dnssecPolicy`) |
+
+**Prerequisites for DNSSEC**:
+- BIND9 9.16 or newer
+- DNSSEC policy must be defined in `named.conf`:
+  ```bind
+  dnssec-policy "default" {
+      keys {
+          ksk lifetime unlimited algorithm ecdsa256;
+          zsk lifetime 30d algorithm ecdsa256;
+      };
+      signatures-validity 14d;
+  };
+  ```
+
+See [DNSSEC Guide](../advanced/dnssec.md) for comprehensive DNSSEC documentation.
+
 ---
 
 ## List Zones

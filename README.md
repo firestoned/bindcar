@@ -54,6 +54,7 @@ bindcar runs as a sidecar container alongside BIND9, providing a REST interface 
 ## Features
 
 - Zone management via REST API (create, delete, reload, status)
+- **DNSSEC support** with BIND9 9.16+ policy integration and automatic inline signing
 - IP-based rate limiting with configurable thresholds (GCRA algorithm)
 - Kubernetes ServiceAccount token authentication with optional TokenReview validation
 - Fine-grained access control (audience validation, namespace/SA allowlists)

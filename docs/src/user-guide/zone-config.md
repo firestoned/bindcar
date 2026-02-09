@@ -208,6 +208,74 @@ IP addresses allowed to transfer the zone:
 - Load distribution for DNS queries
 - Geographic redundancy
 
+## DNSSEC Configuration (Optional)
+
+Configure DNSSEC (DNS Security Extensions) to add cryptographic signatures to your DNS records.
+
+### DNSSEC Policy
+
+Specifies which DNSSEC policy to apply to the zone:
+
+```json
+{
+  "dnssecPolicy": "default"
+}
+```
+
+- **Type**: String
+- **Format**: Name of a DNSSEC policy defined in BIND9 configuration
+- **Examples**: `"default"`, `"high-security"`, `"custom-policy"`
+- **Requirements**:
+  - BIND9 9.16 or newer
+  - Policy must be defined in `named.conf`
+  - Should be used with `inlineSigning: true`
+
+### Inline Signing
+
+Enables BIND9's automatic inline signing:
+
+```json
+{
+  "inlineSigning": true
+}
+```
+
+- **Type**: Boolean
+- **Default**: `false`
+- **Use Case**: Required for DNSSEC with `dnssecPolicy`
+- **How it works**: BIND9 automatically signs the zone and manages keys
+
+### DNSSEC Example
+
+```json
+{
+  "zoneName": "secure.example.com",
+  "zoneType": "primary",
+  "zoneConfig": {
+    "ttl": 3600,
+    "soa": { ... },
+    "nameServers": ["ns1.secure.example.com."],
+    "records": [ ... ],
+    "dnssecPolicy": "default",
+    "inlineSigning": true
+  }
+}
+```
+
+**Prerequisites**:
+- Define DNSSEC policy in BIND9 `named.conf`:
+  ```bind
+  dnssec-policy "default" {
+      keys {
+          ksk lifetime unlimited algorithm ecdsa256;
+          zsk lifetime 30d algorithm ecdsa256;
+      };
+      signatures-validity 14d;
+  };
+  ```
+
+See [DNSSEC Guide](../advanced/dnssec.md) for comprehensive documentation.
+
 ## Complete Example
 
 Full zone configuration with all optional fields:
@@ -267,7 +335,9 @@ Full zone configuration with all optional fields:
       }
     ],
     "alsoNotify": ["10.244.2.101", "10.244.3.101"],
-    "allowTransfer": ["10.244.2.101", "10.244.3.101"]
+    "allowTransfer": ["10.244.2.101", "10.244.3.101"],
+    "dnssecPolicy": "default",
+    "inlineSigning": true
   },
   "updateKeyName": "update-key"
 }

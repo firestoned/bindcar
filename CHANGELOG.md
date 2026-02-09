@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **DNSSEC Support**: Native support for DNSSEC (DNS Security Extensions) via BIND9 9.16+ policies
+  - New `dnssecPolicy` field in `ZoneConfig` to specify DNSSEC policy name
+  - New `inlineSigning` field to enable automatic inline signing
+  - Full integration with BIND9's `dnssec-policy` and `inline-signing` directives
+  - Automatic key generation and management by BIND9
+  - Comprehensive DNSSEC documentation in user guide and advanced topics
+  - API examples and Rust library usage patterns
+
+### Changed
+- Updated `ZoneConfig` struct with optional DNSSEC fields (backward compatible)
+- Enhanced zone creation endpoint to support DNSSEC configuration
+- Updated all documentation with DNSSEC examples and best practices
+
+### Documentation
+- Added comprehensive [DNSSEC Guide](docs/src/advanced/dnssec.md)
+- Updated [Zone Configuration](docs/src/user-guide/zone-config.md) with DNSSEC fields
+- Updated [API Reference](docs/src/reference/api-zones.md) with DNSSEC examples
+- Added DNSSEC examples to code documentation and doctests
+
 ## [2025-12-03] - Initial Release
 
 **Author:** Erick Bourgeois
