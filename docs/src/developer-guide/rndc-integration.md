@@ -805,7 +805,7 @@ fn test_parse_ip_addr_with_cidr() {
 **Future Enhancements**:
 - Parser for `rndc zonestatus` output
 - Parser for `rndc status` output
-- Parser for `rndc.conf` files (see [roadmap](../../roadmaps/rndc-conf-parser.md))
+- Parser for `rndc.conf` files
 - Support for ACL names and expressions
 
 ## Best Practices
@@ -822,7 +822,6 @@ fn test_parse_ip_addr_with_cidr() {
 
 ## Next Steps
 
-- [API Reference](../api-reference/index.md) - Complete API documentation
-- [Troubleshooting](../troubleshooting.md) - Common issues and solutions
-- [Examples](../examples.md) - Practical use cases
-- [RNDC Parser Roadmap](../../roadmaps/rndc-conf-parser.md) - Future parser enhancements
+- [API Reference](../reference/api.md) - Complete API documentation
+- [Troubleshooting](../operations/troubleshooting.md) - Common issues and solutions
+- [Examples](../reference/examples.md) - Practical use cases

@@ -89,7 +89,7 @@ open http://localhost:8080/api/v1/docs
 
 ## Next Steps
 
-- [Configuration](./configuration.md) - Configure environment variables
-- [Authentication](./authentication.md) - Set up authentication
-- [Creating Zones](./creating-zones.md) - Learn more about zone creation
-- [API Reference](./api-reference.md) - Complete API documentation
+- [Configuration](../operations/configuration.md) - Configure environment variables
+- [Authentication](../operations/authentication.md) - Set up authentication
+- [Creating Zones](../user-guide/creating-zones.md) - Learn more about zone creation
+- [API Reference](../reference/api.md) - Complete API documentation

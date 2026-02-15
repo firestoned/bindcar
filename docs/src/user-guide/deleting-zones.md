@@ -131,5 +131,5 @@ curl http://localhost:8080/api/v1/zones/example.com \
 
 ## Next Steps
 
-- [Creating Zones](../creating-zones/index.md) - Create new zones
+- [Creating Zones](./creating-zones.md) - Create new zones
 - [Zone Status](./zone-status.md) - Check zone information

@@ -146,4 +146,4 @@ done
 
 - [Reloading Zones](./reloading-zones.md) - Reload after changes
 - [Deleting Zones](./deleting-zones.md) - Remove zones
-- [API Reference](../api-reference/api-zones.md) - Complete endpoint documentation
+- [API Reference](../reference/api-zones.md) - Complete endpoint documentation

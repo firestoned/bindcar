@@ -78,4 +78,4 @@ Invalid configurations return 400 Bad Request with error details.
 
 - [Zone Configuration](./zone-config.md) - Detailed configuration reference
 - [DNS Records](./dns-records.md) - Supported DNS record types
-- [Managing Zones](../managing-zones/index.md) - Manage existing zones
+- [Managing Zones](./zones.md) - Manage existing zones

@@ -104,5 +104,5 @@ See `.github/workflows/pr.yml`.
 
 ## Next Steps
 
-- [Development Setup](./index.md) - Development environment
-- [Contributing](../contributing.md) - Contribution guidelines
+- [Development Setup](./setup.md) - Development environment
+- [Contributing](./contributing.md) - Contribution guidelines

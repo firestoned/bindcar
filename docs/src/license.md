@@ -46,4 +46,4 @@ cargo tree
 
 By contributing to bindcar, you agree that your contributions will be licensed under the MIT License.
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md) for more information about contributing.
+See [CONTRIBUTING.md](https://github.com/firestoned/bindcar/blob/main/CONTRIBUTING.md) for more information about contributing.

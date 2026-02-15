@@ -246,4 +246,4 @@ groups:
 ## Next Steps
 
 - [Logging](./logging.md) - Configure logging
-- [Troubleshooting](../troubleshooting.md) - Debug issues
+- [Troubleshooting](./troubleshooting.md) - Debug issues

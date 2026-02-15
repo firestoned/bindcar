@@ -107,4 +107,4 @@ cargo doc --open
 
 - [Building from Source](./building.md) - Detailed build instructions
 - [Running Tests](./testing.md) - Testing guide
-- [Contributing](../contributing.md) - Contribution guidelines
+- [Contributing](./contributing.md) - Contribution guidelines

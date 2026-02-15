@@ -226,5 +226,5 @@ kubectl logs -l app=dns -c bindcar | grep 'example.com'
 
 ## Next Steps
 
-- [Monitoring](./index.md) - Overview of monitoring
-- [Troubleshooting](../troubleshooting.md) - Debug issues
+- [Monitoring](./monitoring.md) - Overview of monitoring
+- [Troubleshooting](./troubleshooting.md) - Debug issues

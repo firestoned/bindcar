@@ -48,7 +48,7 @@ All endpoints except `/health` and `/ready` require Bearer token authentication:
 Authorization: Bearer <token>
 ```
 
-See [Authentication](../configuration/authentication.md) for details.
+See [Authentication](../operations/authentication.md) for details.
 
 ## Interactive Documentation
 
@@ -62,4 +62,4 @@ http://localhost:8080/api/v1/docs
 
 - [Health & Status](./health-status.md) - Health check endpoints
 - [Zone Operations](./zone-operations.md) - Zone management operations
-- [API Reference](../api-reference/index.md) - Complete API documentation
+- [API Reference](../reference/api.md) - Complete API documentation

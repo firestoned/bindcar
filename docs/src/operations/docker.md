@@ -88,7 +88,7 @@ docker-compose logs -f bindcar
 
 ## Environment Variables
 
-See [Environment Variables](../configuration/env-vars.md) for complete reference.
+See [Environment Variables](./env-vars.md) for complete reference.
 
 Common variables:
 
@@ -221,5 +221,5 @@ docker exec bind9 rndc status
 ## Next Steps
 
 - [Kubernetes Deployment](./kubernetes.md) - Deploy to Kubernetes
-- [Configuration](../configuration/index.md) - Advanced configuration
-- [Monitoring](../monitoring/index.md) - Monitor your deployment
+- [Configuration](./configuration.md) - Advanced configuration
+- [Monitoring](./monitoring.md) - Monitor your deployment

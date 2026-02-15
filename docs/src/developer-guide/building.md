@@ -143,4 +143,4 @@ BIND_ZONE_DIR=.tmp/zones ./target/release/bindcar
 ## Next Steps
 
 - [Running Tests](./testing.md) - Test your build
-- [Development Setup](./index.md) - Development environment
+- [Development Setup](./setup.md) - Development environment

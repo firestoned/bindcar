@@ -290,5 +290,5 @@ Latency is primarily determined by:
 ## Next Steps
 
 - [API Design](./api-design.md) - Detailed API architecture
-- [RNDC Integration](../development/rndc-integration.md) - Deep dive into RNDC
+- [RNDC Integration](../developer-guide/rndc-integration.md) - Deep dive into RNDC
 - [Deployment](../operations/deployment.md) - Deployment patterns
