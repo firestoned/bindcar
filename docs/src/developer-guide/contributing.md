@@ -474,6 +474,6 @@ Thank you for contributing to bindcar!
 
 ## Next Steps
 
-- [Development Setup](./dev-setup/index.md) - Set up development environment
-- [Architecture](./architecture.md) - Understand the codebase
-- [API Reference](./api-reference/index.md) - API documentation
+- [Development Setup](./setup.md) - Set up development environment
+- [Architecture](./architecture-deep-dive.md) - Understand the codebase
+- [API Reference](../reference/api.md) - API documentation

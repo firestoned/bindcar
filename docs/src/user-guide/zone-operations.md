@@ -120,6 +120,6 @@ curl http://localhost:8080/api/v1/zones \
 
 ## Next Steps
 
-- [Creating Zones](../creating-zones/index.md) - Detailed zone creation guide
-- [Managing Zones](../managing-zones/index.md) - Zone management operations
-- [API Reference](../api-reference/api-zones.md) - Complete zone endpoint reference
+- [Creating Zones](./creating-zones.md) - Detailed zone creation guide
+- [Managing Zones](./zones.md) - Zone management operations
+- [API Reference](../reference/api-zones.md) - Complete zone endpoint reference

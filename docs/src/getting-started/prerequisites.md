@@ -40,7 +40,7 @@ rndc status
 # Expected output: server is up and running
 ```
 
-If rndc is not configured, you'll need to set up the rndc key. See [RNDC Integration](./rndc-integration.md) for details.
+If rndc is not configured, you'll need to set up the rndc key. See [RNDC Integration](../developer-guide/rndc-integration.md) for details.
 
 ## Build Requirements
 
@@ -109,6 +109,6 @@ rustc --version
 
 ## Next Steps
 
-- [Installation](./installation.md) - Install bindcar
+- [Installation](./index.md) - Install bindcar
 - [Quick Start](./quickstart.md) - Get started quickly
-- [Configuration](./configuration.md) - Configure your environment
+- [Configuration](../operations/configuration.md) - Configure your environment

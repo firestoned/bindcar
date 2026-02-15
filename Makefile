@@ -79,76 +79,88 @@ clean: ## Clean build artifacts
 
 # Documentation targets
 .PHONY: docs
-docs: export PATH := $(HOME)/.cargo/bin:$(PATH)
-docs: ## Build all documentation (mdBook + rustdoc + OpenAPI)
+docs: export PATH := $(HOME)/.local/bin:$(HOME)/.cargo/bin:$(PATH)
+docs: ## Build all documentation (MkDocs + rustdoc + OpenAPI)
 	@echo "Building all documentation..."
-	@command -v mdbook >/dev/null 2>&1 || { echo "Error: mdbook not found. Install with: cargo install mdbook"; exit 1; }
+	@echo "Checking Poetry installation..."
+	@command -v poetry >/dev/null 2>&1 || { echo "Error: Poetry not found. Install with: curl -sSL https://install.python-poetry.org | python3 -"; exit 1; }
+	@echo "Ensuring documentation dependencies are installed..."
+	@cd docs && poetry install --no-interaction --quiet
 	@echo "Building rustdoc API documentation..."
-	@K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo doc --no-deps
-	@echo "Build mdBook documentation..."
-	@cd docs && mdbook build
+	@K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo doc --no-deps --all-features
+	@echo "Building MkDocs documentation..."
+	@cd docs && poetry run mkdocs build
 	@echo "Copying rustdoc into documentation..."
-	@mkdir -p docs/target/rustdoc
-	@cp -r target/doc/* docs/target/rustdoc/
+	@mkdir -p docs/site/rustdoc
+	@cp -r target/doc/* docs/site/rustdoc/
 	@echo "Creating rustdoc index redirect..."
-	@echo '<!DOCTYPE html>' > docs/target/rustdoc/index.html
-	@echo '<html>' >> docs/target/rustdoc/index.html
-	@echo '<head>' >> docs/target/rustdoc/index.html
-	@echo '    <meta charset="utf-8">' >> docs/target/rustdoc/index.html
-	@echo '    <title>bindcar API Documentation</title>' >> docs/target/rustdoc/index.html
-	@echo '    <meta http-equiv="refresh" content="0; url=bindcar/index.html">' >> docs/target/rustdoc/index.html
-	@echo '</head>' >> docs/target/rustdoc/index.html
-	@echo '<body>' >> docs/target/rustdoc/index.html
-	@echo '    <p>Redirecting to <a href="bindcar/index.html">bindcar API Documentation</a>...</p>' >> docs/target/rustdoc/index.html
-	@echo '</body>' >> docs/target/rustdoc/index.html
-	@echo '</html>' >> docs/target/rustdoc/index.html
+	@echo '<!DOCTYPE html>' > docs/site/rustdoc/index.html
+	@echo '<html>' >> docs/site/rustdoc/index.html
+	@echo '<head>' >> docs/site/rustdoc/index.html
+	@echo '    <meta charset="utf-8">' >> docs/site/rustdoc/index.html
+	@echo '    <title>bindcar API Documentation</title>' >> docs/site/rustdoc/index.html
+	@echo '    <meta http-equiv="refresh" content="0; url=bindcar/index.html">' >> docs/site/rustdoc/index.html
+	@echo '</head>' >> docs/site/rustdoc/index.html
+	@echo '<body>' >> docs/site/rustdoc/index.html
+	@echo '    <p>Redirecting to <a href="bindcar/index.html">bindcar API Documentation</a>...</p>' >> docs/site/rustdoc/index.html
+	@echo '</body>' >> docs/site/rustdoc/index.html
+	@echo '</html>' >> docs/site/rustdoc/index.html
 	@echo "Generating OpenAPI specification..."
 	@$(MAKE) --no-print-directory docs-openapi
-	@echo "Documentation built successfully in docs/target/"
-	@echo "  - User guide: docs/target/index.html"
-	@echo "  - API reference: docs/target/rustdoc/bindcar/index.html"
-	@echo "  - OpenAPI spec: docs/target/openapi.json"
+	@echo "✓ Documentation built successfully in docs/site/"
+	@echo "  - User guide: docs/site/index.html"
+	@echo "  - API reference: docs/site/rustdoc/bindcar/index.html"
+	@echo "  - OpenAPI spec: docs/site/openapi.json"
 
 .PHONY: docs-openapi
 docs-openapi: ## Generate OpenAPI/Swagger specification
 	@echo "Starting temporary API server to extract OpenAPI spec..."
-	@mkdir -p .tmp/zones docs/target
+	@mkdir -p .tmp/zones docs/site
 	@BIND_ZONE_DIR=.tmp/zones cargo run & \
 		SERVER_PID=$$!; \
 		echo "Waiting for server to start..."; \
 		sleep 3; \
 		echo "Fetching OpenAPI specification..."; \
-		curl -s http://localhost:8080/api/v1/openapi.json > docs/target/openapi.json && \
-		echo "OpenAPI specification saved to docs/target/openapi.json" || \
+		curl -s http://localhost:8080/api/v1/openapi.json > docs/site/openapi.json && \
+		echo "OpenAPI specification saved to docs/site/openapi.json" || \
 		echo "Failed to fetch OpenAPI specification"; \
 		echo "Stopping server..."; \
 		kill $$SERVER_PID 2>/dev/null || true; \
 		sleep 1
 
 .PHONY: docs-serve
-docs-serve: docs ## Build and serve documentation locally
-	@echo "Serving documentation at http://localhost:3000"
-	@cd docs/target && python3 -m http.server 3000
-
-.PHONY: docs-mdbook
-docs-mdbook: ## Build mdBook documentation only
-	@command -v mdbook >/dev/null 2>&1 || { echo "Installing mdbook..."; cargo install mdbook; }
-	@cd docs && mdbook build
-	@echo "mdBook documentation built in docs/target/"
+docs-serve: export PATH := $(HOME)/.local/bin:$(PATH)
+docs-serve: ## Serve documentation locally with live reload (MkDocs)
+	@echo "Starting MkDocs development server with live reload..."
+	@command -v poetry >/dev/null 2>&1 || { echo "Error: Poetry not found. Install with: curl -sSL https://install.python-poetry.org | python3 -"; exit 1; }
+	@echo "Ensuring documentation dependencies are installed..."
+	@cd docs && poetry install --no-interaction --quiet
+	@echo ""
+	@echo "Documentation server starting at http://127.0.0.1:8000"
+	@echo "Live reload enabled - changes will auto-refresh your browser"
+	@echo ""
+	@echo "Watching:"
+	@echo "  - Documentation content: docs/src/"
+	@echo "  - Configuration: docs/mkdocs.yml"
+	@echo "  - Theme files: docs/theme/"
+	@echo ""
+	@echo "Press Ctrl+C to stop"
+	@echo ""
+	@cd docs && poetry run mkdocs serve --watch-theme --livereload
 
 .PHONY: docs-rustdoc
-docs-rustdoc: ## Build rustdoc API documentation only
-	cargo doc --no-deps --open
+docs-rustdoc: ## Build and open rustdoc API documentation only
+	@echo "Building rustdoc API documentation..."
+	@K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo doc --no-deps --all-features --open
 
 .PHONY: docs-clean
 docs-clean: ## Clean documentation build artifacts
-	rm -rf docs/target/
-	rm -rf target/doc/
-
-.PHONY: docs-watch
-docs-watch: ## Watch and rebuild mdBook documentation on changes
-	@command -v mdbook >/dev/null 2>&1 || { echo "Installing mdbook..."; cargo install mdbook; }
-	cd docs && mdbook serve
+	@echo "Cleaning documentation build artifacts..."
+	@rm -rf docs/site/
+	@rm -rf target/doc/
+	@rm -rf docs/.venv/
+	@rm -rf docs/poetry.lock
+	@echo "✓ Documentation artifacts cleaned"
 
 #
 # Code Coverage

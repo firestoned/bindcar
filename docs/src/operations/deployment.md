@@ -124,7 +124,7 @@ spec:
 
 ## Configuration
 
-See [Configuration](../configuration/index.md) for environment variables and settings.
+See [Configuration](./configuration.md) for environment variables and settings.
 
 ## Security Considerations
 
@@ -138,5 +138,5 @@ See [Configuration](../configuration/index.md) for environment variables and set
 
 - [Docker Deployment](./docker.md) - Deploy with Docker
 - [Kubernetes Deployment](./kubernetes.md) - Deploy to Kubernetes
-- [Configuration](../configuration/index.md) - Configure bindcar
-- [Monitoring](../monitoring/index.md) - Monitor your deployment
+- [Configuration](./configuration.md) - Configure bindcar
+- [Monitoring](./monitoring.md) - Monitor your deployment

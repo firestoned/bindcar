@@ -260,4 +260,4 @@ Specifies which CAs can issue certificates.
 ## Next Steps
 
 - [Zone Configuration](./zone-config.md) - Complete zone configuration
-- [Managing Zones](../managing-zones/index.md) - Modify zones after creation
+- [Managing Zones](./zones.md) - Modify zones after creation

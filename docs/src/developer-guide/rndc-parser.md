@@ -709,7 +709,7 @@ While all options are preserved via `raw_options`, structured parsing is not yet
 
 ### Future Enhancements
 
-See the [BIND9 Full Zone Config Support Roadmap](../../roadmaps/bind9-full-zone-config-support.md) for details:
+Planned improvements for zone configuration parsing:
 
 - Structured parsers for common options (notify, forwarders, transfer timeouts)
 - ACL name resolution
@@ -784,4 +784,3 @@ class           ::= "IN" | "CH" | "HS"
 - [RNDC Integration](./rndc-integration.md) - RNDC command execution
 - [Zone Operations](../user-guide/zone-operations.md) - Using zone modification API
 - [API Reference](../reference/api-zones.md) - Zone API endpoints
-- [RNDC Conf Parser Roadmap](../../roadmaps/rndc-conf-parser.md) - Future enhancements

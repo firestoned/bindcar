@@ -645,6 +645,6 @@ If you encounter a bug or need help:
 
 ## Next Steps
 
-- [Monitoring](./monitoring/index.md) - Set up logging and monitoring
-- [Contributing](./contributing.md) - Report bugs or contribute fixes
-- [Examples](./examples.md) - Working examples and use cases
+- [Monitoring](./monitoring.md) - Set up logging and monitoring
+- [Contributing](../developer-guide/contributing.md) - Report bugs or contribute fixes
+- [Examples](../reference/examples.md) - Working examples and use cases

@@ -441,10 +441,10 @@ kubectl logs -n dns-system -l app=dns -c bindcar
 
 ## Troubleshooting
 
-See [Troubleshooting](../troubleshooting.md) for common issues.
+See [Troubleshooting](./troubleshooting.md) for common issues.
 
 ## Next Steps
 
-- [Configuration](../configuration/index.md) - Configure bindcar
-- [Monitoring](../monitoring/index.md) - Monitor your deployment
-- [Troubleshooting](../troubleshooting.md) - Debug issues
+- [Configuration](./configuration.md) - Configure bindcar
+- [Monitoring](./monitoring.md) - Monitor your deployment
+- [Troubleshooting](./troubleshooting.md) - Debug issues

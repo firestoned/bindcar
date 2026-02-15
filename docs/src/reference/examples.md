@@ -1146,6 +1146,6 @@ fi
 
 ## Next Steps
 
-- [API Reference](./api-reference/index.md) - Complete API documentation
-- [Troubleshooting](./troubleshooting.md) - Common issues and solutions
-- [Contributing](./contributing.md) - Contribute your own examples
+- [API Reference](./api.md) - Complete API documentation
+- [Troubleshooting](../operations/troubleshooting.md) - Common issues and solutions
+- [Contributing](../developer-guide/contributing.md) - Contribute your own examples

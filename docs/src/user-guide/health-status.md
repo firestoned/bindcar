@@ -186,5 +186,5 @@ While bindcar doesn't currently export Prometheus metrics, you can use blackbox_
 ## Next Steps
 
 - [Zone Operations](./zone-operations.md) - Zone management endpoints
-- [API Reference](../api-reference/index.md) - Complete API documentation
-- [Monitoring](../monitoring/index.md) - Monitoring and observability
+- [API Reference](../reference/api.md) - Complete API documentation
+- [Monitoring](../operations/monitoring.md) - Monitoring and observability

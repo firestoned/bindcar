@@ -166,10 +166,10 @@ Integrate with CI/CD, infrastructure-as-code, or configuration management tools.
 
 ## Next Steps
 
-- [Installation](./installation.md) - Get started with bindcar
-- [Quick Start](./quickstart.md) - Deploy your first zone
-- [API Reference](./api-reference.md) - Complete API documentation
-- [Architecture](./architecture.md) - Understand how bindcar works
+- [Installation](./getting-started/index.md) - Get started with bindcar
+- [Quick Start](./getting-started/quickstart.md) - Deploy your first zone
+- [API Reference](./reference/api.md) - Complete API documentation
+- [Architecture](./getting-started/architecture.md) - Understand how bindcar works
 
 ## Support & Community
 

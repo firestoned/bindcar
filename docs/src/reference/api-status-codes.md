@@ -508,6 +508,6 @@ fi
 
 ## Next Steps
 
-- [API Overview](../api-overview/index.md) - API design and endpoints
-- [Troubleshooting](../troubleshooting.md) - Debugging API errors
-- [Examples](../examples.md) - Complete API usage examples
+- [API Overview](../user-guide/api-overview.md) - API design and endpoints
+- [Troubleshooting](../operations/troubleshooting.md) - Debugging API errors
+- [Examples](./examples.md) - Complete API usage examples

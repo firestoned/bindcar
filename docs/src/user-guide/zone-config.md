@@ -346,4 +346,4 @@ Full zone configuration with all optional fields:
 ## Next Steps
 
 - [DNS Records](./dns-records.md) - Record types and formats
-- [Managing Zones](../managing-zones/index.md) - Manage zones after creation
+- [Managing Zones](./zones.md) - Manage zones after creation

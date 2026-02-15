@@ -1,12 +1,19 @@
-# mdBook build output
-target/
+# MkDocs build output
+site/
 
 # Rust documentation
 rustdoc/
 
+# Poetry virtual environment and lock file
+.venv/
+poetry.lock
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
 # Mermaid temporary files (if any are generated)
 **/.mermaid-*
 **/mermaid-diagram-*.svg
-
-# Note: We DO want to commit mermaid.min.js and mermaid-init.js
-# These are essential for rendering diagrams
