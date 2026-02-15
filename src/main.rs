@@ -57,6 +57,9 @@ use tower_governor::{
         zones::server_status,
         zones::list_zones,
         zones::get_zone,
+        bindcar::records::add_record,
+        bindcar::records::remove_record,
+        bindcar::records::update_record,
     ),
     components(
         schemas(
@@ -69,16 +72,21 @@ use tower_governor::{
             zones::ZoneConfig,
             zones::SoaRecord,
             zones::DnsRecord,
+            bindcar::records::AddRecordRequest,
+            bindcar::records::RemoveRecordRequest,
+            bindcar::records::UpdateRecordRequest,
+            bindcar::records::RecordResponse,
         )
     ),
     tags(
         (name = "zones", description = "Zone management endpoints"),
+        (name = "records", description = "DNS record management endpoints"),
         (name = "server", description = "Server status endpoints")
     ),
     info(
         title = "Bindcar API",
         version = "0.1.0",
-        description = "HTTP REST API for managing BIND9 zones via RNDC",
+        description = "HTTP REST API for managing BIND9 zones and DNS records via RNDC and nsupdate",
         license(name = "MIT")
     )
 )]
@@ -288,13 +296,57 @@ async fn main() -> anyhow::Result<()> {
 
     // create rndc executor
     let rndc = Arc::new(
-        RndcExecutor::new(rndc_server, rndc_algorithm, rndc_secret)
-            .context("failed to create rndc client")?,
+        RndcExecutor::new(
+            rndc_server.clone(),
+            rndc_algorithm.clone(),
+            rndc_secret.clone(),
+        )
+        .context("failed to create rndc client")?,
+    );
+
+    // Configure nsupdate executor (hybrid approach: env vars → rndc credentials)
+    let nsupdate_key_name = std::env::var("NSUPDATE_KEY_NAME")
+        .ok()
+        .or_else(|| std::env::var("RNDC_KEY_NAME").ok())
+        .or(Some("rndc-key".to_string()));
+
+    let nsupdate_algorithm = std::env::var("NSUPDATE_ALGORITHM")
+        .ok()
+        .or(Some(rndc_algorithm.clone()));
+
+    let nsupdate_secret = std::env::var("NSUPDATE_SECRET")
+        .ok()
+        .or(Some(rndc_secret.clone()));
+
+    let nsupdate_server = std::env::var("NSUPDATE_SERVER")
+        .ok()
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
+    let nsupdate_port = std::env::var("NSUPDATE_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(53);
+
+    info!("nsupdate executor configuration:");
+    info!("  server: {}:{}", nsupdate_server, nsupdate_port);
+    info!("  TSIG key: {:?}", nsupdate_key_name);
+
+    // create nsupdate executor
+    let nsupdate = Arc::new(
+        bindcar::nsupdate::NsupdateExecutor::new(
+            nsupdate_server,
+            nsupdate_port,
+            nsupdate_key_name,
+            nsupdate_algorithm,
+            nsupdate_secret,
+        )
+        .context("failed to create nsupdate executor")?,
     );
 
     // create application state
     let state = AppState {
         rndc,
+        nsupdate,
         zone_dir: zone_dir.clone(),
     };
 
@@ -313,6 +365,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/zones/{name}/thaw", post(zones::thaw_zone))
         .route("/zones/{name}/notify", post(zones::notify_zone))
         .route("/zones/{name}/retransfer", post(zones::retransfer_zone))
+        .route(
+            "/zones/{name}/records",
+            post(bindcar::records::add_record)
+                .delete(bindcar::records::remove_record)
+                .put(bindcar::records::update_record),
+        )
         .route("/server/status", get(zones::server_status))
         .with_state(state.clone());
 

@@ -11,13 +11,15 @@ use axum::{
 use serde::Serialize;
 use std::sync::Arc;
 
-use crate::rndc::RndcExecutor;
+use crate::{nsupdate::NsupdateExecutor, rndc::RndcExecutor};
 
 /// Application state shared across handlers
 #[derive(Clone)]
 pub struct AppState {
     /// RNDC command executor
     pub rndc: Arc<RndcExecutor>,
+    /// nsupdate command executor
+    pub nsupdate: Arc<NsupdateExecutor>,
     /// Zone file directory
     pub zone_dir: String,
 }
@@ -49,6 +51,15 @@ pub enum ApiError {
 
     #[error("Internal server error: {0}")]
     InternalError(String),
+
+    #[error("Dynamic updates not enabled: {0}")]
+    DynamicUpdatesNotEnabled(String),
+
+    #[error("nsupdate command failed: {0}")]
+    NsupdateError(String),
+
+    #[error("Invalid record: {0}")]
+    InvalidRecord(String),
 }
 
 impl IntoResponse for ApiError {
@@ -60,6 +71,9 @@ impl IntoResponse for ApiError {
             ApiError::ZoneNotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
             ApiError::ZoneAlreadyExists(_) => (StatusCode::CONFLICT, self.to_string()),
             ApiError::InternalError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            ApiError::DynamicUpdatesNotEnabled(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            ApiError::NsupdateError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            ApiError::InvalidRecord(_) => (StatusCode::BAD_REQUEST, self.to_string()),
         };
 
         let body = Json(ErrorResponse {

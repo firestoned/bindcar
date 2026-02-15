@@ -149,3 +149,24 @@ pub fn record_rate_limit(allowed: bool) {
     let result = if allowed { "allowed" } else { "rejected" };
     RATE_LIMIT_REQUESTS_TOTAL.with_label_values(&[result]).inc();
 }
+
+/// Record an nsupdate command execution
+pub fn record_nsupdate_command(operation: &str, success: bool, duration: f64) {
+    let result = if success { "success" } else { "error" };
+    let command = format!("nsupdate_{}", operation);
+    RNDC_COMMANDS_TOTAL
+        .with_label_values(&[command.as_str(), result])
+        .inc();
+    RNDC_COMMAND_DURATION_SECONDS
+        .with_label_values(&[command.as_str()])
+        .observe(duration);
+}
+
+/// Record a DNS record operation (add, remove, update)
+pub fn record_record_operation(operation: &str, success: bool) {
+    let result = if success { "success" } else { "error" };
+    let op = format!("record_{}", operation);
+    ZONE_OPERATIONS_TOTAL
+        .with_label_values(&[op.as_str(), result])
+        .inc();
+}

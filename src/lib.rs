@@ -139,7 +139,9 @@
 pub mod auth;
 pub mod metrics;
 pub mod middleware;
+pub mod nsupdate;
 pub mod rate_limit;
+pub mod records;
 pub mod rndc;
 pub mod rndc_conf_parser;
 pub mod rndc_conf_types;
@@ -153,6 +155,9 @@ pub mod zones;
 // RNDC executor
 pub use rndc::RndcExecutor;
 
+// nsupdate executor
+pub use nsupdate::NsupdateExecutor;
+
 // Error types
 pub use types::{ApiError, AppState, ErrorResponse};
 
@@ -164,6 +169,9 @@ pub use zones::{
     CreateZoneRequest, ServerStatusResponse, ZoneInfo, ZoneListResponse, ZoneResponse,
     ZONE_TYPE_PRIMARY, ZONE_TYPE_SECONDARY,
 };
+
+// Record management types
+pub use records::{AddRecordRequest, RecordResponse, RemoveRecordRequest, UpdateRecordRequest};
 
 // RNDC configuration
 pub use rndc::{parse_rndc_conf, RndcConfig};
@@ -182,7 +190,11 @@ mod metrics_test;
 #[cfg(test)]
 mod middleware_test;
 #[cfg(test)]
+mod nsupdate_test;
+#[cfg(test)]
 mod rate_limit_test;
+#[cfg(test)]
+mod records_test;
 #[cfg(test)]
 mod rndc_parser_tests;
 #[cfg(test)]
