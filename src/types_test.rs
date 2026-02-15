@@ -4,7 +4,7 @@
 //! Unit tests for types module
 
 use super::types::*;
-use crate::rndc::RndcExecutor;
+use crate::{nsupdate::NsupdateExecutor, rndc::RndcExecutor};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use std::sync::Arc;
@@ -19,8 +19,19 @@ fn test_app_state_clone() {
         )
         .expect("Failed to create RndcExecutor"),
     );
+    let nsupdate = Arc::new(
+        NsupdateExecutor::new(
+            "127.0.0.1".to_string(),
+            53,
+            Some("test-key".to_string()),
+            Some("HMAC-SHA256".to_string()),
+            Some("dGVzdC1zZWNyZXQtaGVyZQ==".to_string()),
+        )
+        .expect("Failed to create NsupdateExecutor"),
+    );
     let state = AppState {
         rndc: rndc.clone(),
+        nsupdate: nsupdate.clone(),
         zone_dir: "/test/dir".to_string(),
     };
 
@@ -113,6 +124,39 @@ fn test_api_error_internal_error() {
 }
 
 #[test]
+fn test_api_error_dynamic_updates_not_enabled() {
+    let error = ApiError::DynamicUpdatesNotEnabled("example.com".to_string());
+    assert_eq!(
+        error.to_string(),
+        "Dynamic updates not enabled: example.com"
+    );
+
+    let response = error.into_response();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn test_api_error_nsupdate_error() {
+    let error = ApiError::NsupdateError("nsupdate failed".to_string());
+    assert_eq!(
+        error.to_string(),
+        "nsupdate command failed: nsupdate failed"
+    );
+
+    let response = error.into_response();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[test]
+fn test_api_error_invalid_record() {
+    let error = ApiError::InvalidRecord("invalid IP address".to_string());
+    assert_eq!(error.to_string(), "Invalid record: invalid IP address");
+
+    let response = error.into_response();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
 fn test_api_error_display() {
     let errors = vec![
         ApiError::ZoneFileError("file error".to_string()),
@@ -121,6 +165,9 @@ fn test_api_error_display() {
         ApiError::ZoneNotFound("test.com".to_string()),
         ApiError::ZoneAlreadyExists("test.com".to_string()),
         ApiError::InternalError("internal".to_string()),
+        ApiError::DynamicUpdatesNotEnabled("test.com".to_string()),
+        ApiError::NsupdateError("nsupdate error".to_string()),
+        ApiError::InvalidRecord("invalid".to_string()),
     ];
 
     for error in errors {
