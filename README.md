@@ -53,7 +53,8 @@ bindcar runs as a sidecar container alongside BIND9, providing a REST interface 
 
 ## Features
 
-- Zone management via REST API (create, delete, reload, status)
+- **Zone management** via REST API (create, delete, reload, status, modify)
+- **Individual DNS record management** (add, update, remove records dynamically via nsupdate)
 - **DNSSEC support** with BIND9 9.16+ policy integration and automatic inline signing
 - IP-based rate limiting with configurable thresholds (GCRA algorithm)
 - Kubernetes ServiceAccount token authentication with optional TokenReview validation
@@ -110,6 +111,11 @@ Environment variables:
 - `RNDC_SERVER` - RNDC server address (default: `127.0.0.1:953`, or from `/etc/bind/rndc.conf`)
 - `RNDC_ALGORITHM` - HMAC algorithm (default: `sha256`, or from `/etc/bind/rndc.conf`)
 - `RNDC_SECRET` - Base64-encoded RNDC secret key (required if not using rndc.conf)
+- `NSUPDATE_SERVER` - DNS server for nsupdate (default: `127.0.0.1`)
+- `NSUPDATE_PORT` - DNS server port for nsupdate (default: `53`)
+- `NSUPDATE_KEY_NAME` - TSIG key name for nsupdate (defaults to RNDC key)
+- `NSUPDATE_ALGORITHM` - HMAC algorithm for nsupdate (defaults to `RNDC_ALGORITHM`)
+- `NSUPDATE_SECRET` - Base64-encoded TSIG secret for nsupdate (defaults to `RNDC_SECRET`)
 - `RUST_LOG` - Log level (default: `info`)
 - `DISABLE_AUTH` - Disable authentication (default: `false`)
 - `RATE_LIMIT_ENABLED` - Enable rate limiting (default: `true`)
@@ -206,10 +212,15 @@ See [Kubernetes TokenReview Validation](https://firestoned.github.io/bindcar/dev
 
 ## API Endpoints
 
+### Health & Metrics
 - `GET /api/v1/health` - Health check
 - `GET /api/v1/ready` - Readiness check
 - `GET /metrics` - Prometheus metrics (no auth required)
+
+### Server Status
 - `GET /api/v1/server/status` - BIND9 server status
+
+### Zone Management
 - `POST /api/v1/zones` - Create zone
 - `GET /api/v1/zones` - List zones
 - `GET /api/v1/zones/{name}` - Get zone info
@@ -220,12 +231,19 @@ See [Kubernetes TokenReview Validation](https://firestoned.github.io/bindcar/dev
 - `POST /api/v1/zones/{name}/thaw` - Thaw zone
 - `POST /api/v1/zones/{name}/notify` - Notify secondaries
 
+### DNS Record Management
+- `POST /api/v1/zones/{name}/records` - Add individual record
+- `DELETE /api/v1/zones/{name}/records` - Remove individual record
+- `PUT /api/v1/zones/{name}/records` - Update individual record
+
 ## Documentation
 
 Full documentation is available at: [https://firestoned.github.io/bindcar](https://firestoned.github.io/bindcar)
 
 - [Getting Started](https://firestoned.github.io/bindcar/installation.html)
 - [API Reference](https://firestoned.github.io/bindcar/api-reference.html)
+- [Managing DNS Records](https://firestoned.github.io/bindcar/user-guide/managing-records.html)
+- [Record Endpoints API](https://firestoned.github.io/bindcar/reference/api-records.html)
 - [Configuration Guide](https://firestoned.github.io/bindcar/configuration.html)
 - [Deployment](https://firestoned.github.io/bindcar/deployment.html)
 

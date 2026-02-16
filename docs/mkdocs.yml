@@ -192,6 +192,7 @@ nav:
           - Zone Status: user-guide/zone-status.md
       - Managing DNS Records:
           - Overview: user-guide/records.md
+          - Managing Individual Records: user-guide/managing-records.md
           - DNS Record Types: user-guide/dns-records.md
 
   - Operations:
@@ -237,6 +238,7 @@ nav:
       - API Reference: reference/api.md
       - Health Endpoints: reference/api-health.md
       - Zone Endpoints: reference/api-zones.md
+      - Record Endpoints: reference/api-records.md
       - Status Codes: reference/api-status-codes.md
       - Examples: reference/examples.md
       - Rustdoc API: rustdoc.md

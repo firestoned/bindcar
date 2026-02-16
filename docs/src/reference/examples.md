@@ -75,6 +75,216 @@ curl -X DELETE "$BASE_URL/zones/example.com" \
 echo -e "\n\nDone!"
 ```
 
+## DNS Record Management
+
+### Add, Update, and Remove Individual Records
+
+```bash
+#!/bin/bash
+set -e
+
+TOKEN="your-secret-token"
+BASE_URL="http://localhost:8080/api/v1"
+ZONE="example.com"
+
+# Prerequisites: Zone must be created with dynamic updates enabled
+echo "Creating zone with dynamic updates enabled..."
+curl -X POST "$BASE_URL/zones" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"zoneName\": \"$ZONE\",
+    \"zoneType\": \"primary\",
+    \"zoneConfig\": {
+      \"ttl\": 3600,
+      \"soa\": {
+        \"primaryNs\": \"ns1.$ZONE.\",
+        \"adminEmail\": \"admin.$ZONE.\",
+        \"serial\": 1,
+        \"refresh\": 3600,
+        \"retry\": 1800,
+        \"expire\": 604800,
+        \"negativeTtl\": 86400
+      },
+      \"updateKeyName\": \"update-key\",
+      \"records\": [
+        {\"name\": \"@\", \"type\": \"NS\", \"value\": \"ns1.$ZONE.\"}
+      ]
+    }
+  }"
+
+# 1. Add A record
+echo -e "\n\n1. Adding A record for www..."
+curl -X POST "$BASE_URL/zones/$ZONE/records" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "www",
+    "type": "A",
+    "value": "192.0.2.100",
+    "ttl": 3600
+  }'
+
+# 2. Add another A record (same name, different IP)
+echo -e "\n\n2. Adding second A record for www (load balancing)..."
+curl -X POST "$BASE_URL/zones/$ZONE/records" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "www",
+    "type": "A",
+    "value": "192.0.2.101",
+    "ttl": 3600
+  }'
+
+# 3. Add MX record
+echo -e "\n\n3. Adding MX record..."
+curl -X POST "$BASE_URL/zones/$ZONE/records" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "@",
+    "type": "MX",
+    "value": "mail.example.com.",
+    "ttl": 3600,
+    "priority": 10
+  }'
+
+# 4. Update an A record
+echo -e "\n\n4. Updating A record (changing IP)..."
+curl -X PUT "$BASE_URL/zones/$ZONE/records" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "www",
+    "type": "A",
+    "currentValue": "192.0.2.100",
+    "newValue": "192.0.2.102",
+    "ttl": 7200
+  }'
+
+# 5. Remove specific A record
+echo -e "\n\n5. Removing specific A record..."
+curl -X DELETE "$BASE_URL/zones/$ZONE/records" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "www",
+    "type": "A",
+    "value": "192.0.2.101"
+  }'
+
+# 6. Verify with dig
+echo -e "\n\n6. Verifying DNS records..."
+dig @localhost www.$ZONE +short
+dig @localhost $ZONE MX +short
+
+echo -e "\n\nDone!"
+```
+
+### Python: Dynamic Record Management
+
+```python
+#!/usr/bin/env python3
+import requests
+from typing import Optional
+
+BASE_URL = "http://localhost:8080/api/v1"
+TOKEN = "your-secret-token"
+
+headers = {
+    "Authorization": f"Bearer {TOKEN}",
+    "Content-Type": "application/json"
+}
+
+class RecordManager:
+    """Manage individual DNS records dynamically."""
+
+    def __init__(self, zone_name: str):
+        self.zone_name = zone_name
+        self.base_path = f"{BASE_URL}/zones/{zone_name}/records"
+
+    def add_record(self, name: str, record_type: str, value: str,
+                   ttl: int = 3600, priority: Optional[int] = None):
+        """Add a DNS record to the zone."""
+        data = {
+            "name": name,
+            "type": record_type,
+            "value": value,
+            "ttl": ttl
+        }
+        if priority is not None:
+            data["priority"] = priority
+
+        response = requests.post(self.base_path, headers=headers, json=data)
+
+        if response.status_code == 201:
+            print(f"✓ Added {record_type} record: {name} -> {value}")
+            return response.json()
+        else:
+            print(f"✗ Failed to add record: {response.text}")
+            return None
+
+    def remove_record(self, name: str, record_type: str, value: str):
+        """Remove a specific DNS record."""
+        data = {
+            "name": name,
+            "type": record_type,
+            "value": value
+        }
+
+        response = requests.delete(self.base_path, headers=headers, json=data)
+
+        if response.status_code == 200:
+            print(f"✓ Removed {record_type} record: {name} ({value})")
+            return response.json()
+        else:
+            print(f"✗ Failed to remove record: {response.text}")
+            return None
+
+    def update_record(self, name: str, record_type: str,
+                      current_value: str, new_value: str, ttl: int = 3600):
+        """Update an existing DNS record."""
+        data = {
+            "name": name,
+            "type": record_type,
+            "currentValue": current_value,
+            "newValue": new_value,
+            "ttl": ttl
+        }
+
+        response = requests.put(self.base_path, headers=headers, json=data)
+
+        if response.status_code == 200:
+            print(f"✓ Updated {record_type} record: {name} {current_value} -> {new_value}")
+            return response.json()
+        else:
+            print(f"✗ Failed to update record: {response.text}")
+            return None
+
+# Example usage
+manager = RecordManager("example.com")
+
+# Add web servers
+manager.add_record("web1", "A", "192.0.2.10")
+manager.add_record("web2", "A", "192.0.2.11")
+manager.add_record("web3", "A", "192.0.2.12")
+
+# Add round-robin DNS
+manager.add_record("www", "A", "192.0.2.10")
+manager.add_record("www", "A", "192.0.2.11")
+manager.add_record("www", "A", "192.0.2.12")
+
+# Update one server
+manager.update_record("web1", "A", "192.0.2.10", "192.0.2.20")
+
+# Remove a failed server from rotation
+manager.remove_record("www", "A", "192.0.2.11")
+
+# Add CNAME
+manager.add_record("app", "CNAME", "web1.example.com.")
+```
+
 ## Multi-Zone Setup
 
 ### Create Multiple Related Zones
@@ -347,19 +557,25 @@ add_ptr_record() {
     local SUBNET="${IP%.*}"
     local LAST_OCTET="${IP##*.}"
     local ZONE_NAME="${SUBNET##*.}.${SUBNET%.*}.in-addr.arpa"
-    
+
     echo "Adding PTR: $IP -> $HOSTNAME"
-    
-    # Note: This example shows the concept
-    # Actual implementation would need zone update API endpoint
-    echo "Would add PTR record: $LAST_OCTET PTR $HOSTNAME."
+
+    curl -X POST "$BASE_URL/zones/$ZONE_NAME/records" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{
+        \"name\": \"$LAST_OCTET\",
+        \"type\": \"PTR\",
+        \"value\": \"$HOSTNAME.\",
+        \"ttl\": 3600
+      }"
 }
 
 # Create reverse zones for IP ranges
 create_reverse_zone "192.0.2"
 create_reverse_zone "192.0.3"
 
-# Add PTR records (conceptual - requires zone update API)
+# Add PTR records using dynamic updates
 add_ptr_record "192.0.2.1" "ns1.example.com"
 add_ptr_record "192.0.2.10" "web1.example.com"
 add_ptr_record "192.0.2.20" "mail.example.com"

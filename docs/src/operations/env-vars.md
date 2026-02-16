@@ -82,6 +82,103 @@ The secret must be:
 - Base64-encoded
 - Match the key configured in BIND9's `rndc.conf`
 
+## nsupdate Variables
+
+These variables configure the nsupdate executor for dynamic DNS record updates. If not set, bindcar automatically falls back to using RNDC credentials.
+
+### NSUPDATE_KEY_NAME
+
+- **Type**: String
+- **Default**: Falls back to RNDC key name
+- **Required**: No
+- **Description**: TSIG key name for nsupdate authentication
+
+```bash
+NSUPDATE_KEY_NAME=update-key
+```
+
+This should match the key name in your zone's `allow-update` directive.
+
+### NSUPDATE_ALGORITHM
+
+- **Type**: String
+- **Default**: Falls back to `RNDC_ALGORITHM`
+- **Required**: No
+- **Description**: HMAC algorithm for TSIG authentication
+
+```bash
+NSUPDATE_ALGORITHM=HMAC-SHA256
+```
+
+Valid values (same as RNDC):
+- `md5` (or `hmac-md5` or `HMAC-MD5`)
+- `sha1` (or `hmac-sha1` or `HMAC-SHA1`)
+- `sha224` (or `hmac-sha224` or `HMAC-SHA224`)
+- `sha256` (or `hmac-sha256` or `HMAC-SHA256`)
+- `sha384` (or `hmac-sha384` or `HMAC-SHA384`)
+- `sha512` (or `hmac-sha512` or `HMAC-SHA512`)
+
+### NSUPDATE_SECRET
+
+- **Type**: String (base64-encoded)
+- **Default**: Falls back to `RNDC_SECRET`
+- **Required**: No
+- **Description**: Base64-encoded TSIG secret for nsupdate
+
+```bash
+NSUPDATE_SECRET=dGVzdC1zZWNyZXQtaGVyZQ==
+```
+
+Must be:
+- Base64-encoded
+- Match the key configured in BIND9's zone `allow-update` directive
+
+### NSUPDATE_SERVER
+
+- **Type**: String (IP address)
+- **Default**: `127.0.0.1`
+- **Required**: No
+- **Description**: DNS server address for nsupdate commands
+
+```bash
+NSUPDATE_SERVER=127.0.0.1
+```
+
+Typically localhost when running as a sidecar.
+
+### NSUPDATE_PORT
+
+- **Type**: Integer
+- **Default**: `53`
+- **Required**: No
+- **Description**: DNS server port for nsupdate commands
+
+```bash
+NSUPDATE_PORT=53
+```
+
+### Example Configurations
+
+**Using separate keys (recommended for security)**:
+```bash
+# RNDC for zone management
+RNDC_SECRET=rndc-key-secret-here
+RNDC_ALGORITHM=sha256
+
+# nsupdate for record updates (different key)
+NSUPDATE_KEY_NAME=update-key
+NSUPDATE_SECRET=update-key-secret-here
+NSUPDATE_ALGORITHM=HMAC-SHA256
+```
+
+**Using same key (simpler setup)**:
+```bash
+# Set RNDC vars only - nsupdate automatically uses them
+RNDC_SECRET=shared-key-secret-here
+RNDC_ALGORITHM=sha256
+# nsupdate will use RNDC credentials automatically
+```
+
 ## Logging Variables
 
 ### RUST_LOG

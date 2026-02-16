@@ -9,12 +9,12 @@ on:
       - main
     paths:
       - 'docs/**'
-      - 'api/**'
+      - 'src/**/*.rs'
       - '.github/workflows/docs.yaml'
   pull_request:
     paths:
       - 'docs/**'
-      - 'api/**'
+      - 'src/**/*.rs'
       - '.github/workflows/docs.yaml'
   workflow_dispatch:
 
@@ -28,11 +28,6 @@ concurrency:
   group: "pages"
   cancel-in-progress: true
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-  K8S_OPENAPI_ENABLED_VERSION: "1.31"
-
 jobs:
   build:
     name: Build Documentation
@@ -40,26 +35,59 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git-revision-date-localized plugin
 
       - name: Setup Rust build environment
-        uses: firestoned/github-actions/rust/setup-rust-build@v1.3.4
+        uses: firestoned/github-actions/rust/setup-rust-build@v1.3.2
         with:
           target: x86_64-unknown-linux-gnu
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install Poetry
-        uses: snok/install-poetry@v1
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Configure Poetry
+        run: |
+          cd docs
+          poetry config virtualenvs.in-project true
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
         with:
-          version: 1.8.2
-          virtualenvs-create: true
-          virtualenvs-in-project: true
+          path: docs/.venv
+          key: ${{ runner.os }}-poetry-${{ hashFiles('docs/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Install documentation dependencies
+        run: |
+          cd docs
+          poetry install --no-interaction --no-ansi
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Build documentation
         run: make docs
+
+      - name: Check for broken links
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          npm install -g linkinator
+          linkinator docs/site/ --recurse --skip "rustdoc/.*" --verbosity error
 
       - name: Setup Pages
         if: github.ref == 'refs/heads/main'
