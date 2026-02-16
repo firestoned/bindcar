@@ -37,7 +37,11 @@ https://your-domain.com/api/v1
         ├── /status      # Zone status
         ├── /freeze      # Freeze zone updates
         ├── /thaw        # Thaw zone updates
-        └── /notify      # Notify secondaries
+        ├── /notify      # Notify secondaries
+        └── /records     # Manage individual DNS records
+            ├── POST     # Add record
+            ├── DELETE   # Remove record
+            └── PUT      # Update record
 ```
 
 ## Authentication
@@ -62,4 +66,5 @@ http://localhost:8080/api/v1/docs
 
 - [Health & Status](./health-status.md) - Health check endpoints
 - [Zone Operations](./zone-operations.md) - Zone management operations
+- [Managing DNS Records](./managing-records.md) - Individual record management
 - [API Reference](../reference/api.md) - Complete API documentation

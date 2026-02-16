@@ -77,6 +77,12 @@ sequenceDiagram
 - [POST /api/v1/zones/{name}/thaw](./api-zones.md#thaw-zone) - Thaw zone (enable updates)
 - [POST /api/v1/zones/{name}/notify](./api-zones.md#notify-secondaries) - Notify secondary servers
 
+### DNS Record Management
+
+- [POST /api/v1/zones/{name}/records](./api-records.md#add-record) - Add individual record
+- [DELETE /api/v1/zones/{name}/records](./api-records.md#remove-record) - Remove individual record
+- [PUT /api/v1/zones/{name}/records](./api-records.md#update-record) - Update individual record
+
 ## Interactive API Documentation
 
 bindcar includes a Swagger UI for interactive API exploration:

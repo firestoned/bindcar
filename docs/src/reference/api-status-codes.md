@@ -17,6 +17,8 @@ Complete HTTP status code reference for all bindcar API endpoints.
 - POST /api/v1/zones/{name}/freeze - Zone frozen successfully
 - POST /api/v1/zones/{name}/thaw - Zone thawed successfully
 - POST /api/v1/zones/{name}/notify - Notify sent successfully
+- DELETE /api/v1/zones/{name}/records - Record removed successfully
+- PUT /api/v1/zones/{name}/records - Record updated successfully
 
 **Response Body**: JSON with requested data
 
@@ -31,8 +33,9 @@ Complete HTTP status code reference for all bindcar API endpoints.
 
 **When Returned**:
 - POST /api/v1/zones - Zone created successfully
+- POST /api/v1/zones/{name}/records - DNS record added successfully
 
-**Response Body**: JSON with created zone details
+**Response Body**: JSON with created resource details
 
 **Headers**:
 - `Location: /api/v1/zones/{name}` - URL of created resource
@@ -63,8 +66,9 @@ Complete HTTP status code reference for all bindcar API endpoints.
 - Invalid JSON in request body
 - Missing required fields
 - Invalid field types
-- Invalid DNS record format
+- Invalid DNS record format (A, AAAA, CNAME, MX, TXT, etc.)
 - Invalid zone name format
+- Zone does not support dynamic updates (no allow-update configured)
 
 **Response Body**: JSON error with details
 
@@ -381,6 +385,7 @@ graph TD
 | Endpoint | Success | Error Codes |
 |----------|---------|-------------|
 | /api/v1/zones | 201 Created | 400, 401, 409, 413, 415, 422, 429, 500, 503 |
+| /api/v1/zones/{name}/records | 201 Created | 400, 401, 404, 413, 415, 422, 429, 500, 503 |
 | /api/v1/zones/{name}/reload | 200 OK | 401, 404, 429, 500, 503 |
 | /api/v1/zones/{name}/freeze | 200 OK | 401, 404, 429, 500, 503 |
 | /api/v1/zones/{name}/thaw | 200 OK | 401, 404, 429, 500, 503 |
@@ -402,6 +407,13 @@ graph TD
 | Endpoint | Success | Error Codes |
 |----------|---------|-------------|
 | /api/v1/zones/{name} | 204 No Content | 401, 404, 429, 500, 503 |
+| /api/v1/zones/{name}/records | 200 OK | 400, 401, 404, 422, 429, 500, 503 |
+
+### PUT Endpoints
+
+| Endpoint | Success | Error Codes |
+|----------|---------|-------------|
+| /api/v1/zones/{name}/records | 200 OK | 400, 401, 404, 422, 429, 500, 503 |
 
 ## Best Practices
 

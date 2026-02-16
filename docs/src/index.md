@@ -1,9 +1,21 @@
 # Introduction
 
-[![Pull Request CI](https://github.com/firestoned/bindcar/actions/workflows/pr.yml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/pr.yml)
-[![Docker Build](https://github.com/firestoned/bindcar/actions/workflows/docker.yml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/docker.yml)
-
 **bindcar** is a lightweight HTTP REST API server for managing BIND9 zones via rndc commands. It provides a modern HTTP interface to BIND9's native control protocol, making DNS zone management simple and scriptable.
+
+### Project Status
+
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Crates.io](https://img.shields.io/crates/v/bindcar.svg)](https://crates.io/crates/bindcar)
+[![GitHub Release](https://img.shields.io/github/v/release/firestoned/bindcar)](https://github.com/firestoned/bindcar/releases/latest)
+[![GitHub commits since latest release](https://img.shields.io/github/commits-since/firestoned/bindcar/latest)](https://github.com/firestoned/bindcar/commits/main)
+[![Last Commit](https://img.shields.io/github/last-commit/firestoned/bindcar)](https://github.com/firestoned/bindcar/commits/main)
+
+### CI/CD Status
+
+[![Main Branch CI/CD](https://github.com/firestoned/bindcar/actions/workflows/main.yaml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/main.yaml)
+[![Pull Request Checks](https://github.com/firestoned/bindcar/actions/workflows/pr.yml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/pr.yml)
+[![Release Workflow](https://github.com/firestoned/bindcar/actions/workflows/release.yml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/release.yml)
+[![Documentation](https://github.com/firestoned/bindcar/actions/workflows/docs.yaml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/docs.yaml)
 
 ## What is bindcar?
 
