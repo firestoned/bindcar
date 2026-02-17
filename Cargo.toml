@@ -60,7 +60,7 @@ tower_governor = "0.8"
 rndc = "0.1.3"
 
 # Parsing
-nom = "7"
+nom = "8"
 
 # Kubernetes client (optional, for token validation)
 kube = { version = "2.0", features = ["client", "rustls-tls"], optional = true }

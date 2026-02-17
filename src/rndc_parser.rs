@@ -26,7 +26,7 @@ use nom::{
     combinator::{map, opt, recognize},
     multi::many0,
     sequence::{delimited, preceded, terminated},
-    IResult,
+    IResult, Parser,
 };
 use std::net::IpAddr;
 use thiserror::Error;
@@ -58,21 +58,21 @@ pub type ParseResult<T> = Result<T, RndcParseError>;
 // ========== Common Parser Primitives ==========
 
 /// Skip whitespace around a parser
-fn ws<'a, F, O>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
+fn ws<'a, F, O>(inner: F) -> impl Parser<&'a str, Output = O, Error = nom::error::Error<&'a str>>
 where
-    F: FnMut(&'a str) -> IResult<&'a str, O>,
+    F: Parser<&'a str, Output = O, Error = nom::error::Error<&'a str>>,
 {
     delimited(multispace0, inner, multispace0)
 }
 
 /// Parse a semicolon
 fn semicolon(input: &str) -> IResult<&str, char> {
-    ws(char(';'))(input)
+    ws(char(';')).parse(input)
 }
 
 /// Parse a quoted string: "example"
 pub(crate) fn quoted_string(input: &str) -> IResult<&str, String> {
-    let (input, content) = delimited(char('"'), take_until("\""), char('"'))(input)?;
+    let (input, content) = delimited(char('"'), take_until("\""), char('"')).parse(input)?;
     Ok((input, content.to_string()))
 }
 
@@ -87,7 +87,8 @@ pub(crate) fn ip_addr(input: &str) -> IResult<&str, IpAddr> {
     // Try to parse as much as possible that looks like an IP address
     let (input, addr_str) = recognize(take_while1(|c: char| {
         c.is_ascii_hexdigit() || c == '.' || c == ':'
-    }))(input)?;
+    }))
+    .parse(input)?;
 
     // Try to parse the string as an IP address
     let addr = match addr_str.parse::<IpAddr>() {
@@ -101,20 +102,22 @@ pub(crate) fn ip_addr(input: &str) -> IResult<&str, IpAddr> {
     };
 
     // Check for optional CIDR suffix (e.g., /32 or /128) and consume it
-    let (input, _) = opt(preceded(char('/'), take_while1(|c: char| c.is_numeric())))(input)?;
+    let (input, _) =
+        opt(preceded(char('/'), take_while1(|c: char| c.is_numeric()))).parse(input)?;
 
     Ok((input, addr))
 }
 
 /// Parse IP address with optional port
 pub(crate) fn ip_with_port(input: &str) -> IResult<&str, PrimarySpec> {
-    let (input, addr) = ws(ip_addr)(input)?;
+    let (input, addr) = ws(ip_addr).parse(input)?;
     let (input, port) = opt(preceded(
         ws(tag("port")),
         map(take_while1(|c: char| c.is_numeric()), |s: &str| {
             s.parse::<u16>().ok()
         }),
-    ))(input)?;
+    ))
+    .parse(input)?;
 
     Ok((
         input,
@@ -131,7 +134,8 @@ fn ip_list(input: &str) -> IResult<&str, Vec<IpAddr>> {
         ws(char('{')),
         many0(terminated(ws(ip_addr), semicolon)),
         ws(char('}')),
-    )(input)
+    )
+    .parse(input)
 }
 
 /// Parse a list of primary specs: { addr; addr port 5353; }
@@ -140,7 +144,8 @@ fn primary_list(input: &str) -> IResult<&str, Vec<PrimarySpec>> {
         ws(char('{')),
         many0(terminated(ip_with_port, semicolon)),
         ws(char('}')),
-    )(input)
+    )
+    .parse(input)
 }
 
 // ========== Zone Configuration Parser ==========
@@ -216,8 +221,8 @@ enum ZoneStatement {
 
 /// Parse zone type statement: type primary;
 fn parse_type_statement(input: &str) -> IResult<&str, ZoneStatement> {
-    let (input, _) = ws(tag("type"))(input)?;
-    let (input, type_str) = ws(identifier)(input)?;
+    let (input, _) = ws(tag("type")).parse(input)?;
+    let (input, type_str) = ws(identifier).parse(input)?;
     let (input, _) = semicolon(input)?;
 
     let zone_type = ZoneType::parse(type_str).ok_or_else(|| {
@@ -229,8 +234,8 @@ fn parse_type_statement(input: &str) -> IResult<&str, ZoneStatement> {
 
 /// Parse file statement: file "/path/to/file";
 fn parse_file_statement(input: &str) -> IResult<&str, ZoneStatement> {
-    let (input, _) = ws(tag("file"))(input)?;
-    let (input, file) = ws(quoted_string)(input)?;
+    let (input, _) = ws(tag("file")).parse(input)?;
+    let (input, file) = ws(quoted_string).parse(input)?;
     let (input, _) = semicolon(input)?;
     Ok((input, ZoneStatement::File(file)))
 }
@@ -238,7 +243,7 @@ fn parse_file_statement(input: &str) -> IResult<&str, ZoneStatement> {
 /// Parse primaries statement: primaries { addr; addr port 5353; };
 /// Also handles legacy "masters" keyword
 fn parse_primaries_statement(input: &str) -> IResult<&str, ZoneStatement> {
-    let (input, _) = ws(alt((tag("primaries"), tag("masters"))))(input)?;
+    let (input, _) = ws(alt((tag("primaries"), tag("masters")))).parse(input)?;
     let (input, primaries) = primary_list(input)?;
     let (input, _) = semicolon(input)?;
     Ok((input, ZoneStatement::Primaries(primaries)))
@@ -246,7 +251,7 @@ fn parse_primaries_statement(input: &str) -> IResult<&str, ZoneStatement> {
 
 /// Parse also-notify statement: also-notify { addr; addr; };
 fn parse_also_notify_statement(input: &str) -> IResult<&str, ZoneStatement> {
-    let (input, _) = ws(tag("also-notify"))(input)?;
+    let (input, _) = ws(tag("also-notify")).parse(input)?;
     let (input, addrs) = ip_list(input)?;
     let (input, _) = semicolon(input)?;
     Ok((input, ZoneStatement::AlsoNotify(addrs)))
@@ -254,7 +259,7 @@ fn parse_also_notify_statement(input: &str) -> IResult<&str, ZoneStatement> {
 
 /// Parse allow-transfer statement: allow-transfer { addr; addr; };
 fn parse_allow_transfer_statement(input: &str) -> IResult<&str, ZoneStatement> {
-    let (input, _) = ws(tag("allow-transfer"))(input)?;
+    let (input, _) = ws(tag("allow-transfer")).parse(input)?;
     let (input, addrs) = ip_list(input)?;
     let (input, _) = semicolon(input)?;
     Ok((input, ZoneStatement::AllowTransfer(addrs)))
@@ -263,13 +268,13 @@ fn parse_allow_transfer_statement(input: &str) -> IResult<&str, ZoneStatement> {
 /// Parse allow-update statement: allow-update { addr; addr; }; or allow-update { key "name"; };
 /// Captures both IP addresses and raw directive for key-based updates
 fn parse_allow_update_statement(input: &str) -> IResult<&str, ZoneStatement> {
-    let (input, _) = ws(tag("allow-update"))(input)?;
+    let (input, _) = ws(tag("allow-update")).parse(input)?;
 
     // Capture the start position to extract raw content
     let start_input = input;
 
     // Parse the content between braces
-    let (input, _) = ws(char('{'))(input)?;
+    let (input, _) = ws(char('{')).parse(input)?;
 
     // Collect IP addresses and check for key references
     let mut addrs = Vec::new();
@@ -287,7 +292,7 @@ fn parse_allow_update_statement(input: &str) -> IResult<&str, ZoneStatement> {
         }
 
         // Check for "key" keyword
-        if let Ok((input, _)) = ws(tag("key"))(input) {
+        if let Ok((input, _)) = ws(tag("key")).parse(input) {
             has_key_ref = true;
             // Skip to the next semicolon
             let (input, _) = take_until(";")(input)?;
@@ -327,7 +332,7 @@ fn parse_allow_update_statement(input: &str) -> IResult<&str, ZoneStatement> {
 /// Format: option-name value; or option-name { ... };
 fn parse_unknown_statement(input: &str) -> IResult<&str, ZoneStatement> {
     // Parse the option name
-    let (input, option_name) = ws(identifier)(input)?;
+    let (input, option_name) = ws(identifier).parse(input)?;
 
     // Capture starting position for value
     let start_input = input;
@@ -338,7 +343,8 @@ fn parse_unknown_statement(input: &str) -> IResult<&str, ZoneStatement> {
         delimited(ws(char('{')), take_until("}"), ws(char('}'))),
         // Simple value (anything until semicolon)
         take_until(";"),
-    ))(input)?;
+    ))
+    .parse(input)?;
 
     // Calculate raw value
     let value_len = start_input.len() - input.len();
@@ -363,7 +369,8 @@ fn parse_zone_statement(input: &str) -> IResult<&str, ZoneStatement> {
         parse_allow_update_statement,
         // Catch-all for unknown options (must be last)
         parse_unknown_statement,
-    ))(input)
+    ))
+    .parse(input)
 }
 
 /// Parse complete zone configuration from showzone output
@@ -379,11 +386,11 @@ fn parse_zone_statement(input: &str) -> IResult<&str, ZoneStatement> {
 /// ```
 fn parse_zone_config_internal(input: &str) -> IResult<&str, ZoneConfig> {
     // Parse: zone "name" [class] { statements };
-    let (input, _) = ws(tag("zone"))(input)?;
-    let (input, zone_name) = ws(quoted_string)(input)?;
+    let (input, _) = ws(tag("zone")).parse(input)?;
+    let (input, zone_name) = ws(quoted_string).parse(input)?;
 
     // Optional class (IN, CH, HS)
-    let (input, class) = opt(ws(alt((tag("IN"), tag("CH"), tag("HS")))))(input)?;
+    let (input, class) = opt(ws(alt((tag("IN"), tag("CH"), tag("HS"))))).parse(input)?;
     let class = match class {
         Some("IN") => DnsClass::IN,
         Some("CH") => DnsClass::CH,
@@ -393,7 +400,7 @@ fn parse_zone_config_internal(input: &str) -> IResult<&str, ZoneConfig> {
 
     // Parse zone block
     let (input, statements) =
-        delimited(ws(char('{')), many0(parse_zone_statement), ws(tag("};")))(input)?;
+        delimited(ws(char('{')), many0(parse_zone_statement), ws(tag("};"))).parse(input)?;
 
     // Build ZoneConfig from statements
     let mut config = ZoneConfig::new(zone_name, ZoneType::Primary); // Default type
