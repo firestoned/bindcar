@@ -33,8 +33,8 @@ use nom::{
     character::complete::{char, digit1, multispace0, multispace1},
     combinator::{map, recognize, value},
     multi::{many0, separated_list0},
-    sequence::{delimited, preceded, tuple},
-    IResult,
+    sequence::{delimited, preceded},
+    IResult, Parser,
 };
 use std::collections::HashSet;
 use std::net::IpAddr;
@@ -89,18 +89,18 @@ fn hash_comment(input: &str) -> IResult<&str, ()> {
 
 /// Parse C-style block comment: /* comment */
 fn block_comment(input: &str) -> IResult<&str, ()> {
-    value((), tuple((tag("/*"), take_until("*/"), tag("*/"))))(input)
+    value((), (tag("/*"), take_until("*/"), tag("*/"))).parse(input)
 }
 
 /// Parse any type of comment
 fn comment(input: &str) -> IResult<&str, ()> {
-    alt((line_comment, hash_comment, block_comment))(input)
+    alt((line_comment, hash_comment, block_comment)).parse(input)
 }
 
 /// Skip whitespace and comments
-fn ws<'a, F, O>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
+fn ws<'a, F, O>(inner: F) -> impl Parser<&'a str, Output = O, Error = nom::error::Error<&'a str>>
 where
-    F: FnMut(&'a str) -> IResult<&'a str, O>,
+    F: Parser<&'a str, Output = O, Error = nom::error::Error<&'a str>>,
 {
     delimited(
         many0(alt((value((), multispace1), comment))),
@@ -111,7 +111,7 @@ where
 
 /// Parse a semicolon with surrounding whitespace
 fn semicolon(input: &str) -> IResult<&str, char> {
-    ws(char(';'))(input)
+    ws(char(';')).parse(input)
 }
 
 // ========== String and Identifier Parsers ==========
@@ -127,7 +127,8 @@ fn escaped_char(input: &str) -> IResult<&str, char> {
             value('\r', char('r')),
             value('\t', char('t')),
         )),
-    )(input)
+    )
+    .parse(input)
 }
 
 /// Parse quoted string with escape sequences: "example"
@@ -144,7 +145,8 @@ fn quoted_string(input: &str) -> IResult<&str, String> {
             |parts| parts.join(""),
         ),
         char('"'),
-    )(input)
+    )
+    .parse(input)
 }
 
 /// Parse an identifier (alphanumeric with hyphens, underscores, dots, and colons)
@@ -159,7 +161,7 @@ fn identifier(input: &str) -> IResult<&str, &str> {
 
 /// Parse an IPv4 address
 fn ipv4_addr(input: &str) -> IResult<&str, IpAddr> {
-    let (input, addr_str) = recognize(tuple((
+    let (input, addr_str) = recognize((
         digit1,
         char('.'),
         digit1,
@@ -167,7 +169,8 @@ fn ipv4_addr(input: &str) -> IResult<&str, IpAddr> {
         digit1,
         char('.'),
         digit1,
-    )))(input)?;
+    ))
+    .parse(input)?;
 
     let addr = match addr_str.parse::<IpAddr>() {
         Ok(addr) => addr,
@@ -185,7 +188,7 @@ fn ipv4_addr(input: &str) -> IResult<&str, IpAddr> {
 /// Parse an IPv6 address
 fn ipv6_addr(input: &str) -> IResult<&str, IpAddr> {
     let (input, addr_str) =
-        recognize(take_while1(|c: char| c.is_ascii_hexdigit() || c == ':'))(input)?;
+        recognize(take_while1(|c: char| c.is_ascii_hexdigit() || c == ':')).parse(input)?;
 
     // Must contain at least two colons to be valid IPv6
     if !addr_str.contains("::") && addr_str.matches(':').count() < 2 {
@@ -210,12 +213,12 @@ fn ipv6_addr(input: &str) -> IResult<&str, IpAddr> {
 
 /// Parse an IP address (IPv4 or IPv6)
 fn ip_addr(input: &str) -> IResult<&str, IpAddr> {
-    alt((ipv6_addr, ipv4_addr))(input)
+    alt((ipv6_addr, ipv4_addr)).parse(input)
 }
 
 /// Parse a port number
 fn port_number(input: &str) -> IResult<&str, u16> {
-    map(digit1, |s: &str| s.parse::<u16>().unwrap_or(953))(input)
+    map(digit1, |s: &str| s.parse::<u16>().unwrap_or(953)).parse(input)
 }
 
 /// Parse a server address (hostname or IP)
@@ -224,7 +227,8 @@ fn server_address(input: &str) -> IResult<&str, ServerAddress> {
     alt((
         map(ip_addr, ServerAddress::IpAddr),
         map(identifier, |s: &str| ServerAddress::Hostname(s.to_string())),
-    ))(input)
+    ))
+    .parse(input)
 }
 
 // ========== Key Block Parser ==========
@@ -238,30 +242,31 @@ enum KeyField {
 
 /// Parse algorithm field: algorithm hmac-sha256;
 fn parse_algorithm_field(input: &str) -> IResult<&str, KeyField> {
-    let (input, _) = ws(tag("algorithm"))(input)?;
-    let (input, algo) = ws(identifier)(input)?;
+    let (input, _) = ws(tag("algorithm")).parse(input)?;
+    let (input, algo) = ws(identifier).parse(input)?;
     let (input, _) = semicolon(input)?;
     Ok((input, KeyField::Algorithm(algo.to_string())))
 }
 
 /// Parse secret field: secret "base64string";
 fn parse_secret_field(input: &str) -> IResult<&str, KeyField> {
-    let (input, _) = ws(tag("secret"))(input)?;
-    let (input, secret) = ws(quoted_string)(input)?;
+    let (input, _) = ws(tag("secret")).parse(input)?;
+    let (input, secret) = ws(quoted_string).parse(input)?;
     let (input, _) = semicolon(input)?;
     Ok((input, KeyField::Secret(secret)))
 }
 
 /// Parse key field
 fn parse_key_field(input: &str) -> IResult<&str, KeyField> {
-    alt((parse_algorithm_field, parse_secret_field))(input)
+    alt((parse_algorithm_field, parse_secret_field)).parse(input)
 }
 
 /// Parse key block: key "name" { algorithm ...; secret "..."; };
 fn parse_key_block(input: &str) -> IResult<&str, (String, KeyBlock)> {
-    let (input, _) = ws(tag("key"))(input)?;
-    let (input, name) = ws(quoted_string)(input)?;
-    let (input, fields) = delimited(ws(char('{')), many0(parse_key_field), ws(tag("};")))(input)?;
+    let (input, _) = ws(tag("key")).parse(input)?;
+    let (input, name) = ws(quoted_string).parse(input)?;
+    let (input, fields) =
+        delimited(ws(char('{')), many0(parse_key_field), ws(tag("};"))).parse(input)?;
 
     let mut algorithm = None;
     let mut secret = None;
@@ -294,28 +299,29 @@ enum ServerField {
 
 /// Parse key field: key "keyname";
 fn parse_server_key_field(input: &str) -> IResult<&str, ServerField> {
-    let (input, _) = ws(tag("key"))(input)?;
-    let (input, key) = ws(quoted_string)(input)?;
+    let (input, _) = ws(tag("key")).parse(input)?;
+    let (input, key) = ws(quoted_string).parse(input)?;
     let (input, _) = semicolon(input)?;
     Ok((input, ServerField::Key(key)))
 }
 
 /// Parse port field: port 953;
 fn parse_server_port_field(input: &str) -> IResult<&str, ServerField> {
-    let (input, _) = ws(tag("port"))(input)?;
-    let (input, port) = ws(port_number)(input)?;
+    let (input, _) = ws(tag("port")).parse(input)?;
+    let (input, port) = ws(port_number).parse(input)?;
     let (input, _) = semicolon(input)?;
     Ok((input, ServerField::Port(port)))
 }
 
 /// Parse addresses field: addresses { ip; ip; };
 fn parse_server_addresses_field(input: &str) -> IResult<&str, ServerField> {
-    let (input, _) = ws(tag("addresses"))(input)?;
+    let (input, _) = ws(tag("addresses")).parse(input)?;
     let (input, addrs) = delimited(
         ws(char('{')),
         separated_list0(semicolon, ws(ip_addr)),
         ws(tag("};")),
-    )(input)?;
+    )
+    .parse(input)?;
     Ok((input, ServerField::Addresses(addrs)))
 }
 
@@ -325,15 +331,16 @@ fn parse_server_field(input: &str) -> IResult<&str, ServerField> {
         parse_server_key_field,
         parse_server_port_field,
         parse_server_addresses_field,
-    ))(input)
+    ))
+    .parse(input)
 }
 
 /// Parse server block: server address { key "..."; port 953; };
 fn parse_server_block(input: &str) -> IResult<&str, (String, ServerBlock)> {
-    let (input, _) = ws(tag("server"))(input)?;
-    let (input, addr) = ws(server_address)(input)?;
+    let (input, _) = ws(tag("server")).parse(input)?;
+    let (input, addr) = ws(server_address).parse(input)?;
     let (input, fields) =
-        delimited(ws(char('{')), many0(parse_server_field), ws(tag("};")))(input)?;
+        delimited(ws(char('{')), many0(parse_server_field), ws(tag("};"))).parse(input)?;
 
     let mut server = ServerBlock::new(addr.clone());
 
@@ -361,24 +368,24 @@ enum OptionField {
 
 /// Parse default-server field: default-server localhost;
 fn parse_default_server_field(input: &str) -> IResult<&str, OptionField> {
-    let (input, _) = ws(tag("default-server"))(input)?;
-    let (input, server) = ws(identifier)(input)?;
+    let (input, _) = ws(tag("default-server")).parse(input)?;
+    let (input, server) = ws(identifier).parse(input)?;
     let (input, _) = semicolon(input)?;
     Ok((input, OptionField::DefaultServer(server.to_string())))
 }
 
 /// Parse default-key field: default-key "keyname";
 fn parse_default_key_field(input: &str) -> IResult<&str, OptionField> {
-    let (input, _) = ws(tag("default-key"))(input)?;
-    let (input, key) = ws(quoted_string)(input)?;
+    let (input, _) = ws(tag("default-key")).parse(input)?;
+    let (input, key) = ws(quoted_string).parse(input)?;
     let (input, _) = semicolon(input)?;
     Ok((input, OptionField::DefaultKey(key)))
 }
 
 /// Parse default-port field: default-port 953;
 fn parse_default_port_field(input: &str) -> IResult<&str, OptionField> {
-    let (input, _) = ws(tag("default-port"))(input)?;
-    let (input, port) = ws(port_number)(input)?;
+    let (input, _) = ws(tag("default-port")).parse(input)?;
+    let (input, port) = ws(port_number).parse(input)?;
     let (input, _) = semicolon(input)?;
     Ok((input, OptionField::DefaultPort(port)))
 }
@@ -389,14 +396,15 @@ fn parse_option_field(input: &str) -> IResult<&str, OptionField> {
         parse_default_server_field,
         parse_default_key_field,
         parse_default_port_field,
-    ))(input)
+    ))
+    .parse(input)
 }
 
 /// Parse options block: options { default-server localhost; };
 fn parse_options_block(input: &str) -> IResult<&str, OptionsBlock> {
-    let (input, _) = ws(tag("options"))(input)?;
+    let (input, _) = ws(tag("options")).parse(input)?;
     let (input, fields) =
-        delimited(ws(char('{')), many0(parse_option_field), ws(tag("};")))(input)?;
+        delimited(ws(char('{')), many0(parse_option_field), ws(tag("};"))).parse(input)?;
 
     let mut options = OptionsBlock::new();
 
@@ -415,8 +423,8 @@ fn parse_options_block(input: &str) -> IResult<&str, OptionsBlock> {
 
 /// Parse include statement: include "/path/to/file";
 fn parse_include_stmt(input: &str) -> IResult<&str, PathBuf> {
-    let (input, _) = ws(tag("include"))(input)?;
-    let (input, path) = ws(quoted_string)(input)?;
+    let (input, _) = ws(tag("include")).parse(input)?;
+    let (input, path) = ws(quoted_string).parse(input)?;
     let (input, _) = semicolon(input)?;
     Ok((input, PathBuf::from(path)))
 }
@@ -441,14 +449,15 @@ fn parse_statement(input: &str) -> IResult<&str, Statement> {
             Statement::Server(addr, srv)
         }),
         map(parse_options_block, Statement::Options),
-    ))(input)
+    ))
+    .parse(input)
 }
 
 // ========== File Parser ==========
 
 /// Parse rndc.conf file content (internal)
 fn parse_rndc_conf_internal(input: &str) -> IResult<&str, RndcConfFile> {
-    let (input, statements) = many0(ws(parse_statement))(input)?;
+    let (input, statements) = many0(ws(parse_statement)).parse(input)?;
     let (input, _) = multispace0(input)?;
 
     let mut conf = RndcConfFile::new();
