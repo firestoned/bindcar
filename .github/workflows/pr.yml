@@ -17,7 +17,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  K8S_OPENAPI_ENABLED_VERSION: "1.31"
+  K8S_OPENAPI_ENABLED_VERSION: "1.32"
 
 jobs:
   license-check:
@@ -25,10 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Check license headers
-        uses: firestoned/github-actions/security/license-check@v1.3.4
+        uses: firestoned/github-actions/security/license-check@v1.3.5
         with:
           copyright-holder: "Erick Bourgeois, firestoned"
           license-id: "MIT"
@@ -38,12 +38,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0  # Fetch all history for verification
 
       - name: Verify all commits are signed
-        uses: firestoned/github-actions/security/verify-signed-commits@v1.3.4
+        uses: firestoned/github-actions/security/verify-signed-commits@v1.3.5
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           base-ref: origin/${{ github.base_ref }}
@@ -55,7 +55,7 @@ jobs:
     needs: [license-check, verify-commits]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -71,7 +71,7 @@ jobs:
     needs: format
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -79,7 +79,7 @@ jobs:
           components: clippy
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@v1.3.4
+        uses: firestoned/github-actions/rust/cache-cargo@v1.3.5
 
       - name: Run clippy
         run: make clippy
@@ -104,25 +104,25 @@ jobs:
             binary_name: bindcar
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Setup Rust build environment
-        uses: firestoned/github-actions/rust/setup-rust-build@v1.3.4
+        uses: firestoned/github-actions/rust/setup-rust-build@v1.3.5
         with:
           target: ${{ matrix.platform.target }}
 
       - name: Build binary
-        uses: firestoned/github-actions/rust/build-binary@v1.3.4
+        uses: firestoned/github-actions/rust/build-binary@v1.3.5
         with:
           target: ${{ matrix.platform.target }}
 
       - name: Generate SBOM
-        uses: firestoned/github-actions/rust/generate-sbom@v1.3.4
+        uses: firestoned/github-actions/rust/generate-sbom@v1.3.5
         with:
           target: ${{ matrix.platform.target }}
 
       - name: Upload binary and SBOM artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: ${{ matrix.platform.artifact_name }}
           path: |
@@ -137,19 +137,19 @@ jobs:
     needs: build
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Download x86_64 build artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.1
         with:
           name: bindcar-linux-amd64
           path: target/x86_64-unknown-linux-gnu/release/
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@v1.3.4
+        uses: firestoned/github-actions/rust/cache-cargo@v1.3.5
 
       - name: Run tests
         run: make test
@@ -166,11 +166,11 @@ jobs:
       short-sha: ${{ steps.version-chainguard.outputs.short-sha }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Extract version for Chainguard
         id: version-chainguard
-        uses: firestoned/github-actions/versioning/extract-version@v1.3.4
+        uses: firestoned/github-actions/versioning/extract-version@v1.3.5
         with:
           repository: firestoned/bindcar
           workflow-type: pr
@@ -179,7 +179,7 @@ jobs:
 
       - name: Extract version for Distroless
         id: version-distroless
-        uses: firestoned/github-actions/versioning/extract-version@v1.3.4
+        uses: firestoned/github-actions/versioning/extract-version@v1.3.5
         with:
           repository: firestoned/bindcar
           workflow-type: pr
@@ -211,19 +211,19 @@ jobs:
             image-repository: ${{ needs.extract-version.outputs.image-repository-distroless }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Prepare Docker binaries
         uses: ./.github/actions/prepare-docker-binaries
 
       - name: Setup Docker environment
-        uses: firestoned/github-actions/docker/setup-docker@v1.3.4
+        uses: firestoned/github-actions/docker/setup-docker@v1.3.5
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6.0.0
         with:
           images: ghcr.io/${{ matrix.variant.image-repository }}
           tags: |
@@ -233,7 +233,7 @@ jobs:
             latest=false
 
       - name: Build and push Docker image (${{ matrix.variant.name }})
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7.0.0
         with:
           context: .
           file: ${{ matrix.variant.dockerfile }}
@@ -257,7 +257,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install DNS tools
-        run: sudo apt-get install -y dnsutils bind9-utils
+        run: sudo apt-get update && sudo apt-get install -y dnsutils bind9-utils
 
       - name: Download x86_64 build artifact
         uses: actions/download-artifact@v4
@@ -266,11 +266,11 @@ jobs:
           path: /tmp/bindcar-bin
 
       - name: Make binary executable
-        run: chmod +x /tmp/bindcar-bin/bindcar
+        run: chmod +x /tmp/bindcar-bin/target/x86_64-unknown-linux-gnu/release/bindcar
 
       - name: Run drone integration test
         env:
-          BINDCAR_BIN: /tmp/bindcar-bin/bindcar
+          BINDCAR_BIN: /tmp/bindcar-bin/target/x86_64-unknown-linux-gnu/release/bindcar
         run: make drone-integration-test-ci
 
   security:
@@ -278,10 +278,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Run security scan
-        uses: firestoned/github-actions/rust/security-scan@v1.3.4
+        uses: firestoned/github-actions/rust/security-scan@v1.3.5
         with:
           cargo-audit-version: "0.22.0"
 
@@ -294,16 +294,16 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.1
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.68.34
         with:
           tool: cargo-llvm-cov
 
@@ -311,7 +311,7 @@ jobs:
         run: cargo llvm-cov --lib --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v5.5.2
         with:
           files: lcov.info
           fail_ci_if_error: false
@@ -322,7 +322,7 @@ jobs:
         run: cargo llvm-cov --lib --html
 
       - name: Upload HTML coverage as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: coverage-report
           path: target/llvm-cov/html/

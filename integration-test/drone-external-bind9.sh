@@ -162,6 +162,8 @@ check_deps
 log "[1/7] preparing temp directories"
 rm -rf "$TEST_ROOT"
 mkdir -p "$ZONE_DIR" "$BIND9_CONF_DIR"
+# named runs as user 'bind' inside the container; make zone dir world-writable
+chmod 777 "$ZONE_DIR"
 
 # --- [2/7] Generate TSIG key ---
 log "[2/7] generating TSIG key (openssl rand)"

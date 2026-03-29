@@ -4,7 +4,7 @@
 # Makefile for bindcar
 
 # Configuration
-K8S_OPENAPI_ENABLED_VERSION ?= 1.31
+K8S_OPENAPI_ENABLED_VERSION ?= 1.32
 IMAGE_NAME ?= bindcar
 IMAGE_TAG ?= latest
 REGISTRY ?= ghcr.io/firestoned

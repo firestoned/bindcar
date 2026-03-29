@@ -1,5 +1,55 @@
 # Changelog
 
+## [2026-03-29 20:00] - Fix zone directory permissions for BIND9 container
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `integration-test/drone-external-bind9.sh`: Added `chmod 777 "$ZONE_DIR"` after `mkdir -p` so the `bind` user inside the container can write to the zone directory
+
+### Why
+On the CI runner the zone directory is created by the `runner` user. The BIND9 container runs `named` as user `bind` (uid 101), which has no write access to the host-owned directory. named aborts with `permission denied` when it can't write to its configured `directory`.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [ ] Config change only
+- [x] CI/CD only
+
+## [2026-03-29 19:00] - Fix drone integration test binary path
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/workflows/pr.yml`: Fixed `chmod` and `BINDCAR_BIN` paths in drone integration test — artifact upload preserves the full relative path `target/x86_64-unknown-linux-gnu/release/bindcar`, so after downloading to `/tmp/bindcar-bin` the binary is at `/tmp/bindcar-bin/target/x86_64-unknown-linux-gnu/release/bindcar`, not `/tmp/bindcar-bin/bindcar`
+
+### Why
+`chmod: cannot access '/tmp/bindcar-bin/bindcar': No such file or directory` — `upload-artifact` preserves the workspace-relative path structure inside the artifact zip, so `download-artifact` mirrors that structure under the destination directory.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [ ] Config change only
+- [x] CI/CD only
+
+## [2026-03-29 18:00] - Fix CI test and drone integration test failures
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/workflows/pr.yml`: Updated `K8S_OPENAPI_ENABLED_VERSION` from `"1.31"` to `"1.32"` to match the merged `k8s-openapi = "0.27"` Cargo.toml dependency that enables `v1_32` feature
+- `.github/workflows/pr.yml`: Added `apt-get update` before `apt-get install` in drone integration test job to prevent 404 mirror failures
+- `.github/workflows/release.yml`: Updated `K8S_OPENAPI_ENABLED_VERSION` from `"1.31"` to `"1.32"` to match
+
+### Why
+Merging `main` into `out-of-cluster` brought in `kube 3.0` and `k8s-openapi 0.27` with `v1_32` feature. The CI env var `K8S_OPENAPI_ENABLED_VERSION: "1.31"` enabled `v1_31` while Cargo.toml enabled `v1_32` — k8s-openapi panics when both are active. The drone test apt install failed because the runner's package mirror had a stale/missing entry for `bind9-utils`.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [ ] Config change only
+- [x] CI/CD only
+
 ## [2026-03-26 00:02] - Drone integration test in PR CI
 
 **Author:** Erick Bourgeois
