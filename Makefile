@@ -4,7 +4,7 @@
 # Makefile for bindcar
 
 # Configuration
-K8S_OPENAPI_ENABLED_VERSION ?= 1.31
+K8S_OPENAPI_ENABLED_VERSION ?= 1.32
 IMAGE_NAME ?= bindcar
 IMAGE_TAG ?= latest
 REGISTRY ?= ghcr.io/firestoned
@@ -34,6 +34,19 @@ clippy: ## Run clippy
 
 .PHONY: check
 check: fmt clippy test ## Run all checks
+
+#
+# Integration tests
+#
+
+.PHONY: drone-integration-test
+drone-integration-test: ## Run drone mode integration test (requires Docker, curl, dig)
+	cargo build
+	./integration-test/drone-external-bind9.sh
+
+.PHONY: drone-integration-test-ci
+drone-integration-test-ci: ## Run drone integration test in CI (uses pre-built binary via BINDCAR_BIN env var)
+	./integration-test/drone-external-bind9.sh
 
 #
 # Docker targets

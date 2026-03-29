@@ -3,13 +3,10 @@
 
 //! BIND9 RNDC API Server
 //!
-//! A lightweight HTTP REST API server that manages BIND9 zones by:
-//! - Creating zone files in `/var/cache/bind/`
-//! - Executing local rndc commands to manage zones
-//! - Providing authenticated access via Kubernetes ServiceAccount tokens
+//! Supports two operating modes selected via subcommand:
 //!
-//! This server runs as a sidecar container alongside BIND9, sharing
-//! the zone file storage volume and rndc configuration.
+//! - `bindcar run` (default) — sidecar mode alongside a local BIND9 instance
+//! - `bindcar drone` — standalone mode managing a remote BIND9 instance
 
 use anyhow::Context;
 use axum::{
@@ -20,6 +17,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use clap::Parser;
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -31,6 +29,7 @@ use utoipa_swagger_ui::SwaggerUi;
 // Import from the library
 use bindcar::{
     auth::authenticate,
+    cli::{Cli, Commands},
     metrics, middleware,
     rate_limit::RateLimitConfig,
     rndc::RndcExecutor,
@@ -173,19 +172,36 @@ async fn ready_check(State(state): State<AppState>) -> Json<ReadyResponse> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing
+    let cli = Cli::parse();
+    init_tracing(cli.debug);
+    start_server(cli.resolved_command()).await
+}
+
+fn init_tracing(debug: bool) {
+    let filter = if debug {
+        tracing_subscriber::EnvFilter::new("debug")
+    } else {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+    };
+
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
+        .with_env_filter(filter)
         .json()
         .init();
+}
 
-    info!(
-        "starting bind9 rndc api server v{}",
-        env!("CARGO_PKG_VERSION")
-    );
+async fn start_server(command: &Commands) -> anyhow::Result<()> {
+    match command {
+        Commands::Run => info!(
+            "starting bindcar v{} [sidecar mode]",
+            env!("CARGO_PKG_VERSION")
+        ),
+        Commands::Drone => info!(
+            "starting bindcar v{} [drone mode] - standalone, managing remote BIND9",
+            env!("CARGO_PKG_VERSION")
+        ),
+    }
 
     // initialize metrics
     metrics::init_metrics();
@@ -209,6 +225,22 @@ async fn main() -> anyhow::Result<()> {
         warn!("⚠️  this should only be used in trusted environments (e.g., linkerd service mesh)");
     } else {
         info!("authentication is enabled");
+
+        #[cfg(feature = "k8s-token-review")]
+        {
+            use bindcar::auth::{detect_kube_auth_mode, KubeAuthMode};
+            match detect_kube_auth_mode() {
+                KubeAuthMode::Explicit { ref server, .. } => {
+                    info!(
+                        "kubernetes auth mode: explicit (KUBE_API_SERVER={})",
+                        server
+                    );
+                }
+                KubeAuthMode::Default => {
+                    info!("kubernetes auth mode: try_default (KUBECONFIG / ~/.kube/config / in-cluster)");
+                }
+            }
+        }
     }
 
     // load rate limiting configuration

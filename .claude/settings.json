@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(colima list:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:crates.io)"
+    ]
+  }
+}

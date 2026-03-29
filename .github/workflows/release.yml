@@ -17,7 +17,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  K8S_OPENAPI_ENABLED_VERSION: "1.31"
+  K8S_OPENAPI_ENABLED_VERSION: "1.32"
 
 jobs:
   license-check:

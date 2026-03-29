@@ -168,6 +168,255 @@ async fn test_auth_error_serialization() {
     assert!(json.contains("error"));
 }
 
+// Kubernetes client builder tests (only when feature is enabled)
+#[cfg(feature = "k8s-token-review")]
+mod kube_client_builder_tests {
+    use crate::auth::{build_explicit_kube_client, detect_kube_auth_mode, KubeAuthMode};
+    use serial_test::serial;
+    use std::env;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    // --- detect_kube_auth_mode: explicit mode ---
+
+    #[test]
+    #[serial]
+    fn test_detect_kube_auth_mode_explicit_when_all_vars_set() {
+        env::set_var("KUBE_API_SERVER", "https://api.example.com:6443");
+        env::set_var("KUBE_TOKEN_PATH", "/var/run/secrets/token");
+        env::set_var("KUBE_CA_CERT_PATH", "/var/run/secrets/ca.crt");
+
+        let mode = detect_kube_auth_mode();
+
+        match mode {
+            KubeAuthMode::Explicit {
+                server,
+                token_path,
+                ca_cert_path,
+            } => {
+                assert_eq!(server, "https://api.example.com:6443");
+                assert_eq!(token_path, "/var/run/secrets/token");
+                assert_eq!(ca_cert_path, "/var/run/secrets/ca.crt");
+            }
+            KubeAuthMode::Default => panic!("Expected Explicit mode, got Default"),
+        }
+
+        env::remove_var("KUBE_API_SERVER");
+        env::remove_var("KUBE_TOKEN_PATH");
+        env::remove_var("KUBE_CA_CERT_PATH");
+    }
+
+    // --- detect_kube_auth_mode: fallback to Default when no vars set ---
+
+    #[test]
+    #[serial]
+    fn test_detect_kube_auth_mode_default_when_no_vars_set() {
+        env::remove_var("KUBE_API_SERVER");
+        env::remove_var("KUBE_TOKEN_PATH");
+        env::remove_var("KUBE_CA_CERT_PATH");
+
+        let mode = detect_kube_auth_mode();
+
+        assert!(
+            matches!(mode, KubeAuthMode::Default),
+            "Expected Default mode when no env vars are set"
+        );
+
+        env::remove_var("KUBE_API_SERVER");
+        env::remove_var("KUBE_TOKEN_PATH");
+        env::remove_var("KUBE_CA_CERT_PATH");
+    }
+
+    // --- detect_kube_auth_mode: partial vars always fall back to Default ---
+
+    #[test]
+    #[serial]
+    fn test_detect_kube_auth_mode_default_when_only_api_server_set() {
+        env::set_var("KUBE_API_SERVER", "https://api.example.com:6443");
+        env::remove_var("KUBE_TOKEN_PATH");
+        env::remove_var("KUBE_CA_CERT_PATH");
+
+        let mode = detect_kube_auth_mode();
+
+        assert!(
+            matches!(mode, KubeAuthMode::Default),
+            "Expected Default mode when only KUBE_API_SERVER is set"
+        );
+
+        env::remove_var("KUBE_API_SERVER");
+        env::remove_var("KUBE_TOKEN_PATH");
+        env::remove_var("KUBE_CA_CERT_PATH");
+    }
+
+    #[test]
+    #[serial]
+    fn test_detect_kube_auth_mode_default_when_only_token_path_set() {
+        env::remove_var("KUBE_API_SERVER");
+        env::set_var("KUBE_TOKEN_PATH", "/var/run/secrets/token");
+        env::remove_var("KUBE_CA_CERT_PATH");
+
+        let mode = detect_kube_auth_mode();
+
+        assert!(
+            matches!(mode, KubeAuthMode::Default),
+            "Expected Default mode when only KUBE_TOKEN_PATH is set"
+        );
+
+        env::remove_var("KUBE_API_SERVER");
+        env::remove_var("KUBE_TOKEN_PATH");
+        env::remove_var("KUBE_CA_CERT_PATH");
+    }
+
+    #[test]
+    #[serial]
+    fn test_detect_kube_auth_mode_default_when_only_ca_cert_path_set() {
+        env::remove_var("KUBE_API_SERVER");
+        env::remove_var("KUBE_TOKEN_PATH");
+        env::set_var("KUBE_CA_CERT_PATH", "/var/run/secrets/ca.crt");
+
+        let mode = detect_kube_auth_mode();
+
+        assert!(
+            matches!(mode, KubeAuthMode::Default),
+            "Expected Default mode when only KUBE_CA_CERT_PATH is set"
+        );
+
+        env::remove_var("KUBE_API_SERVER");
+        env::remove_var("KUBE_TOKEN_PATH");
+        env::remove_var("KUBE_CA_CERT_PATH");
+    }
+
+    #[test]
+    #[serial]
+    fn test_detect_kube_auth_mode_default_when_api_server_and_token_set_missing_ca() {
+        env::set_var("KUBE_API_SERVER", "https://api.example.com:6443");
+        env::set_var("KUBE_TOKEN_PATH", "/var/run/secrets/token");
+        env::remove_var("KUBE_CA_CERT_PATH");
+
+        let mode = detect_kube_auth_mode();
+
+        assert!(
+            matches!(mode, KubeAuthMode::Default),
+            "Expected Default mode when KUBE_CA_CERT_PATH is missing"
+        );
+
+        env::remove_var("KUBE_API_SERVER");
+        env::remove_var("KUBE_TOKEN_PATH");
+        env::remove_var("KUBE_CA_CERT_PATH");
+    }
+
+    #[test]
+    #[serial]
+    fn test_detect_kube_auth_mode_default_when_api_server_and_ca_set_missing_token() {
+        env::set_var("KUBE_API_SERVER", "https://api.example.com:6443");
+        env::remove_var("KUBE_TOKEN_PATH");
+        env::set_var("KUBE_CA_CERT_PATH", "/var/run/secrets/ca.crt");
+
+        let mode = detect_kube_auth_mode();
+
+        assert!(
+            matches!(mode, KubeAuthMode::Default),
+            "Expected Default mode when KUBE_TOKEN_PATH is missing"
+        );
+
+        env::remove_var("KUBE_API_SERVER");
+        env::remove_var("KUBE_TOKEN_PATH");
+        env::remove_var("KUBE_CA_CERT_PATH");
+    }
+
+    #[test]
+    #[serial]
+    fn test_detect_kube_auth_mode_default_when_token_and_ca_set_missing_api_server() {
+        env::remove_var("KUBE_API_SERVER");
+        env::set_var("KUBE_TOKEN_PATH", "/var/run/secrets/token");
+        env::set_var("KUBE_CA_CERT_PATH", "/var/run/secrets/ca.crt");
+
+        let mode = detect_kube_auth_mode();
+
+        assert!(
+            matches!(mode, KubeAuthMode::Default),
+            "Expected Default mode when KUBE_API_SERVER is missing"
+        );
+
+        env::remove_var("KUBE_API_SERVER");
+        env::remove_var("KUBE_TOKEN_PATH");
+        env::remove_var("KUBE_CA_CERT_PATH");
+    }
+
+    // --- build_explicit_kube_client: file error handling ---
+
+    #[tokio::test]
+    async fn test_build_explicit_kube_client_fails_with_missing_token_file() {
+        let result = build_explicit_kube_client(
+            "https://api.example.com:6443".to_string(),
+            "/nonexistent/bindcar-test/token".to_string(),
+            "/nonexistent/bindcar-test/ca.crt".to_string(),
+        )
+        .await;
+
+        assert!(result.is_err(), "Expected error for missing token file");
+        // Client doesn't implement Debug, so extract the error string via if let.
+        if let Err(err) = result {
+            assert!(
+                err.contains("token")
+                    || err.contains("No such file")
+                    || err.contains("failed to read"),
+                "Error should describe the token file problem, got: {}",
+                err
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_build_explicit_kube_client_fails_with_missing_ca_file() {
+        let mut token_file = NamedTempFile::new().unwrap();
+        write!(token_file, "fake-sa-token").unwrap();
+        let token_path = token_file.path().to_str().unwrap().to_string();
+
+        let result = build_explicit_kube_client(
+            "https://api.example.com:6443".to_string(),
+            token_path,
+            "/nonexistent/bindcar-test/ca.crt".to_string(),
+        )
+        .await;
+
+        assert!(result.is_err(), "Expected error for missing CA cert file");
+        if let Err(err) = result {
+            assert!(
+                err.contains("certificate")
+                    || err.contains("ca")
+                    || err.contains("No such file")
+                    || err.contains("failed to read"),
+                "Error should describe the CA certificate problem, got: {}",
+                err
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_build_explicit_kube_client_fails_with_invalid_ca_cert() {
+        let mut token_file = NamedTempFile::new().unwrap();
+        write!(token_file, "fake-sa-token").unwrap();
+        let token_path = token_file.path().to_str().unwrap().to_string();
+
+        let mut ca_file = NamedTempFile::new().unwrap();
+        write!(ca_file, "this is not a valid PEM certificate").unwrap();
+        let ca_path = ca_file.path().to_str().unwrap().to_string();
+
+        let result = build_explicit_kube_client(
+            "https://api.example.com:6443".to_string(),
+            token_path,
+            ca_path,
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "Expected error for invalid CA certificate content"
+        );
+    }
+}
+
 // Kubernetes TokenReview tests (only when feature is enabled)
 #[cfg(feature = "k8s-token-review")]
 mod k8s_token_review_tests {

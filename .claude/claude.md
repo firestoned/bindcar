@@ -1,5 +1,16 @@
 @.claude/SKILL.md
 
+# Project Guidelines for bindcar
+
+> HTTP REST API + CLI for programmatic BIND9 DNS management via RNDC
+
+**CRITICAL Coding Patterns** (full details in `rules/`):
+- **TDD**: Write tests FIRST — `rules/testing.md` + `tdd-workflow` skill
+- **After ANY Rust change**: run `cargo-quality` skill (NON-NEGOTIABLE)
+- **Early returns / magic numbers / style**: `rules/rust-style.md`
+
+---
+
 # Project Instructions for Claude Code
 
 > Platform Engineering - Kubernetes Operators & Infrastructure
@@ -928,10 +939,9 @@ TDD is MANDATORY except for:
    - MUST delete corresponding unit tests
    - Remove or update integration tests that depended on deleted code
 
-4. **Refactoring Code:**
-   - Update test names and assertions to match refactored code
-   - Verify test coverage remains the same or improves
-   - If refactoring changes function signatures, update ALL tests
+---
+
+## Service Mesh
 
 5. **Test Quality Standards:**
    - Use descriptive test names (e.g., `test_reconcile_creates_zone_when_missing`)
@@ -940,488 +950,83 @@ TDD is MANDATORY except for:
    - Test error conditions, not just happy paths
    - Ensure tests are deterministic (no flaky tests)
 
-6. **Test File Organization:**
-   - **CRITICAL**: ALWAYS place tests in separate `_tests.rs` files (see Testing Requirements section below)
-   - NEVER embed large test modules directly in source files
-   - Follow the pattern: `foo.rs` → `foo_tests.rs`
+---
 
-**VERIFICATION:**
-- After ANY Rust code change, run `cargo test` in the modified file's crate
-- ALL tests MUST pass before the task is considered complete
-- If you add code but cannot write a test, document WHY in the code comments
+## 🔍 MANDATORY: Use ripgrep
 
-**Example:**
-If you modify `src/reconcilers/records.rs`:
-1. Update/add tests in `src/reconcilers/records_tests.rs` (separate file)
-2. Ensure `src/reconcilers/records.rs` has: `#[cfg(test)] mod records_tests;`
-3. Run `cargo test --lib reconcilers::records` to verify
-4. Ensure ALL tests pass before moving on
+ALWAYS use `rg` for code search. NEVER use `grep`, `find`, or `lsof`.
 
-### Rust Style Guidelines
+- Rust files: `rg -trs "pattern" . -g '!target/'`
 
-- Use `thiserror` for error types, not string errors
-- Prefer `anyhow::Result` in binaries, typed errors in libraries
-- Use `tracing` for logging, not `println!` or `log`
-- Async functions should use `tokio`
-- All k8s API calls must have timeout and retry logic
-- **No magic numbers**: Any numeric literal other than `0` or `1` MUST be declared as a named constant
-- **Use early returns/guard clauses**: Minimize nesting by handling edge cases early and returning
+---
 
-#### Early Return / Guard Clause Pattern
+## 🚫 Docker Operations Restrictions
 
-**CRITICAL: Prefer early returns over nested if-else statements.**
+**NEVER build or push Docker images.** The user manages all image operations.
 
-The "early return" or "guard clause" coding style emphasizes minimizing nested if-else statements and promoting clearer, more linear code flow. This is achieved by handling error conditions or special cases at the beginning of a function and exiting early if those conditions are met. The remaining code then focuses on the "happy path" or main logic.
+After code changes: run `cargo fmt`, `cargo clippy`, `cargo test`, then inform the user changes are ready to build and deploy.
 
-**Key Principles:**
+---
 
-1. **Handle preconditions first**: Validate input parameters and other preconditions at the start of a function. If a condition is not met, return immediately (e.g., `return Err(...)`, `return None`, or `return Ok(())`). This prevents the main logic from executing with invalid data.
+## 🚨 Plans and Roadmaps → `docs/roadmaps/`
 
-   ```rust
-   // ✅ GOOD - Early return for validation
-   pub async fn reconcile_dnszone(
-       client: Client,
-       dnszone: DNSZone,
-       zone_manager: &Bind9Manager,
-   ) -> Result<()> {
-       // Guard clause: Check if work is needed
-       if !needs_reconciliation {
-           debug!("Spec unchanged, skipping reconciliation");
-           return Ok(());  // Early return - no work needed
-       }
+ALL planning documents MUST go in `docs/roadmaps/`. Filenames: **lowercase**, **hyphens only** (no underscores, no uppercase).
 
-       // Main logic continues here (happy path)
-       let secondary_ips = find_all_secondary_pod_ips(&client, &namespace, &cluster_ref).await?;
-       add_dnszone(client, dnszone, zone_manager).await?;
-       Ok(())
-   }
-
-   // ❌ BAD - Nested if-else
-   pub async fn reconcile_dnszone(
-       client: Client,
-       dnszone: DNSZone,
-       zone_manager: &Bind9Manager,
-   ) -> Result<()> {
-       if needs_reconciliation {
-           let secondary_ips = find_all_secondary_pod_ips(&client, &namespace, &cluster_ref).await?;
-           add_dnszone(client, dnszone, zone_manager).await?;
-           Ok(())
-       } else {
-           debug!("Spec unchanged, skipping reconciliation");
-           Ok(())
-       }
-   }
-   ```
-
-2. **Minimize else statements**: Instead of using if-else for mutually exclusive conditions, use early returns within if blocks. If a condition is met and an action is performed, return the result. The code after the if block then implicitly handles the "else" case.
-
-   ```rust
-   // ✅ GOOD - No else needed
-   fn calculate_discount(price: f64, is_premium_member: bool) -> f64 {
-       if is_premium_member {
-           return price * 0.90;  // Apply 10% discount and return
-       }
-       // No 'else' needed; non-premium members are handled here
-       price * 0.95  // Apply 5% discount
-   }
-
-   // ❌ BAD - Unnecessary else
-   fn calculate_discount(price: f64, is_premium_member: bool) -> f64 {
-       if is_premium_member {
-           price * 0.90
-       } else {
-           price * 0.95
-       }
-   }
-   ```
-
-3. **Prioritize readability and clarity**: The goal is to make the code easier to understand by reducing indentation levels and keeping related logic together. When a reader encounters an early return, they know that specific branch of execution has concluded.
-
-4. **Use `?` for error propagation**: Rust's `?` operator is a form of early return for errors. Use it liberally to keep the happy path unindented.
-
-   ```rust
-   // ✅ GOOD - Early error returns with ?
-   pub async fn add_dnszone(client: Client, dnszone: DNSZone) -> Result<()> {
-       let namespace = dnszone.namespace().ok_or_else(|| anyhow!("No namespace"))?;
-       let instances = find_instances(&client, &namespace).await?;
-
-       if instances.is_empty() {
-           return Err(anyhow!("No instances found"));
-       }
-
-       for instance in instances {
-           add_zone_to_instance(&instance).await?;
-       }
-
-       Ok(())
-   }
-
-   // ❌ BAD - Nested match/if
-   pub async fn add_dnszone(client: Client, dnszone: DNSZone) -> Result<()> {
-       match dnszone.namespace() {
-           Some(namespace) => {
-               match find_instances(&client, &namespace).await {
-                   Ok(instances) => {
-                       if !instances.is_empty() {
-                           for instance in instances {
-                               add_zone_to_instance(&instance).await?;
-                           }
-                           Ok(())
-                       } else {
-                           Err(anyhow!("No instances found"))
-                       }
-                   }
-                   Err(e) => Err(e),
-               }
-           }
-           None => Err(anyhow!("No namespace")),
-       }
-   }
-   ```
-
-**Benefits:**
-- **Reduced nesting**: Improves readability and reduces cognitive load
-- **Clearer code flow**: The main logic is less cluttered by error handling
-- **Easier to test**: Each condition can be tested in isolation
-- **Fail-fast approach**: Catches invalid states or inputs early in the execution
-- **More maintainable**: Changes to edge cases don't affect the main logic
-
-**When to Use:**
-- Input validation at function start
-- Checking preconditions before expensive operations
-- Handling special cases before the general case
-- Error handling in async functions
-- State validation in reconciliation loops
-
-#### Magic Numbers Rule
-
-**CRITICAL: Eliminate all magic numbers from the codebase.**
-
-A "magic number" is any numeric literal (other than `0` or `1`) that appears directly in code without explanation.
-
-**Why:**
-- **Readability**: Named constants make code self-documenting
-- **Maintainability**: Change the value in one place, not scattered throughout
-- **Semantic Meaning**: The constant name explains *why* the value matters
-- **Type Safety**: Constants prevent accidental typos in numeric values
-
-**Rules:**
-- **`0` and `1` are allowed** - These are ubiquitous and self-explanatory (empty, none, first item, etc.)
-- **All other numbers MUST be named constants** - No exceptions
-- Use descriptive names that explain the *purpose*, not just the value
-
-**Examples:**
-
-```rust
-// ✅ GOOD - Named constants
-const DEFAULT_ZONE_TTL: u32 = 3600;
-const MAX_RETRY_ATTEMPTS: u8 = 3;
-const RECONCILE_INTERVAL_SECS: u64 = 300;
-const DNS_PORT: u16 = 53;
-
-fn build_zone(ttl: Option<u32>) -> Zone {
-    Zone {
-        ttl: ttl.unwrap_or(DEFAULT_ZONE_TTL),
-        ..
-    }
-}
-
-fn reconcile() -> Action {
-    Action::requeue(Duration::from_secs(RECONCILE_INTERVAL_SECS))
-}
-
-// ❌ BAD - Magic numbers
-fn build_zone(ttl: Option<u32>) -> Zone {
-    Zone {
-        ttl: ttl.unwrap_or(3600),  // What does 3600 mean? Why this value?
-        ..
-    }
-}
-
-fn reconcile() -> Action {
-    Action::requeue(Duration::from_secs(300))  // Why 300?
-}
+```
+✅ docs/roadmaps/out-of-cluster-support.md
+❌ ROADMAP.md  ❌ docs/roadmaps/OUT_OF_CLUSTER.md  ❌ docs/roadmaps/Phase_3.md
 ```
 
-**Special Cases:**
+---
 
-- **Unit conversions**: Still need constants
-  ```rust
-  // ✅ GOOD
-  const MILLISECONDS_PER_SECOND: u64 = 1000;
-  const SECONDS_PER_HOUR: u64 = 3600;
+## 🔧 GitHub Workflows & CI/CD
 
-  // ❌ BAD
-  Duration::from_millis(timeout_secs * 1000)
-  ```
+See `rules/github-workflows.md` for full standards. Key rules:
 
-- **Array sizes/indexing**: Use constants if size is meaningful
-  ```rust
-  // ✅ GOOD
-  const MAX_DNS_LABELS: usize = 127;
-  let labels = vec![String::new(); MAX_DNS_LABELS];
+- **NEVER** replace `firestoned/github-actions` composite actions with direct action calls — update the `firestoned/github-actions` repo instead
+- All workflows MUST delegate logic to Makefile targets (no inline bash scripts)
+- New workflows MUST support `workflow_call` for reusability
 
-  // ✅ ACCEPTABLE - indexing with 0 or 1
-  let first = items[0];
-  let second = items[1];
+---
 
-  // ❌ BAD - other index values
-  let third = items[2];  // Should be named if it has semantic meaning
-  ```
+## 📝 Documentation Requirements
 
-- **Buffer sizes**: Always use named constants
-  ```rust
-  // ✅ GOOD
-  const READ_BUFFER_SIZE: usize = 8192;
-  let mut buf = vec![0u8; READ_BUFFER_SIZE];
+See `rules/documentation.md` for full workflow.
 
-  // ❌ BAD
-  let mut buf = vec![0u8; 8192];
-  ```
+- Ask "Does documentation need to be updated?" before marking ANY task complete
+- Update `.claude/CHANGELOG.md` with `**Author:**` on EVERY code change (MANDATORY — no exceptions)
+- Build docs with `make docs` — use `build-docs` skill
 
-**Where to Define Constants:**
-- Module-level: For constants used only within one file
-- Crate-level (`src/constants.rs`): For constants used across modules
-- Group related constants together with documentation
+---
 
-**Test Files Exception:**
-Test files (`*_tests.rs`) may use literal values for test data when it improves readability and the values are only used once. However, if the same test value appears multiple times or represents a meaningful configuration value, it should still use the global constants.
+## 🦀 Rust Workflow
 
-**Verification:**
-Before committing, manually scan code for numeric literals:
-```bash
-# Find numeric literals other than 0 and 1 in Rust files (excludes test files)
-grep -Ern '\b[2-9][0-9]*\b' src/ --include="*.rs" --exclude="*_tests.rs" | grep -v '^[^:]*:[^:]*://.*$'
-```
+Full style guide: `rules/rust-style.md`. Full testing standards: `rules/testing.md`.
+
+**After ANY `.rs` change:** run `cargo-quality` skill (`cargo fmt` + `cargo clippy` + `cargo test`). Task is NOT complete until all three pass.
+
+### TDD (mandatory)
+
+Write failing tests FIRST, then implement minimum code to pass. See `tdd-workflow` skill.
+
+Test file pattern: `src/foo.rs` → `#[cfg(test)] mod foo_test;` at bottom → `src/foo_test.rs`
+
+> **Note:** This project uses `_test.rs` (singular), not `_tests.rs` (plural).
 
 ### Dependency Management
 
-Before adding a new dependency:
-1. Check if existing deps solve the problem
-2. Verify the crate is actively maintained (commits in last 6 months)
-3. Prefer crates from well-known authors or the Rust ecosystem
-4. Document why the dependency was added in `.claude/CHANGELOG.md`
+Before adding deps: verify actively maintained (commits in last 6 months), prefer well-known crates, document reason in CHANGELOG.
 
 ---
 
-## ☸️ Kubernetes Operator Patterns
+## 🧪 Testing
 
-### CRD Development - Rust as Source of Truth
+See `rules/testing.md` for full standards.
 
-**CRITICAL: Rust types in `src/crd.rs` are the source of truth.**
-
-CRD YAML files in `/deploy/crds/` are **AUTO-GENERATED** from the Rust types. This ensures:
-- Type safety enforced at compile time
-- CRDs deployed to clusters match what the operator expects
-- Schema validation in Kubernetes matches Rust types
-- No drift between deployed CRDs and operator code
-
-#### Workflow for CRD Changes:
-
-> **How:** Run the `regen-crds` skill, then `regen-api-docs` skill (LAST).
-
-#### Generated YAML Format:
-
-All generated YAML files include:
-- Copyright header: `# Copyright (c) 2025 Erick Bourgeois, firestoned`
-- SPDX license identifier: `# SPDX-License-Identifier: MIT`
-- Auto-generated warning: `# DO NOT EDIT MANUALLY - Run 'cargo run --bin crdgen' to regenerate`
-
-**Never edit the YAML files directly** - your changes will be overwritten on next generation.
-
-#### Adding New CRDs:
-
-> **How:** Follow the `add-new-crd` skill.
-
-#### CI/CD Integration:
-
-Add this to your CI pipeline to ensure CRDs and documentation stay in sync:
-
-```bash
-# Generate CRDs
-cargo run --bin crdgen
-
-# Generate API documentation
-cargo run --bin crddoc > docs/src/reference/api.md
-
-# Check if any files changed
-if ! git diff --quiet deploy/crds/ docs/src/reference/api.md; then
-  echo "ERROR: CRD YAML files or API documentation are out of sync with src/crd.rs"
-  echo "Run: cargo run --bin crdgen"
-  echo "Run: cargo run --bin crddoc > docs/src/reference/api.md"
-  exit 1
-fi
-```
-
-#### Example CRD Structure:
-
-```rust
-/// Spec for BindZone resource - MUST match dnszones.crd.yaml
-#[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
-#[kube(
-    kind = "DNSZone",
-    group = "dns.firestoned.io",
-    version = "v1beta1",
-    namespaced,
-    status = "DNSZoneStatus",
-    printcolumn = r#"{"name":"Zone","type":"string","jsonPath":".spec.zoneName"}"#,
-    printcolumn = r#"{"name":"Ready","type":"string","jsonPath":".status.conditions[?(@.type=='Ready')].status"}"#
-)]
-#[serde(rename_all = "camelCase")]
-pub struct DNSZoneSpec {
-    /// The DNS zone name (e.g., "example.com")
-    pub zone_name: String,
-    // ... other fields - verify against YAML!
-}
-```
-
-### Controller Best Practices
-
-#### Event-Driven Programming (Watch, Not Poll)
-
-**CRITICAL: Kubernetes controllers MUST use event-driven programming, NOT polling.**
-
-Controllers should react to cluster state changes via the Kubernetes watch API, not poll resources on a timer.
-
-**Why Event-Driven:**
-- **Efficiency**: Only react when changes occur, not wastefully checking repeatedly
-- **Scalability**: Watch API scales to thousands of resources without overwhelming the API server
-- **Responsiveness**: Immediate reaction to changes instead of waiting for next poll interval
-- **Best Practice**: Aligns with Kubernetes controller design patterns
-
-**✅ CORRECT - Event-Driven with Watch:**
-```rust
-use kube::runtime::Controller;
-
-// Controller watches resources and reacts to events
-Controller::new(api, Config::default())
-    .run(reconcile, error_policy, context)
-    .for_each(|_| futures::future::ready(()))
-    .await;
-```
-
-**❌ WRONG - Polling Pattern:**
-```rust
-// Don't do this - wasteful polling
-loop {
-    let resources = api.list(&ListParams::default()).await?;
-    for resource in resources {
-        reconcile(resource).await?;
-    }
-    tokio::time::sleep(Duration::from_secs(30)).await; // Polling!
-}
-```
-
-**When Polling is Acceptable:**
-- Reconciling with external systems (non-Kubernetes APIs) that don't support webhooks
-- Periodic cleanup or maintenance tasks (use `requeue_after` in reconcile result)
-- Time-based operations (certificate renewal, lease expiration)
-
-**Event-Driven Best Practices:**
-- Use `Controller::new()` from kube-runtime for standard reconciliation loops
-- Use `.watches()` to observe related resources (e.g., watch Pods when reconciling Deployments)
-- Use `.run()` to start the event-driven reconciliation loop
-- Return `Action::requeue(duration)` for periodic checks, not manual polling
-- Use informers/reflectors for local caching of cluster state
-
-**General Controller Best Practices:**
-- Always set `ownerReferences` for child resources
-- Use finalizers for cleanup logic
-- Implement exponential backoff for retries
-- Set appropriate `requeue_after` durations
-- Log reconciliation start/end with resource name and namespace
-
-### Status Conditions
-
-Always update status conditions following Kubernetes conventions:
-
-```rust
-Condition {
-    type_: "Ready".to_string(),
-    status: "True".to_string(),
-    reason: "ReconcileSucceeded".to_string(),
-    message: "Zone synchronized successfully".to_string(),
-    last_transition_time: Some(Time(Utc::now())),
-    observed_generation: Some(zone.metadata.generation.unwrap_or(0)),
-}
-```
-
----
-
-## 🔄 FluxCD / GitOps Integration
-
-### Kustomization Structure
-
-```
-clusters/
-├── base/
-│   ├── kustomization.yaml
-│   └── resources/
-└── overlays/
-    ├── dev/
-    ├── staging/
-    └── prod/
-```
-
-### HelmRelease Changes
-
-When modifying HelmRelease manifests:
-1. Bump the chart version or values checksum
-2. Add suspend annotation for breaking changes
-3. Document rollback procedure in `.claude/CHANGELOG.md`
-
----
-
-## 🧪 Testing Requirements
-
-### Unit Tests
-
-**MANDATORY: Every public function MUST have corresponding unit tests.**
-
-#### Test File Organization
-
-**CRITICAL: ALWAYS place unit tests in separate `_tests.rs` files, NOT embedded in the source file.**
-
-This is the **required pattern** for this codebase. Do NOT embed tests directly in source files.
-
-**Correct Pattern:** `src/foo.rs` → declare `#[cfg(test)] mod foo_tests;` at the bottom; `src/foo_tests.rs` → `#[cfg(test)] mod tests { use super::super::*; ... }`.
-
-> **See:** `tdd-workflow` skill for the full file pattern and Arrange-Act-Assert examples.
-
-**Examples in This Codebase:**
-- `src/main.rs` → `src/main_tests.rs`
-- `src/bind9.rs` → `src/bind9_tests.rs`
-- `src/crd.rs` → `src/crd_tests.rs`
-- `src/bind9_resources.rs` → `src/bind9_resources_tests.rs`
-- `src/reconcilers/bind9cluster.rs` → `src/reconcilers/bind9cluster_tests.rs`
-
-**Test Coverage Requirements:**
-- **Success path:** Test the primary expected behavior
-- **Failure paths:** Test error handling for each possible error type
-- **Edge cases:** Empty strings, null values, boundary conditions
-- **State changes:** Verify correct state transitions
-- **Async operations:** Test timeouts, retries, and cancellation
-
-**When to Update Tests:**
-- **ALWAYS** when adding new functions → Add new tests
-- **ALWAYS** when modifying functions → Update existing tests
-- **ALWAYS** when deleting functions → Delete corresponding tests
-- **ALWAYS** when refactoring → Verify tests still cover the same behavior
-
-### Integration Tests
-
-Place in `/tests/` directory:
-- Use `k8s-openapi` test fixtures
-- Mock external services (BIND API, etc.)
-- Test failure scenarios, not just happy path
-- Test end-to-end workflows (create → update → delete)
-- Verify finalizers and cleanup logic
-
-### Test Execution
-
-> **How:** Run the `cargo-quality` skill. For a specific module: `cargo test --lib <module_path>`. For verbose output: `cargo test -- --nocapture`.
-
-**ALL tests MUST pass before code is considered complete.**
+- Every public function MUST have unit tests
+- Tests in separate `_test.rs` files (never embedded in source)
+- Integration tests in `integration-test/` directory
+- Run: `cargo-quality` skill. Specific test: `cargo test <name>`. Verbose: `cargo test -- --nocapture`
 
 ---
 
@@ -1429,95 +1034,57 @@ Place in `/tests/` directory:
 
 ```
 src/
-├── main.rs                  # Entry point, CLI setup
-├── main_tests.rs            # Tests for main.rs
-├── lib.rs                   # Library exports
-├── bind9.rs                 # BIND9 zone file generation
-├── bind9_tests.rs           # Tests for bind9.rs
-├── bind9_resources.rs       # BIND9 Kubernetes resource builders
-├── bind9_resources_tests.rs # Tests for bind9_resources.rs
-├── crd.rs                   # Custom Resource Definitions
-├── crd_tests.rs             # Tests for crd.rs
-├── crd_docs.rs              # CRD documentation helpers
-├── crd_docs_tests.rs        # Tests for crd_docs.rs
-├── labels.rs                # Standard Kubernetes labels
-├── reconcilers/             # Reconciliation logic
-│   ├── mod.rs               # Module exports
-│   ├── bind9cluster.rs      # Bind9Cluster reconciler
-│   ├── bind9cluster_tests.rs # Tests for bind9cluster.rs
-│   ├── bind9instance.rs     # Bind9Instance reconciler
-│   ├── bind9instance_tests.rs # Tests for bind9instance.rs
-│   ├── dnszone.rs           # DNSZone reconciler
-│   ├── dnszone_tests.rs     # Tests for dnszone.rs
-│   ├── records.rs           # DNS record reconcilers
-│   └── records_tests.rs     # Tests for records.rs
-└── bin/
-    ├── crdgen.rs            # CRD YAML generator
-    └── crddoc.rs            # CRD documentation generator
+├── main.rs
+├── lib.rs
+├── auth.rs / auth_test.rs
+├── cli.rs / cli_test.rs
+├── metrics.rs / metrics_test.rs
+├── middleware.rs / middleware_test.rs
+├── nsupdate.rs / nsupdate_test.rs
+├── rate_limit.rs / rate_limit_test.rs
+├── records.rs / records_test.rs
+├── rndc.rs / rndc_test.rs
+├── rndc_conf_parser.rs / rndc_conf_parser_tests.rs
+├── rndc_conf_types.rs / rndc_conf_types_tests.rs
+├── rndc_parser.rs / rndc_parser_tests.rs
+├── rndc_types.rs / rndc_types_tests.rs
+├── types.rs / types_test.rs
+└── zones.rs / zones_test.rs
 
 docs/
-├── roadmaps/                # CRITICAL: All roadmaps and implementation planning docs MUST go here
-│   └── *.md                 # Future feature plans, optimization strategies, design proposals
-├── adr/                     # Architecture Decision Records
-├── src/                     # mdBook documentation source
-└── ...
+├── roadmaps/   ← ALL planning docs here (lowercase-hyphen filenames)
+└── src/        ← mkdocs source
+
+integration-test/   ← Integration tests
+examples/           ← Usage examples
 ```
-
-**Test File Pattern:**
-- Every `foo.rs` has a corresponding `foo_tests.rs`
-- Test files are in the same directory as the source file
-- Source file declares: `#[cfg(test)] mod foo_tests;`
-- Test file contains: `#[cfg(test)] mod tests { ... }`
-
-**Documentation File Pattern:**
-- **CRITICAL**: ALL roadmaps and implementation planning documents MUST be stored in `docs/roadmaps/`
-- Use descriptive, uppercase filenames with underscores (e.g., `CLUSTER_PROVIDER_RECONCILIATION_OPTIMIZATION.md`)
-- Include date, status, and impact in document header
-- This is MANDATORY - never store roadmaps or planning docs in the root or other directories
 
 ---
 
 ## 🚫 Things to Avoid
 
-- **Never** use `unwrap()` in production code - use `?` or explicit error handling
-- **Never** hardcode namespaces - make them configurable
-- **Never** use `sleep()` for synchronization - use proper k8s watch/informers
-- **Never** ignore errors in finalizers - this blocks resource deletion
-- **Never** store state outside of Kubernetes - operators must be stateless
+- `unwrap()` in production — use `?` or explicit error handling
+- Hardcoded ports or paths — make them configurable
+- `sleep()` for synchronization
+- Ignoring RNDC command errors
+- Magic numbers — use named constants (see `rules/rust-style.md`)
 
 ---
 
 ## 💡 Helpful Commands
 
-See `.claude/SKILL.md` for full step-by-step procedures. Quick one-liners:
-
 ```bash
-# Run operator locally against current kubeconfig
-RUST_LOG=debug cargo run
-
-# Validate all manifests
-kubectl apply --dry-run=server -f deploy/
+source ~/.zshrc && cargo run                     # Run locally
+cargo test -- --nocapture                        # Verbose test output
+make docs                                        # Build documentation
 ```
 
-Skills for common operations: `regen-crds`, `regen-api-docs`, `validate-examples`, `cargo-quality`, `build-docs`, `get-multiarch-digest`.
+Skills: `cargo-quality`, `tdd-workflow`, `update-changelog`, `update-docs`, `build-docs`, `get-multiarch-digest`, `pre-commit-checklist`.
 
 ---
 
 ## 📋 PR/Commit Checklist
 
-**MANDATORY: Run this checklist at the end of EVERY task before considering it complete.**
+**Run `pre-commit-checklist` skill before EVERY commit. A task is NOT complete until it passes.**
 
-> **How:** Follow the `pre-commit-checklist` skill in `.claude/SKILL.md` for the full gated checklist.
-
-**A task is NOT complete until the pre-commit-checklist passes.**
-
-**Documentation is NOT optional** - it is a critical requirement equal in importance to the code itself.
-
----
-
-## 🔗 Project References
-
-- [kube-rs documentation](https://kube.rs/)
-- [Kubernetes API conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)
-- [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
-- Internal: k0rdent platform docs (check Confluence)
+Documentation is NOT optional — it is a critical requirement equal in importance to the code.

@@ -137,6 +137,7 @@
 
 // Re-export public modules
 pub mod auth;
+pub mod cli;
 pub mod metrics;
 pub mod middleware;
 pub mod nsupdate;
@@ -185,6 +186,8 @@ pub use rndc_conf_types::{KeyBlock, OptionsBlock, RndcConfFile, ServerAddress, S
 // Test modules
 #[cfg(test)]
 mod auth_test;
+#[cfg(test)]
+mod cli_test;
 #[cfg(test)]
 mod metrics_test;
 #[cfg(test)]

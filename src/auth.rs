@@ -39,7 +39,12 @@ use tracing::{debug, warn};
 #[cfg(feature = "k8s-token-review")]
 use k8s_openapi::api::authentication::v1::TokenReview;
 #[cfg(feature = "k8s-token-review")]
-use kube::{Api, Client};
+use kube::{
+    config::{
+        AuthInfo, Cluster, KubeConfigOptions, Kubeconfig, NamedAuthInfo, NamedCluster, NamedContext,
+    },
+    Api, Client, Config,
+};
 #[cfg(feature = "k8s-token-review")]
 use std::env;
 #[cfg(feature = "k8s-token-review")]
@@ -129,6 +134,171 @@ impl TokenReviewConfig {
             return None;
         }
         Some(parts[2].to_string())
+    }
+}
+
+/// Describes how the Kubernetes client will be authenticated when performing TokenReview calls.
+///
+/// The mode is determined by environment variables at startup. When all three explicit
+/// vars (`KUBE_API_SERVER`, `KUBE_TOKEN_PATH`, `KUBE_CA_CERT_PATH`) are present,
+/// bindcar builds the client directly from those files. Otherwise it falls back to
+/// `kube::Client::try_default()`, which checks `KUBECONFIG`, `~/.kube/config`, and then
+/// the in-cluster ServiceAccount mount in order.
+#[cfg(feature = "k8s-token-review")]
+#[derive(Debug)]
+pub enum KubeAuthMode {
+    /// All three explicit env vars are set; use them to build the client.
+    Explicit {
+        server: String,
+        token_path: String,
+        ca_cert_path: String,
+    },
+    /// Fall back to `kube::Client::try_default()`.
+    Default,
+}
+
+/// Inspect environment variables and return which Kubernetes auth mode should be used.
+///
+/// Returns `KubeAuthMode::Explicit` only when **all three** of `KUBE_API_SERVER`,
+/// `KUBE_TOKEN_PATH`, and `KUBE_CA_CERT_PATH` are present. If only some are set a
+/// warning is logged and `KubeAuthMode::Default` is returned so that existing
+/// in-cluster and kubeconfig deployments are unaffected.
+#[cfg(feature = "k8s-token-review")]
+pub fn detect_kube_auth_mode() -> KubeAuthMode {
+    let api_server = env::var("KUBE_API_SERVER").ok();
+    let token_path = env::var("KUBE_TOKEN_PATH").ok();
+    let ca_cert_path = env::var("KUBE_CA_CERT_PATH").ok();
+
+    // Warn on partial configuration so operators notice misconfiguration early.
+    let set_count = [&api_server, &token_path, &ca_cert_path]
+        .iter()
+        .filter(|v| v.is_some())
+        .count();
+
+    if set_count > 0 && set_count < 3 {
+        warn!(
+            "Partial KUBE_* env vars set ({}/3 present): \
+             KUBE_API_SERVER={}, KUBE_TOKEN_PATH={}, KUBE_CA_CERT_PATH={}. \
+             All three must be set for explicit auth. Falling back to try_default().",
+            set_count,
+            api_server.as_deref().unwrap_or("(not set)"),
+            token_path.as_deref().unwrap_or("(not set)"),
+            ca_cert_path.as_deref().unwrap_or("(not set)"),
+        );
+    }
+
+    match (api_server, token_path, ca_cert_path) {
+        (Some(server), Some(token_path), Some(ca_cert_path)) => KubeAuthMode::Explicit {
+            server,
+            token_path,
+            ca_cert_path,
+        },
+        _ => KubeAuthMode::Default,
+    }
+}
+
+/// Build a `kube::Client` from explicit file-based credentials.
+///
+/// Reads the token from `token_path` and the CA certificate from `ca_cert_path`,
+/// then constructs an in-memory kubeconfig pointing at `server`.
+///
+/// # Errors
+/// Returns an error string if either file cannot be read, the CA certificate is not
+/// valid PEM, or the kube client cannot be initialized.
+#[cfg(feature = "k8s-token-review")]
+pub(crate) async fn build_explicit_kube_client(
+    server: String,
+    token_path: String,
+    ca_cert_path: String,
+) -> Result<Client, String> {
+    // Validate token file is readable first so callers get a clear error message.
+    // The content is not used here — kube will re-read the file on each API call via
+    // token_file in the kubeconfig, which is correct for rotating SA tokens.
+    tokio::fs::read_to_string(&token_path)
+        .await
+        .map_err(|e| format!("failed to read token file '{}': {}", token_path, e))?;
+
+    // Validate CA certificate file is readable and contains a PEM certificate block.
+    // kube defers TLS setup to the first API call, so we validate eagerly here to
+    // surface misconfiguration at startup rather than on the first request.
+    let ca_bytes = tokio::fs::read(&ca_cert_path).await.map_err(|e| {
+        format!(
+            "failed to read CA certificate file '{}': {}",
+            ca_cert_path, e
+        )
+    })?;
+    let ca_pem = String::from_utf8_lossy(&ca_bytes);
+    if !ca_pem.contains("-----BEGIN CERTIFICATE-----") {
+        return Err(format!(
+            "CA certificate file '{}' does not contain a valid PEM certificate block",
+            ca_cert_path
+        ));
+    }
+
+    // Build an in-memory kubeconfig using file paths. kube will re-read the token
+    // file on each API call (correct for short-lived, rotating SA tokens) and will
+    // parse the CA cert PEM when building the TLS stack.
+    let kubeconfig = Kubeconfig {
+        clusters: vec![NamedCluster {
+            name: "standalone".to_string(),
+            cluster: Some(Cluster {
+                server: Some(server),
+                certificate_authority: Some(ca_cert_path),
+                ..Default::default()
+            }),
+        }],
+        auth_infos: vec![NamedAuthInfo {
+            name: "standalone".to_string(),
+            auth_info: Some(AuthInfo {
+                // Use token_file so the token is re-read on rotation, not embedded.
+                token_file: Some(token_path),
+                ..Default::default()
+            }),
+        }],
+        contexts: vec![NamedContext {
+            name: "standalone".to_string(),
+            context: Some(kube::config::Context {
+                cluster: "standalone".to_string(),
+                user: Some("standalone".to_string()),
+                ..Default::default()
+            }),
+        }],
+        current_context: Some("standalone".to_string()),
+        ..Default::default()
+    };
+
+    let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default())
+        .await
+        .map_err(|e| format!("failed to build Kubernetes client config: {}", e))?;
+
+    Client::try_from(config).map_err(|e| format!("failed to create Kubernetes client: {}", e))
+}
+
+/// Build a `kube::Client` using the resolved auth mode.
+///
+/// Priority order:
+/// 1. Explicit env vars (`KUBE_API_SERVER` + `KUBE_TOKEN_PATH` + `KUBE_CA_CERT_PATH`)
+/// 2. `KUBECONFIG` env / `~/.kube/config` / in-cluster SA mount (via `try_default`)
+#[cfg(feature = "k8s-token-review")]
+async fn build_kube_client() -> Result<Client, String> {
+    match detect_kube_auth_mode() {
+        KubeAuthMode::Explicit {
+            server,
+            token_path,
+            ca_cert_path,
+        } => {
+            debug!(
+                "Kubernetes auth mode: explicit (KUBE_API_SERVER={})",
+                server
+            );
+            build_explicit_kube_client(server, token_path, ca_cert_path).await
+        }
+        KubeAuthMode::Default => {
+            debug!("Kubernetes auth mode: try_default (KUBECONFIG / ~/.kube/config / in-cluster)");
+            Client::try_default()
+                .await
+                .map_err(|e| format!("Failed to create Kubernetes client: {}", e))
+        }
     }
 }
 
@@ -231,10 +401,8 @@ pub(crate) async fn validate_token_with_k8s(token: &str) -> Result<(), String> {
     // Load security configuration
     let config = TokenReviewConfig::from_env();
 
-    // Create Kubernetes client
-    let client = Client::try_default()
-        .await
-        .map_err(|e| format!("Failed to create Kubernetes client: {}", e))?;
+    // Create Kubernetes client using the resolved auth mode.
+    let client = build_kube_client().await?;
 
     // Create TokenReview API client
     let token_reviews: Api<TokenReview> = Api::all(client);
