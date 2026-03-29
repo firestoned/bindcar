@@ -1,0 +1,9 @@
+// named.conf.local — locally defined zones
+//
+// Zones are managed dynamically by bindcar via "rndc addzone" and "rndc delzone".
+// Do NOT add zones here manually — bindcar tracks zone state and will conflict
+// with any statically defined zones that share the same name.
+//
+// If you need to pre-seed a zone before starting bindcar, you can temporarily
+// add it here, verify it loads, then hand ownership to bindcar by removing it
+// from this file and using the bindcar API to recreate it.

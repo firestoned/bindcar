@@ -36,6 +36,19 @@ clippy: ## Run clippy
 check: fmt clippy test ## Run all checks
 
 #
+# Integration tests
+#
+
+.PHONY: drone-integration-test
+drone-integration-test: ## Run drone mode integration test (requires Docker, curl, dig)
+	cargo build
+	./integration-test/drone-external-bind9.sh
+
+.PHONY: drone-integration-test-ci
+drone-integration-test-ci: ## Run drone integration test in CI (uses pre-built binary via BINDCAR_BIN env var)
+	./integration-test/drone-external-bind9.sh
+
+#
 # Docker targets
 #
 

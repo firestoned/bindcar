@@ -1,4 +1,15 @@
-# Project Guidelines
+@.claude/SKILL.md
+
+# Project Guidelines for bindcar
+
+> HTTP REST API + CLI for programmatic BIND9 DNS management via RNDC
+
+**CRITICAL Coding Patterns** (full details in `rules/`):
+- **TDD**: Write tests FIRST — `rules/testing.md` + `tdd-workflow` skill
+- **After ANY Rust change**: run `cargo-quality` skill (NON-NEGOTIABLE)
+- **Early returns / magic numbers / style**: `rules/rust-style.md`
+
+---
 
 ## Rust Development Environment
 
@@ -9,80 +20,147 @@ source ~/.zshrc
 
 This ensures the Rust toolchain is properly loaded in the shell environment.
 
+---
+
 ## Service Mesh
 
 When referencing service mesh in documentation or code, always use **Linkerd** as the example implementation.
 
-## Documentation Standards
+---
 
-### Roadmaps and Plans
+## 🔍 MANDATORY: Use ripgrep
 
-**CRITICAL:** All roadmaps, implementation plans, and design documents created by Claude Code must be placed in the `docs/roadmaps/` directory.
+ALWAYS use `rg` for code search. NEVER use `grep`, `find`, or `lsof`.
 
-- Use descriptive filenames in kebab-case (e.g., `rndc-conf-parser.md`, `feature-implementation-plan.md`)
-- Include clear status indicators (Planning, In Progress, Completed)
-- Reference relevant source files with relative links
-- Provide detailed implementation phases with timelines
-- Include success criteria and testing strategies
+- Rust files: `rg -trs "pattern" . -g '!target/'`
 
-## Code Style
+---
 
-### Early Return Pattern (Guard Clauses)
+## 🚫 Docker Operations Restrictions
 
-Always use the "early return" or "guard clause" coding style to minimize nested if-else statements and promote clearer, more linear code flow. Handle error conditions or special cases at the beginning of a function and exit early if those conditions are met.
+**NEVER build or push Docker images.** The user manages all image operations.
 
-**Key principles:**
+After code changes: run `cargo fmt`, `cargo clippy`, `cargo test`, then inform the user changes are ready to build and deploy.
 
-1. **Handle preconditions first** - Validate input parameters and other preconditions at the start of a function. If a condition is not met, return immediately (e.g., return `None`, `Err`, or an error value). This prevents the main logic from executing with invalid data.
+---
 
-   ```rust
-   fn process_data(data: Option<Vec<String>>) -> Option<ProcessedData> {
-       // Handle invalid input early
-       let data = match data {
-           Some(d) => d,
-           None => return None,
-       };
+## 🚨 Plans and Roadmaps → `docs/roadmaps/`
 
-       if data.is_empty() {
-           return None; // Handle empty data
-       }
+ALL planning documents MUST go in `docs/roadmaps/`. Filenames: **lowercase**, **hyphens only** (no underscores, no uppercase).
 
-       // ... rest of the processing logic (happy path)
-   }
-   ```
+```
+✅ docs/roadmaps/out-of-cluster-support.md
+❌ ROADMAP.md  ❌ docs/roadmaps/OUT_OF_CLUSTER.md  ❌ docs/roadmaps/Phase_3.md
+```
 
-2. **Minimize else statements** - Instead of using if-else for mutually exclusive conditions, use early returns within if blocks. If a condition is met and an action is performed, return the result. The code after the if block then implicitly handles the "else" case.
+---
 
-   ```rust
-   fn calculate_discount(price: f64, is_premium_member: bool) -> f64 {
-       if is_premium_member {
-           return price * 0.90; // Apply 10% discount and return
-       }
+## 🔧 GitHub Workflows & CI/CD
 
-       // No 'else' needed; non-premium members are handled here
-       price * 0.95 // Apply 5% discount
-   }
-   ```
+See `rules/github-workflows.md` for full standards. Key rules:
 
-3. **Prioritize readability and clarity** - The goal is to make the code easier to understand by reducing indentation levels and keeping related logic together. When a reader encounters an early return, they know that specific branch of execution has concluded.
+- **NEVER** replace `firestoned/github-actions` composite actions with direct action calls — update the `firestoned/github-actions` repo instead
+- All workflows MUST delegate logic to Makefile targets (no inline bash scripts)
+- New workflows MUST support `workflow_call` for reusability
 
-4. **Use Result types for error handling** - In Rust, prefer `Result<T, E>` types with early returns using the `?` operator for error propagation:
+---
 
-   ```rust
-   fn process_request(config: &Config) -> Result<Response, Error> {
-       if config.api_key.is_empty() {
-           return Err(Error::MissingApiKey);
-       }
+## 📝 Documentation Requirements
 
-       let validated_data = validate_input(&config.data)?;
-       let processed = process_validated_data(validated_data)?;
+See `rules/documentation.md` for full workflow.
 
-       Ok(Response::new(processed))
-   }
-   ```
+- Ask "Does documentation need to be updated?" before marking ANY task complete
+- Update `.claude/CHANGELOG.md` with `**Author:**` on EVERY code change (MANDATORY — no exceptions)
+- Build docs with `make docs` — use `build-docs` skill
 
-**Benefits:**
-- Reduced nesting improves readability and reduces cognitive load
-- Clearer code flow with main logic less cluttered by error handling
-- Easier to test each condition in isolation
-- Fail-fast approach catches invalid states or inputs early in execution
+---
+
+## 🦀 Rust Workflow
+
+Full style guide: `rules/rust-style.md`. Full testing standards: `rules/testing.md`.
+
+**After ANY `.rs` change:** run `cargo-quality` skill (`cargo fmt` + `cargo clippy` + `cargo test`). Task is NOT complete until all three pass.
+
+### TDD (mandatory)
+
+Write failing tests FIRST, then implement minimum code to pass. See `tdd-workflow` skill.
+
+Test file pattern: `src/foo.rs` → `#[cfg(test)] mod foo_test;` at bottom → `src/foo_test.rs`
+
+> **Note:** This project uses `_test.rs` (singular), not `_tests.rs` (plural).
+
+### Dependency Management
+
+Before adding deps: verify actively maintained (commits in last 6 months), prefer well-known crates, document reason in CHANGELOG.
+
+---
+
+## 🧪 Testing
+
+See `rules/testing.md` for full standards.
+
+- Every public function MUST have unit tests
+- Tests in separate `_test.rs` files (never embedded in source)
+- Integration tests in `integration-test/` directory
+- Run: `cargo-quality` skill. Specific test: `cargo test <name>`. Verbose: `cargo test -- --nocapture`
+
+---
+
+## 📁 File Organization
+
+```
+src/
+├── main.rs
+├── lib.rs
+├── auth.rs / auth_test.rs
+├── cli.rs / cli_test.rs
+├── metrics.rs / metrics_test.rs
+├── middleware.rs / middleware_test.rs
+├── nsupdate.rs / nsupdate_test.rs
+├── rate_limit.rs / rate_limit_test.rs
+├── records.rs / records_test.rs
+├── rndc.rs / rndc_test.rs
+├── rndc_conf_parser.rs / rndc_conf_parser_tests.rs
+├── rndc_conf_types.rs / rndc_conf_types_tests.rs
+├── rndc_parser.rs / rndc_parser_tests.rs
+├── rndc_types.rs / rndc_types_tests.rs
+├── types.rs / types_test.rs
+└── zones.rs / zones_test.rs
+
+docs/
+├── roadmaps/   ← ALL planning docs here (lowercase-hyphen filenames)
+└── src/        ← mkdocs source
+
+integration-test/   ← Integration tests
+examples/           ← Usage examples
+```
+
+---
+
+## 🚫 Things to Avoid
+
+- `unwrap()` in production — use `?` or explicit error handling
+- Hardcoded ports or paths — make them configurable
+- `sleep()` for synchronization
+- Ignoring RNDC command errors
+- Magic numbers — use named constants (see `rules/rust-style.md`)
+
+---
+
+## 💡 Helpful Commands
+
+```bash
+source ~/.zshrc && cargo run                     # Run locally
+cargo test -- --nocapture                        # Verbose test output
+make docs                                        # Build documentation
+```
+
+Skills: `cargo-quality`, `tdd-workflow`, `update-changelog`, `update-docs`, `build-docs`, `get-multiarch-digest`, `pre-commit-checklist`.
+
+---
+
+## 📋 PR/Commit Checklist
+
+**Run `pre-commit-checklist` skill before EVERY commit. A task is NOT complete until it passes.**
+
+Documentation is NOT optional — it is a critical requirement equal in importance to the code.

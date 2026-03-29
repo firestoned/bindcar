@@ -363,7 +363,7 @@ pub async fn create_zone(
             .zone_config
             .primaries
             .as_ref()
-            .map_or(true, |p| p.is_empty())
+            .is_none_or(|p| p.is_empty())
     {
         metrics::record_zone_operation("create", false);
         return Err(ApiError::InvalidRequest(

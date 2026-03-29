@@ -1,0 +1,56 @@
+// named.conf.options — global server options
+
+options {
+    // Zone files are stored here; bindcar uses BIND_ZONE_DIR to match this path
+    directory "/var/cache/bind";
+
+    // -----------------------------------------------------------------------
+    // Listeners
+    // -----------------------------------------------------------------------
+
+    // Accept DNS queries on all interfaces, standard port
+    listen-on port 53 { 0.0.0.0; };
+
+    // Disable IPv6 listener unless your environment requires it
+    listen-on-v6 { none; };
+
+    // -----------------------------------------------------------------------
+    // Query access
+    // -----------------------------------------------------------------------
+
+    // Allow queries from any client (authoritative server, not a resolver)
+    allow-query { any; };
+
+    // Disable zone transfers — add secondary nameserver IPs here when needed
+    allow-transfer { none; };
+
+    // -----------------------------------------------------------------------
+    // Dynamic updates (nsupdate)
+    // -----------------------------------------------------------------------
+
+    // Allow nsupdate from localhost only.
+    // Individual zones added via bindcar inherit this default; to restrict
+    // further, configure allow-update per zone in the rndc addzone call.
+    allow-update { 127.0.0.1; };
+
+    // -----------------------------------------------------------------------
+    // Dynamic zone management (required for bindcar rndc addzone / delzone)
+    // -----------------------------------------------------------------------
+
+    allow-new-zones yes;
+
+    // -----------------------------------------------------------------------
+    // Authoritative-only mode — disable recursive resolution
+    // -----------------------------------------------------------------------
+
+    recursion no;
+    additional-from-auth no;
+    additional-from-cache no;
+
+    // -----------------------------------------------------------------------
+    // DNSSEC — disabled for a plain authoritative setup.
+    // Enable and configure a dnssec-policy if you need signed zones.
+    // -----------------------------------------------------------------------
+
+    dnssec-validation no;
+};

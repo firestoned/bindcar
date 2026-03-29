@@ -37,6 +37,9 @@ pub struct NsupdateExecutor {
     server: String,
     /// DNS server port
     port: u16,
+    /// Force TCP transport (nsupdate -v); required in environments where
+    /// UDP is unreliable, e.g., Docker Desktop on macOS.
+    use_tcp: bool,
 }
 
 impl NsupdateExecutor {
@@ -77,12 +80,17 @@ impl NsupdateExecutor {
             tsig_key_name.is_some()
         );
 
+        let use_tcp = std::env::var("NSUPDATE_TCP")
+            .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
+
         Ok(Self {
             tsig_key_name,
             tsig_algorithm,
             tsig_secret,
             server,
             port,
+            use_tcp,
         })
     }
 
@@ -101,6 +109,10 @@ impl NsupdateExecutor {
         debug!("Executing nsupdate commands:\n{}", commands);
 
         let mut cmd = tokio::process::Command::new("nsupdate");
+
+        if self.use_tcp {
+            cmd.arg("-v");
+        }
 
         // Add TSIG authentication if configured
         if let (Some(ref key_name), Some(ref algorithm), Some(ref secret)) =
