@@ -25,7 +25,7 @@ path = "src/main.rs"
 # HTTP server framework
 axum = "0.8"
 tower = "0.5"
-tower-http = { version = "0.6", features = ["trace"] }
+tower-http = { version = "0.7", features = ["trace"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
