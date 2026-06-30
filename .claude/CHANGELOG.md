@@ -1,5 +1,34 @@
 # Changelog
 
+## [2026-06-29 23:00] - SHA-pin all GitHub Actions + Dependabot SHA updates
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/workflows/{docs.yaml,main.yaml,pr.yml,release.yml}`: pinned every
+  external action `uses:` ref to a full commit SHA with a `# <tag>` comment
+  (102 refs), including the first-party `firestoned/github-actions/*` composite
+  actions. SHAs resolved from the live GitHub API.
+- `.github/actions/prepare-docker-binaries/action.yaml`: pinned
+  `actions/download-artifact@v4` to its commit SHA.
+- `.github/dependabot.yml`: documented that the github-actions ecosystem now
+  updates SHA pins (Dependabot bumps the SHA + version comment to the newest
+  release) and covers the composite action directory.
+
+### Why
+Supply-chain hardening: a mutable tag (`@v4`, `@stable`) can be force-pushed to
+point at malicious code, whereas a commit SHA is immutable. Pinning to SHA with
+a `# vX` comment lets Dependabot keep them current by bumping the SHA itself.
+Exceptions: the SLSA reusable workflow stays on a semver tag (required for
+provenance verification), and the local `./.github/actions/...` action needs no
+pin.
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [x] CI/config change only
+- [ ] Documentation only
+
 ## [2026-06-29 22:00] - Fix drone integration test for B-4 startup guard
 
 **Author:** Erick Bourgeois

@@ -25,10 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Check license headers
-        uses: firestoned/github-actions/security/license-check@v1.3.4
+        uses: firestoned/github-actions/security/license-check@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
         with:
           copyright-holder: "Erick Bourgeois, firestoned"
           license-id: "MIT"
@@ -38,12 +38,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0  # Fetch all history for verification
 
       - name: Verify commits are signed
-        uses: firestoned/github-actions/security/verify-signed-commits@v1.3.4
+        uses: firestoned/github-actions/security/verify-signed-commits@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           verify-mode: push
@@ -68,25 +68,25 @@ jobs:
             binary_name: bindcar
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Rust build environment
-        uses: firestoned/github-actions/rust/setup-rust-build@v1.3.4
+        uses: firestoned/github-actions/rust/setup-rust-build@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
         with:
           target: ${{ matrix.platform.target }}
 
       - name: Build binary
-        uses: firestoned/github-actions/rust/build-binary@v1.3.4
+        uses: firestoned/github-actions/rust/build-binary@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
         with:
           target: ${{ matrix.platform.target }}
 
       - name: Generate SBOM
-        uses: firestoned/github-actions/rust/generate-sbom@v1.3.4
+        uses: firestoned/github-actions/rust/generate-sbom@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
         with:
           target: ${{ matrix.platform.target }}
 
       - name: Upload binary and SBOM artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.platform.artifact_name }}
           path: |
@@ -100,19 +100,19 @@ jobs:
     needs: build
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Download x86_64 build artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: bindcar-linux-amd64
           path: target/x86_64-unknown-linux-gnu/release/
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@v1.3.4
+        uses: firestoned/github-actions/rust/cache-cargo@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
 
       - name: Run tests
         run: make test
@@ -123,15 +123,15 @@ jobs:
     needs: [license-check, verify-commits]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: rustfmt, clippy
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@v1.3.4
+        uses: firestoned/github-actions/rust/cache-cargo@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
 
       - name: Check formatting
         run: make fmt
@@ -151,11 +151,11 @@ jobs:
       short-sha: ${{ steps.version-chainguard.outputs.short-sha }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Extract version for Chainguard
         id: version-chainguard
-        uses: firestoned/github-actions/versioning/extract-version@v1.3.4
+        uses: firestoned/github-actions/versioning/extract-version@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
         with:
           repository: firestoned/bindcar
           workflow-type: main
@@ -163,7 +163,7 @@ jobs:
 
       - name: Extract version for Distroless
         id: version-distroless
-        uses: firestoned/github-actions/versioning/extract-version@v1.3.4
+        uses: firestoned/github-actions/versioning/extract-version@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
         with:
           repository: firestoned/bindcar
           workflow-type: main
@@ -194,19 +194,19 @@ jobs:
             image-repository: ${{ needs.extract-version.outputs.image-repository-distroless }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Prepare Docker binaries
         uses: ./.github/actions/prepare-docker-binaries
 
       - name: Setup Docker environment
-        uses: firestoned/github-actions/docker/setup-docker@v1.3.4
+        uses: firestoned/github-actions/docker/setup-docker@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ghcr.io/${{ matrix.variant.image-repository }}
           tags: |
@@ -219,7 +219,7 @@ jobs:
 
       - name: Build and push Docker image (${{ matrix.variant.name }})
         id: docker_build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
           file: ${{ matrix.variant.dockerfile }}
@@ -243,16 +243,16 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2
         with:
           tool: cargo-llvm-cov
 
@@ -260,7 +260,7 @@ jobs:
         run: cargo llvm-cov --lib --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
         with:
           files: lcov.info
           fail_ci_if_error: false
@@ -271,7 +271,7 @@ jobs:
         run: cargo llvm-cov --lib --html
 
       - name: Upload HTML coverage as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage-report
           path: target/llvm-cov/html/
@@ -282,9 +282,9 @@ jobs:
     needs: [license-check, verify-commits]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Run security scan
-        uses: firestoned/github-actions/rust/security-scan@v1.3.4
+        uses: firestoned/github-actions/rust/security-scan@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
         with:
           cargo-audit-version: "0.22.0"
