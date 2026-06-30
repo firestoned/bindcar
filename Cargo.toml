@@ -73,7 +73,7 @@ tempfile = "3"
 
 # Kubernetes client (optional, for token validation)
 kube = { version = "3.1", features = ["client", "rustls-tls"], optional = true }
-k8s-openapi = { version = "0.27", default-features = false, optional = true }
+k8s-openapi = { version = "0.28", default-features = false, optional = true }
 
 [features]
 default = []
@@ -87,7 +87,7 @@ serial_test = "3.4"
 tempfile = "3.27"
 
 # Enable k8s-openapi version for tests and examples
-k8s-openapi = { version = "0.27", features = ["v1_32"] }
+k8s-openapi = { version = "0.28", features = ["v1_32"] }
 
 [profile.release]
 opt-level = 3
