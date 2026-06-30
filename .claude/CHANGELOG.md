@@ -1,5 +1,125 @@
 # Changelog
 
+## [2026-07-01 17:30] - Validate zone name on freeze/thaw/notify/reload/status handlers (CodeQL #2)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/zones.rs`: `reload_zone`, `zone_status`, `freeze_zone`, `thaw_zone`, and
+  `notify_zone` now call `validate_zone_name(&zone_name)` before passing the
+  caller-supplied `{name}` path parameter to the RNDC executor — matching the
+  existing guard in `create_zone`/`delete_zone`. Rejected names return HTTP 400
+  (`ApiError::InvalidRequest`) and record a failed-operation metric (except
+  `zone_status`, which records no operation metric).
+- `src/zones_test.rs`: added an offline `AppState` builder and five async tests
+  asserting each handler rejects a path-traversal zone name before touching rndc.
+
+### Why
+These five handlers previously forwarded the raw path parameter straight to
+`rndc.{reload,zonestatus,freeze,thaw,notify}`, unlike `create_zone`/`delete_zone`
+which validate first. CodeQL flagged the pattern (`rust/path-injection` #2). The
+value reaches an RNDC control command rather than a filesystem path, but the
+missing input validation was a real gap; validating closes it consistently.
+
+### Impact
+- [ ] Breaking change
+- [x] API change (malformed zone names now return 400 instead of a 500 from rndc)
+- [ ] Config change only
+- [x] Security hardening
+
+## [2026-07-01 00:00] - CodeQL rust/path-injection (#1, #3): defense-in-depth barrier on readiness zone-dir probe
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/zones.rs`: added `is_normalized_zone_dir(path)` — returns `true` only for
+  an absolute path with no `..`/`.` traversal components (the invariant
+  `resolve_zone_dir` establishes at startup).
+- `src/main.rs`: `ready_check` now calls `is_normalized_zone_dir` as a guard
+  immediately before `tokio::fs::metadata(&state.zone_dir)`. The metadata sink is
+  only reachable after the barrier; an unexpectedly relative/traversal path is
+  logged and reported as not-ready instead of being probed.
+- `src/zones_test.rs`: added unit tests for the barrier (absolute/relative,
+  `..` rejection, embedded `.` acceptance) and a coupling test asserting
+  `resolve_zone_dir` output always satisfies `is_normalized_zone_dir`.
+
+### Why
+CodeQL `rust/path-injection` alerts #1 (main, `f0c43b8`) and #3
+(security-sweep, `2ac1a19`) flag the same code: `state.zone_dir` reaches the
+`/api/v1/ready` handler through the axum `State` extractor, which the analyzer
+models as untrusted, and feeds `tokio::fs::metadata`. The value is actually
+server-configured (`BIND_ZONE_DIR` env var, canonicalized once at startup), so
+this is not a real user-controlled path. Rather than dismiss, we add a genuine
+defense-in-depth barrier that re-asserts the startup invariant at the point of
+use and breaks the tainted dataflow.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [ ] Config change only
+- [x] Security hardening (no behavior change for a correctly-configured server)
+
+## [2026-06-30 14:00] - RED team remediation: critical + high findings (B-8 zone/rndc injection, rate-limit keying, error/metric disclosure, child env, deploy hardening)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/zones.rs`: added `validate_ip_list` (C-1) — `primaries`/`also-notify`/
+  `allow-transfer` entries must parse as `IpAddr` before being interpolated into
+  the `rndc addzone` config literal, blocking brace-breakout BIND config
+  injection. Added `validate_zone_config_content` + `reject_zone_file_control_chars`
+  (C-2) — SOA/name-server/glue/record fields embedded in a `create_zone` request
+  are now validated (control-char reject + IP parse + the same record checks as
+  the add-record endpoint) before `to_zone_file`, blocking `$INCLUDE`/`$GENERATE`
+  zone-file directive injection. Both wired into `create_zone`.
+- `src/records.rs`: `validate_record_type` made `pub(crate)` for reuse by zones.
+- `src/main.rs`, `src/rate_limit.rs`: rate limiter now keys on the real TCP peer
+  (`PeerIpKeyExtractor`) instead of the spoofable `SmartIpKeyExtractor`
+  (X-Forwarded-For), closing rate-limit evasion and victim-bucket exhaustion (A-1).
+- `src/types.rs`: `ApiError::into_response` returns a generic message for all 5xx
+  variants (raw rndc/nsupdate stderr and internal paths are logged server-side
+  only), closing an information-disclosure oracle (A-3). 4xx client-fault detail
+  is unchanged.
+- `src/middleware.rs`: `track_metrics` labels metrics with the matched route
+  template (`MatchedPath`) instead of the raw request path — removes zone-name
+  disclosure via `/metrics` and the unbounded-cardinality memory-exhaustion
+  vector (A-4 / C-3).
+- `src/main.rs`: the unauthenticated `/ready` and `/metrics` endpoints no longer
+  leak internals (C-3). `/ready` returns only `zone_dir: ok|error` /
+  `rndc: ok|error` (the path and backend error text are logged server-side via
+  the new `ready_check_label` helper); the `/metrics` error path returns a
+  generic message. These endpoints stay unauthenticated (kubelet probes /
+  Prometheus scraping) but disclose nothing. Added `src/main_test.rs`.
+- `src/nsupdate.rs`: the spawned `nsupdate` child env is scrubbed
+  (`env_clear()` + `minimal_child_env()` allowlisting only `PATH`), so
+  `NSUPDATE_SECRET`/`RNDC_SECRET` no longer leak via `/proc/<pid>/environ` (A-5).
+- `docker/Dockerfile`: pinned the distroless runtime base to its multi-arch
+  manifest-list digest (K-1) and added an explicit `USER 65532:65532`.
+- `deploy/rbac.yaml` (new): least-privilege `system:auth-delegator` RBAC for
+  TokenReview (K-2). `deploy/pod-hardening.yaml` (new): pod/container
+  `securityContext` reference + egress NetworkPolicy (K-3 / N-1).
+- Tests: `src/zones_test.rs` (+7), `src/types_test.rs` (+2), `src/nsupdate_test.rs`
+  (+1) covering the new validators, error sanitization, and child-env allowlist.
+- `README.md`: documented peer-IP rate-limit keying and the new deploy manifests.
+
+### Why
+Remediates the critical and high findings from the 2026-06-29/30 RED team sweep.
+C-1/C-2 were the core of the unauthenticated DNS-takeover chain (config + zone
+poisoning, `$INCLUDE` file-read oracle); A-1/A-3/A-4 collapse the rate-limit
+bypass and the metrics/error information-disclosure surface; A-5 restores the
+B-7 secret-confinement goal for the child process; K-1/K-2/K-3 give operators
+digest-pinned bases and least-privilege/hardened deployment defaults.
+
+### Impact
+- [ ] Breaking change
+- [x] API change (malformed embedded records/IP lists in `create_zone` now
+  return HTTP 400; 5xx bodies no longer include internal detail)
+- [ ] Config change only
+- [ ] Documentation only
+
+Verified: `cargo fmt`/`clippy --all-targets --all-features` clean; `cargo test`
+286 (default) / 313 (`k8s-token-review`) passing.
+
 ## [2026-06-30 12:30] - Bump kube-rs 3.1.0 → 4.0.0
 
 **Author:** Erick Bourgeois

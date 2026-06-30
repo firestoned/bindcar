@@ -171,6 +171,14 @@ impl NsupdateExecutor {
             keyfile.as_ref().map(tempfile::NamedTempFile::path),
         ));
 
+        // Scrub the child's environment (A-5). The API process holds
+        // NSUPDATE_SECRET / RNDC_SECRET in its own environment, and a spawned
+        // child inherits the parent environment by default — exposing the
+        // base64 secrets via /proc/<pid>/environ to any co-located principal for
+        // the lifetime of the nsupdate process. nsupdate needs none of those; we
+        // pass only an allowlisted PATH so the binary can still be resolved.
+        cmd.env_clear().envs(minimal_child_env());
+
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -390,6 +398,27 @@ impl NsupdateExecutor {
 
         self.execute(&commands).await
     }
+}
+
+/// Environment variables propagated to the spawned `nsupdate` child.
+///
+/// Deliberately minimal: only `PATH`, so the `nsupdate` binary can still be
+/// resolved. Everything else (notably `NSUPDATE_SECRET` / `RNDC_SECRET`, which
+/// live in the API process environment) is withheld so the child's
+/// `/proc/<pid>/environ` never exposes a secret (A-5).
+const CHILD_ENV_ALLOWLIST: &[&str] = &["PATH"];
+
+/// Build the allowlisted environment for the `nsupdate` child process.
+///
+/// Reads only the variables named in [`CHILD_ENV_ALLOWLIST`] from the parent
+/// environment; any that are unset are simply omitted. Used together with
+/// `Command::env_clear()` so the child starts from an empty environment plus
+/// this allowlist.
+pub(crate) fn minimal_child_env() -> Vec<(OsString, OsString)> {
+    CHILD_ENV_ALLOWLIST
+        .iter()
+        .filter_map(|name| std::env::var_os(name).map(|value| (OsString::from(name), value)))
+        .collect()
 }
 
 /// Build the nsupdate argument vector.

@@ -118,6 +118,23 @@ mod tsig_keyfile_tests {
     }
 
     #[test]
+    fn test_minimal_child_env_excludes_secrets() {
+        use crate::nsupdate::minimal_child_env;
+
+        let env = minimal_child_env();
+        // Every propagated variable must be in the PATH-only allowlist; in
+        // particular no SECRET-bearing variable may ever appear (A-5).
+        for (key, _) in &env {
+            let key = key.to_string_lossy();
+            assert_eq!(key, "PATH", "unexpected env var propagated to child: {key}");
+            assert!(
+                !key.to_uppercase().contains("SECRET"),
+                "secret-bearing env var leaked to child: {key}"
+            );
+        }
+    }
+
+    #[test]
     fn test_keyfile_is_created_with_owner_only_permissions() {
         use std::os::unix::fs::PermissionsExt;
 

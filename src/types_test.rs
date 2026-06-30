@@ -156,6 +156,50 @@ fn test_api_error_invalid_record() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
+/// A-3: 5xx response bodies must NOT echo internal detail (raw rndc/nsupdate
+/// stderr, paths). They are replaced with a generic message; the detail is
+/// logged server-side only.
+#[tokio::test]
+async fn test_5xx_error_body_is_sanitized() {
+    let sensitive = "/etc/bind/rndc.key: secret \"S3CR3T\" leaked via stderr";
+    let cases = vec![
+        ApiError::RndcError(sensitive.to_string()).into_response(),
+        ApiError::NsupdateError(sensitive.to_string()).into_response(),
+        ApiError::ZoneFileError(sensitive.to_string()).into_response(),
+        ApiError::InternalError(sensitive.to_string()).into_response(),
+    ];
+
+    for response in cases {
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(
+            !body.contains("S3CR3T") && !body.contains("rndc.key"),
+            "5xx body leaked internal detail: {body}"
+        );
+        assert!(
+            body.contains("Internal server error"),
+            "5xx body should carry the generic message: {body}"
+        );
+    }
+}
+
+/// A-3: 4xx (client-fault) bodies still carry the helpful, safe detail about
+/// the caller's own request.
+#[tokio::test]
+async fn test_4xx_error_body_retains_detail() {
+    let response =
+        ApiError::InvalidRequest("zone name cannot be empty".to_string()).into_response();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(body.contains("zone name cannot be empty"), "got: {body}");
+}
+
 #[test]
 fn test_api_error_display() {
     let errors = vec![

@@ -4,7 +4,38 @@
 //! Unit tests for zones module
 
 use super::zones::*;
+use crate::nsupdate::NsupdateExecutor;
+use crate::rndc::RndcExecutor;
+use crate::types::{ApiError, AppState};
+use axum::extract::{Path, State};
 use std::collections::HashMap;
+use std::sync::Arc;
+
+/// Build an `AppState` whose executors are constructed offline (no network).
+///
+/// The RNDC/nsupdate executors are created with a loopback address and a dummy
+/// TSIG secret; they never connect unless a command is actually executed. This
+/// lets us exercise the handler validation guards, which reject bad input
+/// *before* any executor call, without a live BIND9 server.
+fn offline_app_state() -> AppState {
+    let rndc = RndcExecutor::new(
+        "127.0.0.1:953".to_string(),
+        "sha256".to_string(),
+        "dGVzdC1zZWNyZXQtaGVyZQ==".to_string(),
+    )
+    .expect("offline rndc executor");
+    let nsupdate = NsupdateExecutor::new("127.0.0.1".to_string(), 53, None, None, None)
+        .expect("offline nsupdate executor");
+
+    AppState {
+        rndc: Arc::new(rndc),
+        nsupdate: Arc::new(nsupdate),
+        zone_dir: "/tmp".to_string(),
+    }
+}
+
+/// A zone name that `validate_zone_name` must reject (path traversal).
+const MALICIOUS_ZONE_NAME: &str = "../../etc/passwd";
 
 #[test]
 fn test_zone_config_to_zone_file() {
@@ -1182,4 +1213,217 @@ fn test_resolve_zone_dir_rejects_non_directory() {
 
     // Assert
     assert!(result.is_err(), "a file path must be rejected");
+}
+
+// ---------------------------------------------------------------------------
+// C-1 / C-2: create_zone injection-sink validation (pure helpers)
+// ---------------------------------------------------------------------------
+
+/// Build a minimal, valid primary-zone `ZoneConfig` for mutation in tests.
+fn clean_zone_config() -> ZoneConfig {
+    ZoneConfig {
+        ttl: 3600,
+        soa: SoaRecord {
+            primary_ns: "ns1.example.com.".to_string(),
+            admin_email: "admin.example.com.".to_string(),
+            serial: 2025010101,
+            refresh: 3600,
+            retry: 600,
+            expire: 604_800,
+            negative_ttl: 86400,
+        },
+        name_servers: vec!["ns1.example.com.".to_string()],
+        name_server_ips: HashMap::new(),
+        records: vec![DnsRecord {
+            name: "www".to_string(),
+            record_type: "A".to_string(),
+            value: "192.0.2.1".to_string(),
+            ttl: None,
+            priority: None,
+        }],
+        also_notify: None,
+        allow_transfer: None,
+        primaries: None,
+        dnssec_policy: None,
+        inline_signing: None,
+    }
+}
+
+#[test]
+fn test_validate_ip_list_accepts_valid_v4_and_v6() {
+    let ips = vec![
+        "192.0.2.1".to_string(),
+        "10.0.0.5".to_string(),
+        "2001:db8::1".to_string(),
+    ];
+    assert!(validate_ip_list("primaries", &ips).is_ok());
+    // Empty list is a no-op.
+    assert!(validate_ip_list("primaries", &[]).is_ok());
+}
+
+#[test]
+fn test_validate_ip_list_rejects_rndc_config_injection() {
+    // C-1: the classic brace-breakout payload must be rejected.
+    let payload = vec![r#"1.2.3.4; }; zone "x" { type primary; file "/etc/passwd"; "#.to_string()];
+    assert!(validate_ip_list("primaries", &payload).is_err());
+
+    // Other non-IP / metacharacter entries.
+    assert!(validate_ip_list("also-notify", &["not-an-ip".to_string()]).is_err());
+    assert!(validate_ip_list("allow-transfer", &["192.0.2.1; any".to_string()]).is_err());
+    assert!(validate_ip_list("primaries", &["".to_string()]).is_err());
+}
+
+#[test]
+fn test_validate_zone_config_content_accepts_clean_config() {
+    assert!(validate_zone_config_content(&clean_zone_config()).is_ok());
+}
+
+#[test]
+fn test_validate_zone_config_content_rejects_include_via_record_value() {
+    // C-2: newline + $INCLUDE injected through a record value (A record here is
+    // also rejected for not being a valid IPv4, but a newline is the core gap).
+    let mut config = clean_zone_config();
+    config.records[0].value = "192.0.2.1\n$INCLUDE /etc/bind/rndc.key".to_string();
+    assert!(validate_zone_config_content(&config).is_err());
+
+    // Same via a TXT value, which previously accepted "any non-empty string".
+    let mut config = clean_zone_config();
+    config.records[0].record_type = "TXT".to_string();
+    config.records[0].value = "\"ok\"\n$INCLUDE /etc/shadow".to_string();
+    assert!(validate_zone_config_content(&config).is_err());
+}
+
+#[test]
+fn test_validate_zone_config_content_rejects_injection_via_record_name() {
+    let mut config = clean_zone_config();
+    config.records[0].name = "x\n$INCLUDE /etc/shadow".to_string();
+    assert!(validate_zone_config_content(&config).is_err());
+}
+
+#[test]
+fn test_validate_zone_config_content_rejects_injection_via_soa_and_ns() {
+    // SOA primaryNs / adminEmail.
+    let mut config = clean_zone_config();
+    config.soa.primary_ns = "ns1.example.com.\n$INCLUDE /etc/shadow".to_string();
+    assert!(validate_zone_config_content(&config).is_err());
+
+    let mut config = clean_zone_config();
+    config.soa.admin_email = "admin.example.com.\n$GENERATE 1-9999999".to_string();
+    assert!(validate_zone_config_content(&config).is_err());
+
+    // Name-server entry.
+    let mut config = clean_zone_config();
+    config
+        .name_servers
+        .push("evil.\n$INCLUDE /etc/shadow".to_string());
+    assert!(validate_zone_config_content(&config).is_err());
+}
+
+#[test]
+fn test_validate_zone_config_content_rejects_bad_glue_ip() {
+    let mut config = clean_zone_config();
+    config.name_server_ips.insert(
+        "ns1.example.com.".to_string(),
+        "1.2.3.4\n$INCLUDE /x".to_string(),
+    );
+    assert!(validate_zone_config_content(&config).is_err());
+
+    // Non-IP glue value also rejected.
+    let mut config = clean_zone_config();
+    config
+        .name_server_ips
+        .insert("ns1.example.com.".to_string(), "not-an-ip".to_string());
+    assert!(validate_zone_config_content(&config).is_err());
+}
+
+#[tokio::test]
+async fn test_reload_zone_rejects_invalid_zone_name() {
+    let state = offline_app_state();
+    let result = reload_zone(State(state), Path(MALICIOUS_ZONE_NAME.to_string())).await;
+    assert!(
+        matches!(result, Err(ApiError::InvalidRequest(_))),
+        "reload_zone must reject an invalid zone name before touching rndc"
+    );
+}
+
+#[tokio::test]
+async fn test_zone_status_rejects_invalid_zone_name() {
+    let state = offline_app_state();
+    let result = zone_status(State(state), Path(MALICIOUS_ZONE_NAME.to_string())).await;
+    assert!(
+        matches!(result, Err(ApiError::InvalidRequest(_))),
+        "zone_status must reject an invalid zone name before touching rndc"
+    );
+}
+
+#[tokio::test]
+async fn test_freeze_zone_rejects_invalid_zone_name() {
+    let state = offline_app_state();
+    let result = freeze_zone(State(state), Path(MALICIOUS_ZONE_NAME.to_string())).await;
+    assert!(
+        matches!(result, Err(ApiError::InvalidRequest(_))),
+        "freeze_zone must reject an invalid zone name before touching rndc"
+    );
+}
+
+#[tokio::test]
+async fn test_thaw_zone_rejects_invalid_zone_name() {
+    let state = offline_app_state();
+    let result = thaw_zone(State(state), Path(MALICIOUS_ZONE_NAME.to_string())).await;
+    assert!(
+        matches!(result, Err(ApiError::InvalidRequest(_))),
+        "thaw_zone must reject an invalid zone name before touching rndc"
+    );
+}
+
+#[tokio::test]
+async fn test_notify_zone_rejects_invalid_zone_name() {
+    let state = offline_app_state();
+    let result = notify_zone(State(state), Path(MALICIOUS_ZONE_NAME.to_string())).await;
+    assert!(
+        matches!(result, Err(ApiError::InvalidRequest(_))),
+        "notify_zone must reject an invalid zone name before touching rndc"
+    );
+}
+
+#[test]
+fn test_is_normalized_zone_dir_accepts_absolute_normalized_path() {
+    assert!(is_normalized_zone_dir("/etc/bind/zones"));
+    assert!(is_normalized_zone_dir("/var/lib/bind"));
+    // A single root component is still absolute and normalized.
+    assert!(is_normalized_zone_dir("/"));
+}
+
+#[test]
+fn test_is_normalized_zone_dir_rejects_relative_path() {
+    assert!(!is_normalized_zone_dir("etc/bind/zones"));
+    assert!(!is_normalized_zone_dir("zones"));
+    assert!(!is_normalized_zone_dir(""));
+}
+
+#[test]
+fn test_is_normalized_zone_dir_rejects_parent_dir_traversal() {
+    assert!(!is_normalized_zone_dir("/etc/bind/../../etc/shadow"));
+    assert!(!is_normalized_zone_dir("/../etc"));
+    // A leading separator followed by ".." must not slip through.
+    assert!(!is_normalized_zone_dir("/etc/bind/.."));
+}
+
+#[test]
+fn test_is_normalized_zone_dir_accepts_embedded_current_dir() {
+    // `Path::components()` transparently drops `.` (current-dir) components from
+    // an absolute path, so these normalize to a safe location and are accepted.
+    // The meaningful traversal guard is against `..`, which Rust cannot collapse.
+    assert!(is_normalized_zone_dir("/etc/bind/./zones"));
+    assert!(is_normalized_zone_dir("/./etc"));
+}
+
+#[test]
+fn test_resolve_zone_dir_output_is_normalized() {
+    // The canonicalized output of resolve_zone_dir must always satisfy the
+    // ready-check barrier; this couples the startup guard to the sink guard.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let resolved =
+        resolve_zone_dir(dir.path().to_str().unwrap()).expect("existing directory should resolve");
+    assert!(is_normalized_zone_dir(&resolved));
 }

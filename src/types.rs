@@ -10,6 +10,7 @@ use axum::{
 };
 use serde::Serialize;
 use std::sync::Arc;
+use tracing::error;
 
 use crate::{nsupdate::NsupdateExecutor, rndc::RndcExecutor};
 
@@ -62,18 +63,37 @@ pub enum ApiError {
     InvalidRecord(String),
 }
 
+/// Generic, non-revealing message returned to clients for any 5xx error.
+///
+/// The detailed cause (raw `rndc`/`nsupdate` stderr, internal filesystem paths,
+/// kube API-server errors) is logged server-side instead. Returning it to the
+/// caller is an information-disclosure vector (A-3): BIND/nsupdate stderr can
+/// leak key names, zone-internal configuration, server addresses, and file
+/// contents useful for further attack.
+const GENERIC_SERVER_ERROR: &str = "Internal server error";
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        // 4xx variants describe a problem with the caller's own request (their
+        // input, a missing/duplicate zone) and are safe — and useful — to
+        // return verbatim. 5xx variants carry internal detail and are replaced
+        // with a generic message after the full error is logged server-side.
         let (status, error_message) = match &self {
-            ApiError::ZoneFileError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-            ApiError::RndcError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             ApiError::InvalidRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
             ApiError::ZoneNotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
             ApiError::ZoneAlreadyExists(_) => (StatusCode::CONFLICT, self.to_string()),
-            ApiError::InternalError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             ApiError::DynamicUpdatesNotEnabled(_) => (StatusCode::BAD_REQUEST, self.to_string()),
-            ApiError::NsupdateError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             ApiError::InvalidRecord(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            ApiError::ZoneFileError(_)
+            | ApiError::RndcError(_)
+            | ApiError::InternalError(_)
+            | ApiError::NsupdateError(_) => {
+                error!("returning 500 to client; internal error: {}", self);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    GENERIC_SERVER_ERROR.to_string(),
+                )
+            }
         };
 
         let body = Json(ErrorResponse {
