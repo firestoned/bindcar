@@ -1,5 +1,37 @@
 # Changelog
 
+## [2026-06-30 12:30] - Bump kube-rs 3.1.0 → 4.0.0
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `Cargo.toml`: `kube` dependency `"3.1"` → `"4.0"` (features unchanged:
+  `client`, `rustls-tls`). `k8s-openapi` stays at `0.28` — kube 4.0 still targets
+  it.
+- `Cargo.lock`: `kube`/`kube-client`/`kube-core` `3.1.0` → `4.0.0`.
+- `src/auth.rs`: added `..Default::default()` to the `NamedCluster`,
+  `NamedAuthInfo`, and `NamedContext` initializers in `build_explicit_kube_client`.
+  kube 4.0 added a flattened `other: BTreeMap<String, serde_json::Value>` field
+  (unknown-kubeconfig-field round-tripping) to these wrappers, making the prior
+  exhaustive initializers fail to compile.
+
+### Why
+Stay current with kube-rs. kube 4.0.0 (2026-06-16) is a major release but its
+only breaking change touching this codebase is the new `Named*` `other` field;
+the watcher/timeout/opt-in-tracing changes in 4.0 do not affect us (we only use
+`Client`, `Config::from_custom_kubeconfig`, `Api::all`, and `.create()` for the
+TokenReview flow). No `k8s-openapi` bump required.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [x] Dependency bump (only affects builds with the `k8s-token-review` feature)
+- [ ] Documentation only
+
+Verified: `cargo check`/`clippy`/`test` pass both with and without
+`--features k8s-token-review` (303 tests with the feature; `K8S_OPENAPI_ENABLED_VERSION=1.32`);
+single `kube v4.0.0` in the dependency tree.
+
 ## [2026-06-30 00:00] - Canonicalize zone directory at startup (CodeQL path-injection)
 
 **Author:** Erick Bourgeois
