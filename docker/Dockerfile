@@ -21,7 +21,7 @@
 # to match the target platform (amd64 or arm64).
 
 # Runtime stage - Distroless with glibc
-FROM gcr.io/distroless/cc-debian12:nonroot
+FROM gcr.io/distroless/cc-debian13:nonroot
 
 ARG TARGETARCH
 ARG VERSION=0.1.0
