@@ -1,5 +1,37 @@
 # Changelog
 
+## [2026-06-30 00:00] - Canonicalize zone directory at startup (CodeQL path-injection)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/zones.rs`: added `resolve_zone_dir`, which canonicalizes the configured
+  zone directory, rejects a missing or non-directory path, and returns the
+  normalized absolute path.
+- `src/main.rs`: replaced the inline zone-directory existence check in
+  `start_server` with `zones::resolve_zone_dir`, so `AppState.zone_dir` holds the
+  canonicalized path that the `list_zones`/`ready_check` handlers reuse.
+- `src/zones_test.rs`: added four unit tests covering canonicalization, `..`
+  normalization, missing-path rejection, and non-directory rejection.
+
+### Why
+Resolves the two open CodeQL `rust/path-injection` (high) alerts on the
+firestoned/bindcar code-scanning dashboard (`src/main.rs:147`,
+`src/zones.rs:967`). `BIND_ZONE_DIR` is operator-controlled config, but CodeQL
+treats environment variables as untrusted, and the value flowed unmodified into
+`tokio::fs::read_dir`/`metadata`. Canonicalizing once at startup is genuine
+defense-in-depth (symlinks and `..` resolved against the real filesystem, fail
+fast on a bad path) and breaks the env→filesystem taint flow before the value
+reaches any sink — the configuration-time counterpart to the existing
+`validate_zone_name` guard (B-1) on per-request zone names.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [x] Config change only (zone directory is now canonicalized; a `BIND_ZONE_DIR`
+  that does not exist or is not a directory now fails fast at startup)
+- [ ] Documentation only
+
 ## [2026-06-29 23:00] - SHA-pin all GitHub Actions + Dependabot SHA updates
 
 **Author:** Erick Bourgeois

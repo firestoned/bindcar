@@ -139,6 +139,54 @@ pub(crate) fn validate_rndc_identifier(field: &str, value: &str) -> Result<(), A
     Ok(())
 }
 
+/// Resolve and validate the configured zone directory at startup.
+///
+/// The zone directory comes from the `BIND_ZONE_DIR` environment variable, which
+/// static analysis (CodeQL `rust/path-injection`) treats as untrusted input.
+/// Canonicalizing it once at startup both hardens the server and removes that
+/// taint before the path ever reaches a filesystem sink (`read_dir`/`metadata`):
+///
+/// * Symlinks and `..` segments are resolved against the real filesystem, so the
+///   value stored in [`AppState`] is an absolute, fully-normalized path.
+/// * A missing path or a path that does not resolve to a directory is rejected
+///   up front, turning a late runtime failure into a clear startup error.
+///
+/// This is the configuration-time counterpart to [`validate_zone_name`], which
+/// guards the per-request zone names that are joined onto this directory (B-1).
+///
+/// # Arguments
+/// * `raw_dir` - The configured zone directory path (e.g. from `BIND_ZONE_DIR`).
+///
+/// # Returns
+/// The canonicalized directory path as a UTF-8 `String`.
+///
+/// # Errors
+/// Returns [`ApiError::InternalError`] if the path cannot be canonicalized (for
+/// example it does not exist), does not resolve to a directory, or is not valid
+/// UTF-8.
+pub fn resolve_zone_dir(raw_dir: &str) -> Result<String, ApiError> {
+    let canonical = std::fs::canonicalize(raw_dir).map_err(|e| {
+        ApiError::InternalError(format!(
+            "zone directory {:?} could not be resolved: {}",
+            raw_dir, e
+        ))
+    })?;
+
+    if !canonical.is_dir() {
+        return Err(ApiError::InternalError(format!(
+            "zone directory {:?} does not resolve to a directory",
+            raw_dir
+        )));
+    }
+
+    canonical.into_os_string().into_string().map_err(|_| {
+        ApiError::InternalError(format!(
+            "zone directory {:?} resolves to a non-UTF-8 path",
+            raw_dir
+        ))
+    })
+}
+
 /// SOA (Start of Authority) record configuration
 ///
 /// # Default Values

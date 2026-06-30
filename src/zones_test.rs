@@ -1127,3 +1127,59 @@ fn test_validate_rndc_identifier_rejects_quote_breakout() {
 fn test_validate_rndc_identifier_rejects_empty() {
     assert!(validate_rndc_identifier("dnssecPolicy", "").is_err());
 }
+
+#[test]
+fn test_resolve_zone_dir_returns_canonical_path_for_existing_directory() {
+    // Arrange: a real directory on disk.
+    let dir = tempfile::tempdir().expect("create temp dir");
+
+    // Act
+    let resolved =
+        resolve_zone_dir(dir.path().to_str().unwrap()).expect("existing directory should resolve");
+
+    // Assert: result equals the fully canonicalized path (symlinks like macOS
+    // /var -> /private/var are resolved).
+    let expected = std::fs::canonicalize(dir.path()).unwrap();
+    assert_eq!(resolved, expected.to_str().unwrap());
+}
+
+#[test]
+fn test_resolve_zone_dir_normalizes_parent_directory_references() {
+    // Arrange: a nested directory accessed via a `..` traversal segment.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let nested = dir.path().join("sub");
+    std::fs::create_dir(&nested).unwrap();
+    let traversal = nested.join(".."); // <tmp>/sub/.. == <tmp>
+
+    // Act
+    let resolved =
+        resolve_zone_dir(traversal.to_str().unwrap()).expect("traversal path should resolve");
+
+    // Assert: `..` is collapsed against the real filesystem.
+    let expected = std::fs::canonicalize(dir.path()).unwrap();
+    assert_eq!(resolved, expected.to_str().unwrap());
+}
+
+#[test]
+fn test_resolve_zone_dir_rejects_nonexistent_path() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let missing = dir.path().join("does-not-exist");
+
+    let result = resolve_zone_dir(missing.to_str().unwrap());
+
+    assert!(result.is_err(), "non-existent path must be rejected");
+}
+
+#[test]
+fn test_resolve_zone_dir_rejects_non_directory() {
+    // Arrange: a regular file, not a directory.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let file_path = dir.path().join("named.conf");
+    std::fs::write(&file_path, b"// not a directory").unwrap();
+
+    // Act
+    let result = resolve_zone_dir(file_path.to_str().unwrap());
+
+    // Assert
+    assert!(result.is_err(), "a file path must be rejected");
+}
