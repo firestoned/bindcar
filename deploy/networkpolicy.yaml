@@ -1,0 +1,56 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: MIT
+---
+# NetworkPolicy restricting access to the bindcar REST API (B-4 defense-in-depth).
+#
+# bindcar runs as a sidecar inside the BIND9 instance pods created by the bindy
+# operator. Its REST API (TCP 8080) is privileged — it can create/delete zones and
+# DNS records — so it must only be reachable by the bindy operator, NOT by arbitrary
+# in-cluster pods.
+#
+# IMPORTANT: a NetworkPolicy that selects a pod switches that pod to "default deny"
+# for the listed policyTypes. This policy therefore ALSO explicitly allows DNS
+# (TCP/UDP 53) from anywhere so that selecting the BIND9 pods does not break name
+# resolution or zone transfers. Only the bindcar API port is restricted.
+#
+# Adjust the label selectors to match your deployment:
+#   * podSelector       — the BIND9/bindcar pods (bindy labels them app=bind9,
+#                         app.kubernetes.io/part-of=bindy).
+#   * api ingress.from  — the bindy operator pods (bindy labels them app=bindy).
+#
+# NOTE: standard Kubernetes NetworkPolicy cannot match on ServiceAccount. To
+# enforce "only the bindy operator ServiceAccount" precisely, use a CNI that
+# supports identity-aware policy (e.g. Cilium CiliumNetworkPolicy). This manifest
+# is the portable, label-based equivalent.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bindcar-api-restrict
+  namespace: bindy-system
+  labels:
+    app.kubernetes.io/name: bindcar
+    app.kubernetes.io/component: network-policy
+spec:
+  # Select the BIND9 instance pods that run the bindcar sidecar.
+  podSelector:
+    matchLabels:
+      app: bind9
+      app.kubernetes.io/part-of: bindy
+  policyTypes:
+    - Ingress
+  ingress:
+    # 1) DNS — allowed from anywhere (queries + zone transfers). Without this rule,
+    #    selecting the pod above would default-deny DNS traffic.
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 2) bindcar REST API — ONLY from the bindy operator pods.
+    - from:
+        - podSelector:
+            matchLabels:
+              app: bindy
+      ports:
+        - protocol: TCP
+          port: 8080

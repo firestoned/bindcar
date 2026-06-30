@@ -26,6 +26,12 @@ pub struct Cli {
     #[arg(long, short = 'd', global = true)]
     pub debug: bool,
 
+    /// Acknowledge and allow starting with weak/disabled authentication on a
+    /// non-loopback interface. Without this (or a loopback bind / real auth),
+    /// bindcar refuses to start to avoid silently exposing an unauthenticated API.
+    #[arg(long, global = true)]
+    pub i_know_this_is_insecure: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }

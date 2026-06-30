@@ -30,6 +30,115 @@ use crate::{
 pub const ZONE_TYPE_PRIMARY: &str = "primary";
 pub const ZONE_TYPE_SECONDARY: &str = "secondary";
 
+/// Maximum length of a DNS zone name (RFC 1035 total name length).
+const MAX_ZONE_NAME_LEN: usize = 253;
+
+/// Maximum length of an RNDC configuration identifier (TSIG key / policy name).
+const MAX_RNDC_IDENTIFIER_LEN: usize = 253;
+
+/// Validate a zone name against a strict DNS-name grammar.
+///
+/// The zone name is interpolated into both a filesystem path (`<zone>.zone`) and
+/// RNDC `addzone`/`delzone` commands, so it must be tightly constrained to prevent
+/// path traversal (B-1) and command injection. Only the DNS character set
+/// `[A-Za-z0-9._-]` is permitted, the name must start with an alphanumeric
+/// character, and parent-directory references (`..`), path separators, whitespace,
+/// NUL, and other control characters are rejected.
+///
+/// # Errors
+/// Returns [`ApiError::InvalidRequest`] (HTTP 400) when the name is empty, too
+/// long, or contains a disallowed character or sequence.
+pub(crate) fn validate_zone_name(zone_name: &str) -> Result<(), ApiError> {
+    if zone_name.is_empty() {
+        return Err(ApiError::InvalidRequest(
+            "Zone name cannot be empty".to_string(),
+        ));
+    }
+
+    if zone_name.len() > MAX_ZONE_NAME_LEN {
+        return Err(ApiError::InvalidRequest(format!(
+            "Zone name exceeds maximum length of {} characters",
+            MAX_ZONE_NAME_LEN
+        )));
+    }
+
+    // Reject parent-directory references outright (defense-in-depth against
+    // path traversal even though '/' is already rejected below).
+    if zone_name.contains("..") {
+        return Err(ApiError::InvalidRequest(
+            "Zone name must not contain '..'".to_string(),
+        ));
+    }
+
+    // The first character must be alphanumeric (no leading dot, hyphen, or
+    // separator that could anchor a traversal or empty label).
+    let starts_alphanumeric = zone_name
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphanumeric());
+    if !starts_alphanumeric {
+        return Err(ApiError::InvalidRequest(
+            "Zone name must start with an alphanumeric character".to_string(),
+        ));
+    }
+
+    // Every character must be in the permitted DNS set. This rejects '/', '\\',
+    // whitespace, NUL, quotes, semicolons, braces, and all control characters.
+    for c in zone_name.chars() {
+        if !(c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_') {
+            return Err(ApiError::InvalidRequest(format!(
+                "Zone name contains invalid character: {:?}",
+                c
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate an RNDC configuration identifier such as a TSIG key name or a
+/// `dnssec-policy` name.
+///
+/// These values are interpolated into quoted RNDC `addzone` config literals
+/// (e.g. `allow-update {{ key "<name>"; }}`), so any `"`, `;`, `{`, `}`,
+/// whitespace, or control character could break out of the quoted context and
+/// inject arbitrary BIND configuration (B-3). Only the safe identifier set
+/// `[A-Za-z0-9._-]` is permitted.
+///
+/// # Arguments
+/// * `field` - Human-readable field name used in error messages.
+/// * `value` - The identifier value to validate.
+///
+/// # Errors
+/// Returns [`ApiError::InvalidRequest`] (HTTP 400) when the identifier is empty,
+/// too long, or contains a disallowed character.
+pub(crate) fn validate_rndc_identifier(field: &str, value: &str) -> Result<(), ApiError> {
+    if value.is_empty() {
+        return Err(ApiError::InvalidRequest(format!(
+            "{} cannot be empty",
+            field
+        )));
+    }
+
+    if value.len() > MAX_RNDC_IDENTIFIER_LEN {
+        return Err(ApiError::InvalidRequest(format!(
+            "{} exceeds maximum length of {} characters",
+            field, MAX_RNDC_IDENTIFIER_LEN
+        )));
+    }
+
+    for c in value.chars() {
+        if !(c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_') {
+            return Err(ApiError::InvalidRequest(format!(
+                "{} contains invalid character: {:?}",
+                field, c
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 /// SOA (Start of Authority) record configuration
 ///
 /// # Default Values
@@ -340,12 +449,11 @@ pub async fn create_zone(
         debug!("POST /api/v1/zones payload: {}", json_payload);
     }
 
-    // Validate zone name
-    if request.zone_name.is_empty() {
+    // Validate zone name (strict DNS grammar; prevents path traversal into the
+    // zone directory and command injection into rndc addzone).
+    if let Err(e) = validate_zone_name(&request.zone_name) {
         metrics::record_zone_operation("create", false);
-        return Err(ApiError::InvalidRequest(
-            "Zone name cannot be empty".to_string(),
-        ));
+        return Err(e);
     }
 
     // Validate zone type
@@ -369,6 +477,21 @@ pub async fn create_zone(
         return Err(ApiError::InvalidRequest(
             "Secondary zones require at least one primary server in 'primaries' field".to_string(),
         ));
+    }
+
+    // Validate optional RNDC identifiers up front, before any filesystem writes,
+    // so an injection attempt never reaches the rndc addzone config literal.
+    if let Some(key_name) = &request.update_key_name {
+        if let Err(e) = validate_rndc_identifier("updateKeyName", key_name) {
+            metrics::record_zone_operation("create", false);
+            return Err(e);
+        }
+    }
+    if let Some(dnssec_policy) = &request.zone_config.dnssec_policy {
+        if let Err(e) = validate_rndc_identifier("dnssecPolicy", dnssec_policy) {
+            metrics::record_zone_operation("create", false);
+            return Err(e);
+        }
     }
 
     // Generate zone file content from structured configuration (only for primary zones)
@@ -533,6 +656,13 @@ pub async fn delete_zone(
     Path(zone_name): Path<String>,
 ) -> Result<Json<ZoneResponse>, ApiError> {
     info!("Deleting zone: {}", zone_name);
+
+    // Validate zone name before it reaches rndc delzone or any filesystem path
+    // (prevents path traversal deleting arbitrary *.zone files).
+    if let Err(e) = validate_zone_name(&zone_name) {
+        metrics::record_zone_operation("delete", false);
+        return Err(e);
+    }
 
     // Execute rndc delzone
     let output = state.rndc.delzone(&zone_name).await.map_err(|e| {

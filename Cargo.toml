@@ -57,7 +57,7 @@ lazy_static = "1.5"
 tower_governor = "0.8"
 
 # RNDC client
-rndc = "0.1.4"
+rndc = "0.1.5"
 
 # CLI argument parsing
 clap = { version = "4", features = ["derive"] }
@@ -65,8 +65,14 @@ clap = { version = "4", features = ["derive"] }
 # Parsing
 nom = "8"
 
+# Constant-time comparison for shared-secret API token (avoids timing side-channels)
+subtle = "2.6"
+
+# Secure temp files (0600) for passing the TSIG key to nsupdate via -k instead of argv
+tempfile = "3"
+
 # Kubernetes client (optional, for token validation)
-kube = { version = "3.0", features = ["client", "rustls-tls"], optional = true }
+kube = { version = "3.1", features = ["client", "rustls-tls"], optional = true }
 k8s-openapi = { version = "0.27", default-features = false, optional = true }
 
 [features]

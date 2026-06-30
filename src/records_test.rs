@@ -90,3 +90,57 @@ mod tests {
     // and are better suited for integration test suites. These unit tests validate
     // request/response serialization and type correctness.
 }
+
+#[cfg(test)]
+mod validation_security_tests {
+    use crate::records::{validate_record_name, validate_record_value};
+
+    #[test]
+    fn test_validate_record_value_rejects_control_chars_for_txt() {
+        // TXT/CAA/SRV previously accepted "any non-empty string"; newline/CR/NUL
+        // must now be rejected to prevent nsupdate command injection (B-2).
+        for value in ["v=spf1\nupdate add evil", "a\rb", "x\0y"] {
+            assert!(
+                validate_record_value("TXT", value).is_err(),
+                "expected TXT value {value:?} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_record_value_rejects_control_chars_for_caa_srv() {
+        assert!(validate_record_value("CAA", "0 issue \"ca\"\nx").is_err());
+        assert!(validate_record_value("SRV", "0 5 443 host.\ninject").is_err());
+    }
+
+    #[test]
+    fn test_validate_record_value_accepts_clean_txt() {
+        assert!(validate_record_value("TXT", "v=spf1 -all").is_ok());
+        assert!(validate_record_value("CAA", "0 issue \"letsencrypt.org\"").is_ok());
+    }
+
+    #[test]
+    fn test_validate_record_value_still_rejects_empty() {
+        assert!(validate_record_value("TXT", "").is_err());
+    }
+
+    #[test]
+    fn test_validate_record_name_rejects_control_chars() {
+        for name in ["www\nupdate add evil", "a\rb", "x\0y"] {
+            assert!(
+                validate_record_name(name).is_err(),
+                "expected name {name:?} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_record_name_accepts_clean_names() {
+        for name in ["www", "@", "sub.example.com.", "_dmarc"] {
+            assert!(
+                validate_record_name(name).is_ok(),
+                "expected name {name:?} to be accepted"
+            );
+        }
+    }
+}

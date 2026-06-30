@@ -117,7 +117,10 @@ Environment variables:
 - `NSUPDATE_ALGORITHM` - HMAC algorithm for nsupdate (defaults to `RNDC_ALGORITHM`)
 - `NSUPDATE_SECRET` - Base64-encoded TSIG secret for nsupdate (defaults to `RNDC_SECRET`)
 - `RUST_LOG` - Log level (default: `info`)
+- `BIND_API_ADDRESS` - Interface to bind the API to (default: `0.0.0.0`)
+- `BIND_API_TOKEN` - Shared secret; when set, the Bearer token must match it (constant-time)
 - `DISABLE_AUTH` - Disable authentication (default: `false`)
+- `BINDCAR_ALLOW_INSECURE_AUTH` - Override the startup guard for non-loopback weak/disabled auth (default: `false`)
 - `RATE_LIMIT_ENABLED` - Enable rate limiting (default: `true`)
 - `RATE_LIMIT_REQUESTS` - Max requests per period (default: `100`)
 - `RATE_LIMIT_PERIOD_SECS` - Rate limit period in seconds (default: `60`)
@@ -168,10 +171,27 @@ options {
 
 By default, authentication is **enabled** and requires Bearer token authentication for all API endpoints except `/health` and `/ready`.
 
-**Two authentication modes:**
+**Authentication modes:**
 
-1. **Basic Mode** (default) - Validates token format only
-2. **TokenReview Mode** (optional) - Full token validation with Kubernetes TokenReview API
+1. **Basic Mode** (presence-only) - Validates token format only. ⚠️ This is *not* real
+   authentication and bindcar will **refuse to start** in this mode on a non-loopback
+   interface (see *Startup guard* below).
+2. **Shared-secret Mode** - Set `BIND_API_TOKEN`; every request's Bearer token must equal it
+   (compared in constant time). Real authentication without a Kubernetes API connection —
+   suitable for `drone`/bare-metal deployments.
+3. **TokenReview Mode** (optional) - Full token validation with Kubernetes TokenReview API.
+
+#### Startup guard (B-4)
+
+bindcar refuses to start when the API is bound to a **non-loopback** interface without real
+authentication, so a privileged API is never silently exposed. To start on `0.0.0.0` you must
+satisfy one of:
+
+- a real authenticator is configured — `BIND_API_TOKEN` is set, **or** the binary was built
+  with the `k8s-token-review` feature; **or**
+- the API is bound to loopback (`BIND_API_ADDRESS=127.0.0.1`); **or**
+- the operator explicitly accepts the risk via `--i-know-this-is-insecure` (or
+  `BINDCAR_ALLOW_INSECURE_AUTH=true`).
 
 **TokenReview Mode** provides enhanced security:
 - Validates token signatures
@@ -207,6 +227,12 @@ env:
 ```
 
 **WARNING**: Disabling authentication should ONLY be done in trusted environments where authentication is handled by infrastructure (Linkerd service mesh, API gateway, etc.). Never disable authentication in production without proper network-level security controls.
+
+Because of the startup guard, `DISABLE_AUTH=true` on a non-loopback bind also requires
+`--i-know-this-is-insecure` (or `BINDCAR_ALLOW_INSECURE_AUTH=true`) — an explicit
+acknowledgement that you are relying on infrastructure-level controls. See also
+[`deploy/networkpolicy.yaml`](deploy/networkpolicy.yaml), which restricts the API to the
+bindy operator at the network layer.
 
 See [Kubernetes TokenReview Validation](https://firestoned.github.io/bindcar/developer-guide/k8s-token-validation.html) for detailed configuration.
 
