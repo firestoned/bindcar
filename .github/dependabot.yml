@@ -1,0 +1,88 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: MIT
+
+# Dependabot version-update configuration for bindcar.
+#
+# Dependabot security updates and alerts are configured on the repository
+# (GitHub UI / API), not here. This file controls scheduled *version* updates.
+#
+# Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  # ---------------------------------------------------------------------------
+  # Rust / Cargo dependencies (Cargo.toml + Cargo.lock at the repo root)
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - rust
+    commit-message:
+      prefix: "deps"
+    # Group low-risk updates into a single PR to cut review noise; keep majors
+    # separate so breaking changes get individual scrutiny.
+    groups:
+      cargo-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # ---------------------------------------------------------------------------
+  # GitHub Actions used by the workflows in .github/workflows/ and the composite
+  # action(s) in .github/actions/.
+  #
+  # All actions are pinned to a full commit SHA with a `# vX.Y.Z` version
+  # comment. Dependabot detects SHA-pinned actions and bumps the SHA (and the
+  # comment) to the newest release's commit — i.e. updates run on SHAs, not
+  # floating tags. This includes the firestoned/github-actions composite
+  # actions, which are now SHA-pinned as well; Dependabot drives those bumps.
+  #
+  # NOTE: per the repo's CI standards, firestoned/github-actions may be version-
+  # bumped but must never be replaced with direct third-party action calls.
+  # The SLSA reusable workflow is intentionally left on a semver tag (required
+  # for provenance verification) and is excluded from SHA pinning.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        update-types:
+          - minor
+          - patch
+
+  # ---------------------------------------------------------------------------
+  # Docker base images across all Dockerfiles in docker/
+  #
+  # IMPORTANT: bindcar pins base images by multi-arch manifest-list digest.
+  # Review Dependabot's digest bumps to ensure they point at the multi-arch
+  # manifest list, not a platform-specific digest (see CLAUDE.md).
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: docker
+    directory: "/docker"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: "docker"
+    groups:
+      docker:
+        update-types:
+          - minor
+          - patch
