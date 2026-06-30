@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Check license headers
-        uses: firestoned/github-actions/security/license-check@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
+        uses: firestoned/github-actions/security/license-check@53b483254bc648903c364ee3c73a546d0936a91e # v1.3.6
         with:
           copyright-holder: "Erick Bourgeois, firestoned"
           license-id: "MIT"
@@ -43,7 +43,7 @@ jobs:
           fetch-depth: 0  # Fetch all history for verification
 
       - name: Verify commits are signed
-        uses: firestoned/github-actions/security/verify-signed-commits@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
+        uses: firestoned/github-actions/security/verify-signed-commits@53b483254bc648903c364ee3c73a546d0936a91e # v1.3.6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           verify-mode: push
@@ -71,17 +71,17 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Rust build environment
-        uses: firestoned/github-actions/rust/setup-rust-build@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
+        uses: firestoned/github-actions/rust/setup-rust-build@53b483254bc648903c364ee3c73a546d0936a91e # v1.3.6
         with:
           target: ${{ matrix.platform.target }}
 
       - name: Build binary
-        uses: firestoned/github-actions/rust/build-binary@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
+        uses: firestoned/github-actions/rust/build-binary@53b483254bc648903c364ee3c73a546d0936a91e # v1.3.6
         with:
           target: ${{ matrix.platform.target }}
 
       - name: Generate SBOM
-        uses: firestoned/github-actions/rust/generate-sbom@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
+        uses: firestoned/github-actions/rust/generate-sbom@53b483254bc648903c364ee3c73a546d0936a91e # v1.3.6
         with:
           target: ${{ matrix.platform.target }}
 
@@ -112,7 +112,7 @@ jobs:
           path: target/x86_64-unknown-linux-gnu/release/
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
+        uses: firestoned/github-actions/rust/cache-cargo@53b483254bc648903c364ee3c73a546d0936a91e # v1.3.6
 
       - name: Run tests
         run: make test
@@ -131,7 +131,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo dependencies
-        uses: firestoned/github-actions/rust/cache-cargo@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
+        uses: firestoned/github-actions/rust/cache-cargo@53b483254bc648903c364ee3c73a546d0936a91e # v1.3.6
 
       - name: Check formatting
         run: make fmt
@@ -155,7 +155,7 @@ jobs:
 
       - name: Extract version for Chainguard
         id: version-chainguard
-        uses: firestoned/github-actions/versioning/extract-version@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
+        uses: firestoned/github-actions/versioning/extract-version@53b483254bc648903c364ee3c73a546d0936a91e # v1.3.6
         with:
           repository: firestoned/bindcar
           workflow-type: main
@@ -163,7 +163,7 @@ jobs:
 
       - name: Extract version for Distroless
         id: version-distroless
-        uses: firestoned/github-actions/versioning/extract-version@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
+        uses: firestoned/github-actions/versioning/extract-version@53b483254bc648903c364ee3c73a546d0936a91e # v1.3.6
         with:
           repository: firestoned/bindcar
           workflow-type: main
@@ -200,7 +200,7 @@ jobs:
         uses: ./.github/actions/prepare-docker-binaries
 
       - name: Setup Docker environment
-        uses: firestoned/github-actions/docker/setup-docker@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
+        uses: firestoned/github-actions/docker/setup-docker@53b483254bc648903c364ee3c73a546d0936a91e # v1.3.6
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -285,6 +285,6 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Run security scan
-        uses: firestoned/github-actions/rust/security-scan@1eee84259bb7f1c56289632ae679d2d73ee8782e # v1.3.4
+        uses: firestoned/github-actions/rust/security-scan@53b483254bc648903c364ee3c73a546d0936a91e # v1.3.6
         with:
           cargo-audit-version: "0.22.0"
