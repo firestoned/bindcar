@@ -20,6 +20,10 @@ Must be:
 - Shared between bindcar and BIND9 containers
 - An existing directory
 
+The path is canonicalized once at startup (symlinks and `..` segments are
+resolved against the real filesystem). bindcar fails fast with a clear error if
+the path does not exist or does not resolve to a directory.
+
 ### API_PORT
 
 - **Type**: Integer

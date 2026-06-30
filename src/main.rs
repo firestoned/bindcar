@@ -352,11 +352,13 @@ async fn start_server(command: &Commands, insecure_override: bool) -> anyhow::Re
         ));
     };
 
-    // verify zone directory exists
-    if !tokio::fs::metadata(&zone_dir).await?.is_dir() {
-        error!("zone directory does not exist: {}", zone_dir);
-        return Err(anyhow::anyhow!("zone directory not found"));
-    }
+    // Resolve and validate the zone directory once at startup. Canonicalizing the
+    // operator-provided BIND_ZONE_DIR resolves symlinks and `..`, rejects a missing
+    // or non-directory path up front, and breaks the env->filesystem taint flow
+    // before the value is reused by the read_dir/metadata handlers (B-1).
+    let zone_dir = zones::resolve_zone_dir(&zone_dir)
+        .map_err(|e| anyhow::anyhow!("zone directory not usable: {}", e))?;
+    info!("resolved zone directory: {}", zone_dir);
 
     // create rndc executor
     let rndc = Arc::new(
