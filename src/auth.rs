@@ -357,6 +357,9 @@ pub(crate) async fn build_explicit_kube_client(
                 certificate_authority: Some(ca_cert_path),
                 ..Default::default()
             }),
+            // kube 4.0 added `other` (flattened unknown kubeconfig fields) to the
+            // Named* wrappers; default it so we stay forward-compatible.
+            ..Default::default()
         }],
         auth_infos: vec![NamedAuthInfo {
             name: "standalone".to_string(),
@@ -365,6 +368,7 @@ pub(crate) async fn build_explicit_kube_client(
                 token_file: Some(token_path),
                 ..Default::default()
             }),
+            ..Default::default()
         }],
         contexts: vec![NamedContext {
             name: "standalone".to_string(),
@@ -373,6 +377,7 @@ pub(crate) async fn build_explicit_kube_client(
                 user: Some("standalone".to_string()),
                 ..Default::default()
             }),
+            ..Default::default()
         }],
         current_context: Some("standalone".to_string()),
         ..Default::default()
