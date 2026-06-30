@@ -11,7 +11,7 @@
 #
 # IMPORTANT: This is for local development only. Do NOT use in CI/CD.
 
-FROM alpine:3.20
+FROM alpine:3.24
 
 LABEL org.opencontainers.image.source="https://github.com/firestoned/bindcar"
 LABEL org.opencontainers.image.description="BIND9 RNDC API Server (Local Dev Build)"

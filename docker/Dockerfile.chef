@@ -11,7 +11,7 @@
 # The rust:1.91.0 image doesn't include it by default, so we install it in a separate stage.
 
 # Stage 1: Prepare cargo-chef
-FROM rust:1.91.0 AS chef
+FROM rust:1.96.0 AS chef
 RUN cargo install cargo-chef
 WORKDIR /workspace
 
@@ -59,7 +59,7 @@ RUN TARGET=$(cat /tmp/target) && \
     cp target/$TARGET/release/bindcar target/release/bindcar
 
 # Runtime stage
-FROM alpine:3.20
+FROM alpine:3.24
 
 LABEL org.opencontainers.image.source="https://github.com/firestoned/bindcar"
 LABEL org.opencontainers.image.description="BIND9 RNDC API Server"
