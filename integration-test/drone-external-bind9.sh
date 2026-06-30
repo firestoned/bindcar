@@ -281,6 +281,7 @@ NSUPDATE_SECRET="${RNDC_SECRET}"               \
 BIND_ZONE_DIR="${ZONE_DIR}"                     \
 API_PORT="${BINDCAR_PORT}"                      \
 DISABLE_AUTH="true"                             \
+BINDCAR_ALLOW_INSECURE_AUTH="true"              \
 RUST_LOG="info"                                 \
     "$BINDCAR_BIN" drone &>"${TEST_ROOT}/bindcar.log" &
 BINDCAR_PID=$!

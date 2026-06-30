@@ -94,6 +94,7 @@ struct ApiDoc;
 /// Server configuration
 const DEFAULT_BIND_ZONE_DIR: &str = "/var/cache/bind";
 const DEFAULT_API_PORT: u16 = 8080;
+const DEFAULT_BIND_API_ADDRESS: &str = "0.0.0.0";
 
 /// Health check response
 #[derive(Serialize)]
@@ -174,7 +175,16 @@ async fn ready_check(State(state): State<AppState>) -> Json<ReadyResponse> {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.debug);
-    start_server(cli.resolved_command()).await
+
+    // The insecure-auth override may come from the CLI flag or an env var (the
+    // latter is convenient for container deployments without changing args).
+    let insecure_override = cli.i_know_this_is_insecure
+        || std::env::var("BINDCAR_ALLOW_INSECURE_AUTH")
+            .ok()
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(false);
+
+    start_server(cli.resolved_command(), insecure_override).await
 }
 
 fn init_tracing(debug: bool) {
@@ -191,7 +201,7 @@ fn init_tracing(debug: bool) {
         .init();
 }
 
-async fn start_server(command: &Commands) -> anyhow::Result<()> {
+async fn start_server(command: &Commands, insecure_override: bool) -> anyhow::Result<()> {
     match command {
         Commands::Run => info!(
             "starting bindcar v{} [sidecar mode]",
@@ -213,18 +223,40 @@ async fn start_server(command: &Commands) -> anyhow::Result<()> {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(DEFAULT_API_PORT);
+    let bind_host =
+        std::env::var("BIND_API_ADDRESS").unwrap_or_else(|_| DEFAULT_BIND_API_ADDRESS.to_string());
     let disable_auth = std::env::var("DISABLE_AUTH")
         .ok()
         .and_then(|v| v.parse::<bool>().ok())
         .unwrap_or(false);
 
     info!("zone directory: {}", zone_dir);
-    info!("api port: {}", api_port);
+    info!("api address: {}:{}", bind_host, api_port);
+    // Startup guard (B-4): never silently expose an unauthenticated or
+    // presence-only API on a non-loopback interface. Requires real auth
+    // (TokenReview feature or BIND_API_TOKEN), a loopback bind, or an explicit
+    // operator override.
+    if let Err(e) = bindcar::auth::check_startup_auth_posture(
+        !disable_auth,
+        bindcar::auth::has_real_auth(),
+        &bind_host,
+        insecure_override,
+    ) {
+        error!("{}", e);
+        return Err(anyhow::anyhow!(e));
+    }
+
     if disable_auth {
         warn!("⚠️  authentication is disabled - api endpoints are unprotected!");
         warn!("⚠️  this should only be used in trusted environments (e.g., linkerd service mesh)");
     } else {
         info!("authentication is enabled");
+        if std::env::var(bindcar::auth::BIND_API_TOKEN_ENV)
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)
+        {
+            info!("shared-secret API token authentication is active (BIND_API_TOKEN)");
+        }
 
         #[cfg(feature = "k8s-token-review")]
         {
@@ -447,7 +479,7 @@ async fn start_server(command: &Commands) -> anyhow::Result<()> {
         .layer(TraceLayer::new_for_http());
 
     // start server
-    let addr = format!("0.0.0.0:{}", api_port);
+    let addr = format!("{}:{}", bind_host, api_port);
 
     info!("bind9 rndc api server listening on {}", addr);
     info!("swagger ui available at http://{}/api/v1/docs", addr);

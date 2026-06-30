@@ -56,6 +56,117 @@ pub struct AuthError {
     pub error: String,
 }
 
+/// Environment variable holding a shared API token.
+///
+/// When set to a non-empty value, every request's Bearer token is compared
+/// against it in constant time. This provides real authentication for
+/// deployments that do not use the Kubernetes TokenReview API (`drone` mode,
+/// bare-metal, local testing), closing the "presence-only" gap (B-4) where any
+/// non-empty token was accepted.
+pub const BIND_API_TOKEN_ENV: &str = "BIND_API_TOKEN";
+
+/// Validate the presented Bearer token against the shared secret in
+/// [`BIND_API_TOKEN_ENV`], if configured.
+///
+/// Returns `Ok(())` when the shared-secret mode is **not** configured (the env
+/// var is unset or empty) so this layer is opt-in and composes with the
+/// TokenReview layer. When configured, the comparison is constant-time to avoid
+/// leaking the secret through response timing.
+///
+/// # Errors
+/// Returns `Err` with a generic message when a shared secret is configured but
+/// the presented token does not match.
+pub(crate) fn validate_shared_secret(token: &str) -> Result<(), String> {
+    let expected = std::env::var(BIND_API_TOKEN_ENV)
+        .ok()
+        .filter(|value| !value.is_empty());
+    compare_shared_secret(token, expected.as_deref())
+}
+
+/// Pure constant-time comparison of a presented token against an optional
+/// expected shared secret.
+///
+/// When `expected` is `None` the shared-secret mode is not configured and the
+/// check is a no-op (`Ok`). When `Some`, the comparison is constant-time.
+///
+/// # Errors
+/// Returns `Err` when a shared secret is configured but does not match.
+pub(crate) fn compare_shared_secret(token: &str, expected: Option<&str>) -> Result<(), String> {
+    use subtle::ConstantTimeEq;
+
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+
+    let matches: bool = token.as_bytes().ct_eq(expected.as_bytes()).into();
+    if matches {
+        Ok(())
+    } else {
+        Err("Invalid API token".to_string())
+    }
+}
+
+/// Returns `true` if `host` denotes a loopback-only bind address.
+///
+/// Used by the startup guard: binding to loopback means the API is not reachable
+/// from other pods/hosts, so weaker auth is tolerable for local development.
+pub fn is_loopback_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
+/// Decide whether bindcar is allowed to start given its authentication posture.
+///
+/// bindcar must not silently expose an unauthenticated (or presence-only) API on
+/// a non-loopback interface (B-4). It may start when **any** of the following
+/// holds:
+/// - real authentication is active (`auth_enabled && has_real_auth`), or
+/// - the bind address is loopback-only, or
+/// - the operator explicitly accepted the risk (`insecure_override`).
+///
+/// # Arguments
+/// * `auth_enabled` - Whether the auth middleware is applied (`!DISABLE_AUTH`).
+/// * `has_real_auth` - Whether a real authenticator is configured (TokenReview
+///   feature or a shared secret).
+/// * `bind_host` - The host portion of the listen address.
+/// * `insecure_override` - Whether the operator passed the explicit insecure override.
+///
+/// # Errors
+/// Returns `Err` with an operator-facing message when the configuration would
+/// expose an unauthenticated API on a non-loopback interface.
+pub fn check_startup_auth_posture(
+    auth_enabled: bool,
+    has_real_auth: bool,
+    bind_host: &str,
+    insecure_override: bool,
+) -> Result<(), String> {
+    let secure = auth_enabled && has_real_auth;
+    if secure || insecure_override || is_loopback_host(bind_host) {
+        return Ok(());
+    }
+
+    Err(format!(
+        "refusing to start: the API is bound to a non-loopback interface ({bind_host}) without \
+         real authentication. Enable the Kubernetes TokenReview feature, set {BIND_API_TOKEN_ENV}, \
+         bind to loopback, or pass --i-know-this-is-insecure to override."
+    ))
+}
+
+/// Returns `true` if a real authenticator is configured at runtime: either the
+/// Kubernetes TokenReview feature is compiled in, or a shared secret is set.
+pub fn has_real_auth() -> bool {
+    if cfg!(feature = "k8s-token-review") {
+        return true;
+    }
+    std::env::var(BIND_API_TOKEN_ENV)
+        .map(|value| !value.is_empty())
+        .unwrap_or(false)
+}
+
 /// Configuration for TokenReview security policies
 #[cfg(feature = "k8s-token-review")]
 #[derive(Debug, Clone)]
@@ -356,6 +467,14 @@ pub async fn authenticate(
                 error: "Empty token".to_string(),
             }),
         ));
+    }
+
+    // Shared-secret validation (constant-time). No-op unless BIND_API_TOKEN is
+    // set, in which case the presented token MUST match — this closes the
+    // presence-only gap (B-4) for non-TokenReview deployments.
+    if let Err(e) = validate_shared_secret(token) {
+        warn!("Shared-secret token validation failed");
+        return Err((StatusCode::UNAUTHORIZED, Json(AuthError { error: e })));
     }
 
     // Validate token with Kubernetes TokenReview API if feature is enabled

@@ -116,12 +116,10 @@ const VALID_RECORD_TYPES: &[&str] = &["A", "AAAA", "CNAME", "MX", "TXT", "NS", "
 ///
 /// Ok if zone exists and has allow-update configured, Err otherwise
 async fn validate_zone_for_updates(state: &AppState, zone_name: &str) -> Result<(), ApiError> {
-    // Validate zone name is not empty
-    if zone_name.is_empty() {
-        return Err(ApiError::InvalidRequest(
-            "Zone name cannot be empty".to_string(),
-        ));
-    }
+    // Validate zone name against the strict DNS grammar. This also rejects
+    // empty names and any control characters that could inject extra nsupdate
+    // commands once the zone is assembled into a request.
+    crate::zones::validate_zone_name(zone_name)?;
 
     // Get zone configuration via RNDC
     let zone_config_output = state.rndc.showzone(zone_name).await.map_err(|e| {
@@ -172,13 +170,49 @@ fn validate_record_type(record_type: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Validate a record name, rejecting control characters.
+///
+/// Record names are assembled into newline-delimited nsupdate command scripts,
+/// so a `\n`, `\r`, or NUL in the name could inject additional update commands
+/// (B-2). Legitimate DNS names never contain control characters.
+///
+/// # Errors
+/// Returns [`ApiError::InvalidRecord`] (HTTP 400) if the name contains a control
+/// character.
+pub(crate) fn validate_record_name(name: &str) -> Result<(), ApiError> {
+    if let Some(bad) = name.chars().find(|c| c.is_control()) {
+        return Err(ApiError::InvalidRecord(format!(
+            "Record name contains illegal control character: {:?}",
+            bad
+        )));
+    }
+
+    Ok(())
+}
+
 /// Validate DNS record value based on type
-fn validate_record_value(record_type: &str, value: &str) -> Result<(), ApiError> {
+///
+/// # Errors
+/// Returns [`ApiError::InvalidRecord`] (HTTP 400) if the value is empty, contains
+/// a control character (which could inject nsupdate commands), or fails the
+/// per-type format check.
+pub(crate) fn validate_record_value(record_type: &str, value: &str) -> Result<(), ApiError> {
     // Value cannot be empty
     if value.is_empty() {
         return Err(ApiError::InvalidRecord(
             "Record value cannot be empty".to_string(),
         ));
+    }
+
+    // Reject control characters (newline/CR/NUL) for every record type. These
+    // would otherwise be interpreted as nsupdate command separators and allow
+    // injection of arbitrary update commands (B-2). This replaces the previous
+    // "any non-empty string is valid" behaviour for TXT/CAA/SRV.
+    if let Some(bad) = value.chars().find(|c| c.is_control()) {
+        return Err(ApiError::InvalidRecord(format!(
+            "Record value contains illegal control character: {:?}",
+            bad
+        )));
     }
 
     match record_type.to_uppercase().as_str() {
@@ -204,7 +238,8 @@ fn validate_record_value(record_type: &str, value: &str) -> Result<(), ApiError>
             }
         }
         "TXT" | "CAA" | "SRV" => {
-            // Any non-empty string is valid
+            // No further format constraint beyond the non-empty and
+            // control-character checks performed above.
         }
         _ => {}
     }
@@ -267,6 +302,7 @@ pub async fn add_record(
     // Early return pattern: validate all prerequisites
     validate_zone_for_updates(&state, &zone_name).await?;
     validate_record_type(&request.record_type)?;
+    validate_record_name(&request.name)?;
     validate_record_value(&request.record_type, &request.value)?;
 
     // Normalize record name to FQDN
@@ -353,6 +389,7 @@ pub async fn remove_record(
     // Early return pattern: validate all prerequisites
     validate_zone_for_updates(&state, &zone_name).await?;
     validate_record_type(&request.record_type)?;
+    validate_record_name(&request.name)?;
 
     // Validate value if provided
     if let Some(ref value) = request.value {
@@ -427,6 +464,7 @@ pub async fn update_record(
     // Early return pattern: validate all prerequisites
     validate_zone_for_updates(&state, &zone_name).await?;
     validate_record_type(&request.record_type)?;
+    validate_record_name(&request.name)?;
     validate_record_value(&request.record_type, &request.current_value)?;
     validate_record_value(&request.record_type, &request.new_value)?;
 

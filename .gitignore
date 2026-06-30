@@ -21,6 +21,9 @@ Thumbs.db
 # Local development
 .tmp/
 
+# OpenWolf context management (local only)
+.wolf/
+
 /docs/target/
 /docs/book/
 

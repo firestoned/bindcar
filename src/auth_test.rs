@@ -716,3 +716,69 @@ mod k8s_token_review_tests {
         env::remove_var("BIND_ALLOWED_SERVICE_ACCOUNTS");
     }
 }
+
+// ---------------------------------------------------------------------------
+// B-4: shared-secret auth + startup posture guard (pure, env-free tests)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod b4_auth_posture_tests {
+    use crate::auth::{check_startup_auth_posture, compare_shared_secret, is_loopback_host};
+
+    #[test]
+    fn test_is_loopback_host() {
+        assert!(is_loopback_host("127.0.0.1"));
+        assert!(is_loopback_host("127.0.0.5"));
+        assert!(is_loopback_host("::1"));
+        assert!(is_loopback_host("localhost"));
+        assert!(is_loopback_host("LocalHost"));
+        assert!(!is_loopback_host("0.0.0.0"));
+        assert!(!is_loopback_host("10.0.0.5"));
+        assert!(!is_loopback_host("example.com"));
+    }
+
+    #[test]
+    fn test_compare_shared_secret_noop_when_unconfigured() {
+        // Not configured (None) => any token passes this layer.
+        assert!(compare_shared_secret("anything", None).is_ok());
+        assert!(compare_shared_secret("", None).is_ok());
+    }
+
+    #[test]
+    fn test_compare_shared_secret_matches_and_rejects() {
+        assert!(compare_shared_secret("s3cret-token", Some("s3cret-token")).is_ok());
+        // Presence-only style token (B-4) must now be rejected when a real secret is set.
+        assert!(compare_shared_secret("valid-token", Some("s3cret-token")).is_err());
+        assert!(compare_shared_secret("", Some("s3cret-token")).is_err());
+        assert!(compare_shared_secret("s3cret-token-extra", Some("s3cret-token")).is_err());
+    }
+
+    #[test]
+    fn test_startup_posture_allows_loopback_without_auth() {
+        // Disabled or presence-only auth on loopback is acceptable for local dev.
+        assert!(check_startup_auth_posture(false, false, "127.0.0.1", false).is_ok());
+        assert!(check_startup_auth_posture(false, false, "localhost", false).is_ok());
+        assert!(check_startup_auth_posture(true, false, "::1", false).is_ok());
+    }
+
+    #[test]
+    fn test_startup_posture_refuses_nonloopback_without_real_auth() {
+        // Presence-only (auth enabled, no real auth) on a non-loopback bind must refuse.
+        assert!(check_startup_auth_posture(true, false, "0.0.0.0", false).is_err());
+        // Disabled auth on a non-loopback bind must refuse.
+        assert!(check_startup_auth_posture(false, false, "0.0.0.0", false).is_err());
+        assert!(check_startup_auth_posture(false, false, "10.0.0.5", false).is_err());
+    }
+
+    #[test]
+    fn test_startup_posture_allows_nonloopback_with_real_auth() {
+        assert!(check_startup_auth_posture(true, true, "0.0.0.0", false).is_ok());
+    }
+
+    #[test]
+    fn test_startup_posture_allows_explicit_override() {
+        // --i-know-this-is-insecure lets an operator opt into the risk.
+        assert!(check_startup_auth_posture(false, false, "0.0.0.0", true).is_ok());
+        assert!(check_startup_auth_posture(true, false, "0.0.0.0", true).is_ok());
+    }
+}

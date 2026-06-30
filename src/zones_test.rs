@@ -1033,3 +1033,97 @@ fn test_journal_file_naming_convention() {
     let expected_journal_file = format!("{}.zone.jnl", zone_name);
     assert_eq!(expected_journal_file, "sub.example.com.zone.jnl");
 }
+
+// ---------------------------------------------------------------------------
+// Input validation security tests (B-1 path traversal, B-3 RNDC injection)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_validate_zone_name_accepts_legitimate_names() {
+    for name in [
+        "example.com",
+        "sub.example.com",
+        "a",
+        "my-zone_1.test",
+        "10",
+    ] {
+        assert!(
+            validate_zone_name(name).is_ok(),
+            "expected {name:?} to be accepted"
+        );
+    }
+}
+
+#[test]
+fn test_validate_zone_name_rejects_path_traversal() {
+    for name in [
+        "../etc/passwd",
+        "..",
+        "foo/../bar",
+        "a/b",
+        "/etc/bind",
+        "foo\\bar",
+    ] {
+        assert!(
+            validate_zone_name(name).is_err(),
+            "expected {name:?} to be rejected"
+        );
+    }
+}
+
+#[test]
+fn test_validate_zone_name_rejects_control_chars_and_whitespace() {
+    for name in ["foo\nbar", "foo\rbar", "foo\0bar", "foo bar", "\tzone"] {
+        assert!(
+            validate_zone_name(name).is_err(),
+            "expected {name:?} to be rejected"
+        );
+    }
+}
+
+#[test]
+fn test_validate_zone_name_rejects_empty_and_leading_separator() {
+    assert!(validate_zone_name("").is_err());
+    assert!(validate_zone_name(".example.com").is_err());
+    assert!(validate_zone_name("-example.com").is_err());
+    assert!(validate_zone_name("_dmarc.example.com").is_err());
+}
+
+#[test]
+fn test_validate_zone_name_rejects_overlong() {
+    let long = "a".repeat(254);
+    assert!(validate_zone_name(&long).is_err());
+}
+
+#[test]
+fn test_validate_rndc_identifier_accepts_legitimate_values() {
+    for value in ["update-key", "rndc-key", "default", "high.security_1"] {
+        assert!(
+            validate_rndc_identifier("updateKeyName", value).is_ok(),
+            "expected {value:?} to be accepted"
+        );
+    }
+}
+
+#[test]
+fn test_validate_rndc_identifier_rejects_quote_breakout() {
+    // Payloads that would break out of the quoted rndc config literal.
+    for value in [
+        "key\"; };",
+        "evil\"",
+        "a;b",
+        "a{b}",
+        "key with space",
+        "key\nallow-update { any; };",
+    ] {
+        assert!(
+            validate_rndc_identifier("updateKeyName", value).is_err(),
+            "expected {value:?} to be rejected"
+        );
+    }
+}
+
+#[test]
+fn test_validate_rndc_identifier_rejects_empty() {
+    assert!(validate_rndc_identifier("dnssecPolicy", "").is_err());
+}
