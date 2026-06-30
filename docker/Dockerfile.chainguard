@@ -29,7 +29,7 @@
 # to match the target platform (amd64 or arm64).
 
 # Runtime stage - Chainguard glibc-dynamic (zero CVEs)
-FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:ce2066b540536a53708fbb8e83c76add5fc1710cb4a923ac7cb466f91b2d911e
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:ea9eab0adc5716fb9937ab60155a31bce9cbc8b56e6f2e21fb9af9218be195b7
 
 ARG TARGETARCH
 ARG VERSION=0.1.0
