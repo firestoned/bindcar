@@ -1,5 +1,28 @@
 # Changelog
 
+## [2026-07-01 16:20] - Bump firestoned/github-actions v1.3.6 → v1.3.7 (cargo login --stdin fix)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/workflows/{main.yaml,release.yml,pr.yml,docs.yaml}`: bumped all 33
+  `firestoned/github-actions/*` composite-action refs from
+  `53b48325… # v1.3.6` to `d0d51c63… # v1.3.7` (SHA-pinned).
+
+### Why
+`cargo login` no longer accepts the `--stdin` flag; the `rust/publish-crate`
+action in v1.3.6 ran `cargo login --stdin`, which fails on current toolchains.
+v1.3.7 (firestoned/github-actions #21) pipes the token into `cargo login`
+without the removed flag. Per repo CI standards, the fix lives in the
+`firestoned/github-actions` repo and is consumed here by version bump — the
+composite actions are NOT inlined/replaced.
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [x] CI/CD only (unblocks `cargo publish` in the release workflow)
+- [ ] Documentation only
+
 ## [2026-07-01 15:45] - RED-team sweep remediation (batch 2): MEDIUM + LOW findings A7–A19
 
 **Author:** Erick Bourgeois
