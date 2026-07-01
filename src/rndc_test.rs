@@ -6,6 +6,67 @@
 use super::rndc::*;
 
 #[test]
+fn test_rndc_rejects_weak_hmac_algorithms() {
+    // A12: HMAC-MD5 and HMAC-SHA1 are deprecated and must be rejected.
+    for weak in ["md5", "sha1", "hmac-md5", "hmac-sha1"] {
+        let result = RndcExecutor::new(
+            "127.0.0.1:953".to_string(),
+            weak.to_string(),
+            "dGVzdC1zZWNyZXQ=".to_string(),
+        );
+        assert!(result.is_err(), "weak algorithm {weak} should be rejected");
+    }
+}
+
+#[test]
+fn test_rndc_accepts_sha2_algorithms() {
+    for ok in ["sha256", "hmac-sha256", "sha384", "sha512"] {
+        let result = RndcExecutor::new(
+            "127.0.0.1:953".to_string(),
+            ok.to_string(),
+            "dGVzdC1zZWNyZXQ=".to_string(),
+        );
+        assert!(result.is_ok(), "algorithm {ok} should be accepted");
+    }
+}
+
+#[test]
+fn test_validate_rndc_zone_name_rejects_injection() {
+    // A9: sink-side guard rejects traversal, whitespace, and rndc metacharacters.
+    for bad in [
+        "",
+        "../etc/passwd",
+        "zone name",
+        "zone;reload",
+        "zone\nreload",
+        "a..b",
+    ] {
+        assert!(
+            validate_rndc_zone_name(bad).is_err(),
+            "expected {bad:?} to be rejected"
+        );
+    }
+    assert!(validate_rndc_zone_name("example.com").is_ok());
+    assert!(validate_rndc_zone_name("_dmarc.example.com").is_ok());
+}
+
+#[test]
+fn test_rndc_config_debug_redacts_secret() {
+    // A4 regression: `{:?}` on an RndcConfig must never print the plaintext secret.
+    let cfg = RndcConfig {
+        server: "127.0.0.1:953".to_string(),
+        algorithm: "sha256".to_string(),
+        secret: "SUPERSECRETBASE64VALUE==".to_string(),
+    };
+    let debug = format!("{:?}", cfg);
+    assert!(
+        !debug.contains("SUPERSECRETBASE64VALUE"),
+        "TSIG secret leaked via Debug: {debug}"
+    );
+    assert!(debug.contains("[REDACTED]"), "expected redaction: {debug}");
+}
+
+#[test]
 fn test_rndc_executor_creation() {
     // Test with valid parameters
     let result = RndcExecutor::new(
@@ -29,8 +90,9 @@ fn test_rndc_executor_creation_with_hmac_prefix() {
 
 #[test]
 fn test_rndc_executor_creation_with_all_algorithms() {
-    // Test all valid algorithms
-    let algorithms = vec!["md5", "sha1", "sha224", "sha256", "sha384", "sha512"];
+    // A12: only the SHA-2 family is accepted; md5/sha1 are rejected (tested
+    // separately in test_rndc_rejects_weak_hmac_algorithms).
+    let algorithms = vec!["sha224", "sha256", "sha384", "sha512"];
 
     for algo in algorithms {
         let result = RndcExecutor::new(
@@ -44,15 +106,8 @@ fn test_rndc_executor_creation_with_all_algorithms() {
 
 #[test]
 fn test_rndc_executor_creation_with_hmac_prefix_all_algorithms() {
-    // Test all valid algorithms with hmac- prefix
-    let algorithms = vec![
-        "hmac-md5",
-        "hmac-sha1",
-        "hmac-sha224",
-        "hmac-sha256",
-        "hmac-sha384",
-        "hmac-sha512",
-    ];
+    // A12: SHA-2 family with hmac- prefix (md5/sha1 excluded).
+    let algorithms = vec!["hmac-sha224", "hmac-sha256", "hmac-sha384", "hmac-sha512"];
 
     for algo in algorithms {
         let result = RndcExecutor::new(
@@ -73,7 +128,7 @@ fn test_rndc_executor_creation_with_invalid_algorithm() {
     );
     assert!(result.is_err());
     let error_msg = result.err().unwrap().to_string();
-    assert!(error_msg.contains("Invalid algorithm"));
+    assert!(error_msg.contains("Invalid or deprecated algorithm"));
 }
 
 #[test]

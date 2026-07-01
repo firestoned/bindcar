@@ -1,31 +1,143 @@
 # Changelog
 
-## [2026-07-01 17:30] - Validate zone name on freeze/thaw/notify/reload/status handlers (CodeQL #2)
+## [2026-07-01 15:45] - RED-team sweep remediation (batch 2): MEDIUM + LOW findings A7–A19
 
 **Author:** Erick Bourgeois
 
 ### Changed
-- `src/zones.rs`: `reload_zone`, `zone_status`, `freeze_zone`, `thaw_zone`, and
-  `notify_zone` now call `validate_zone_name(&zone_name)` before passing the
-  caller-supplied `{name}` path parameter to the RNDC executor — matching the
-  existing guard in `create_zone`/`delete_zone`. Rejected names return HTTP 400
-  (`ApiError::InvalidRequest`) and record a failed-operation metric (except
-  `zone_status`, which records no operation metric).
-- `src/zones_test.rs`: added an offline `AppState` builder and five async tests
-  asserting each handler rejects a path-traversal zone name before touching rndc.
+- `src/auth.rs`: **(A7)** auth failures now return a generic `"Unauthorized"` to the
+  client (detail logged server-side only), removing the identity/namespace
+  enumeration oracle. **(A8)** the `kube::Client` is built once and cached in a
+  `OnceCell` (`cached_kube_client`) instead of rebuilt per request. **(A15)**
+  `compare_shared_secret` compares fixed-size SHA-256 digests so timing no longer
+  leaks the secret's length.
+- `src/rndc.rs`: **(A9)** every `RndcExecutor` zone method re-validates the zone
+  name at the sink (`validate_rndc_zone_name`) — defense-in-depth if a caller
+  guard regresses. **(A12)** deprecated `hmac-md5`/`hmac-sha1` rejected;
+  SHA-2 only (`ACCEPTED_RNDC_ALGORITHMS`). **(A18)** deterministic key selection —
+  errors when multiple keys exist with no `default-key` instead of picking an
+  arbitrary HashMap entry. **(A19)** rejects an empty TSIG secret. Named the
+  `DEFAULT_RNDC_PORT` constant.
+- `src/rndc_conf_parser.rs`: **(A16)** `port_number` errors on `u16` overflow
+  instead of silently masking to the default. **(A17)** `MAX_INCLUDE_DEPTH` caps
+  nested `include` recursion (stack-overflow DoS).
+- `src/main.rs`: **(A13)** Swagger UI / OpenAPI spec are now off by default and
+  only served when `BIND_ENABLE_DOCS=true` (they are unauthenticated).
+- `deploy/rbac.yaml`: **(A10)** replaced the `system:auth-delegator` binding with a
+  purpose-built ClusterRole granting only `create tokenreviews` (drops the unused
+  `subjectaccessreviews` recon primitive).
+- `deploy/networkpolicy.yaml`: **(A14)** documented that `/metrics` shares port
+  8080 (already operator-restricted) and how to scope Prometheus scraping.
+- `docker/Dockerfile.chainguard`: **(A11)** pinned the base image to its multi-arch
+  manifest-list digest
+  `@sha256:ea9eab0adc5716fb9937ab60155a31bce9cbc8b56e6f2e21fb9af9218be195b7`
+  (OCI image index, amd64+arm64) and updated the `base.name` label to match.
+- `Cargo.toml`: added `sha2 = "0.10"` (already in the lock graph transitively) for
+  the length-independent shared-secret comparison (A15).
+- Tests: added regressions for A9 (`validate_rndc_zone_name`), A12 (weak-HMAC
+  reject / SHA-2 accept), A15 (length-independent compare), A16 (port overflow),
+  and updated the two existing algorithm tests to the SHA-2-only policy.
 
 ### Why
-These five handlers previously forwarded the raw path parameter straight to
-`rndc.{reload,zonestatus,freeze,thaw,notify}`, unlike `create_zone`/`delete_zone`
-which validate first. CodeQL flagged the pattern (`rust/path-injection` #2). The
-value reaches an RNDC control command rather than a filesystem path, but the
-missing input validation was a real gap; validating closes it consistently.
+Close the remaining RED-team findings: auth-path DoS/oracle (A7/A8), TSIG/secret
+and control-channel hardening (A9/A12/A18/A19), parser robustness (A16/A17),
+unauthenticated recon surface (A13), and cluster-privilege minimization (A10).
+A20 (`DISABLE_AUTH=true` gate) is already enforced by the existing
+`check_startup_auth_posture` startup guard on non-loopback binds.
+
+### Impact
+- [x] Breaking change (RNDC keys using `hmac-md5`/`hmac-sha1` now rejected —
+      re-key with SHA-2; multi-key `rndc.conf` without `default-key` now errors;
+      Swagger UI off unless `BIND_ENABLE_DOCS=true`)
+- [ ] Requires cluster rollout
+- [x] Config change (RBAC ClusterRole change; new `BIND_ENABLE_DOCS`)
+- [ ] Documentation only
+
+## [2026-07-01 15:10] - RED-team sweep remediation: auth confused-deputy chain, TSIG secret disclosure, deploy hardening
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/auth.rs`: **(A1)** `validate_token_with_k8s` now enforces audience binding —
+  after `status.authenticated == true` it requires a non-empty intersection
+  between the requested `spec.audiences` and the returned `status.audiences`
+  (new `audiences_compatible` helper). A valid token minted for a different
+  audience (e.g. any pod's default SA token) is now rejected instead of accepted.
+- `src/auth.rs`: **(A2)** added `TokenReviewConfig::is_authorization_restricted`,
+  `check_authorization_posture`, and the `BIND_ALLOW_ANY_SERVICEACCOUNT` env
+  (`ALLOW_ANY_SERVICE_ACCOUNT_ENV`). Empty namespace/SA allowlists = allow-all.
+- `src/main.rs`: **(A2)** startup now fails closed — with `k8s-token-review`
+  enabled and no allowlist, bindcar refuses to start unless
+  `BIND_ALLOW_ANY_SERVICEACCOUNT=true` is set (loud warning if so).
+- `src/rndc_conf_parser.rs`: **(A3)** `parse_rndc_conf_str` no longer echoes the
+  unparsed remainder (which can contain the TSIG `secret "..."`) into errors, and
+  now rejects trailing unparsed input with a position-only message instead of
+  silently dropping the malformed key (which yielded an empty-secret client).
+  `KeyField` gets a redacting `Debug`.
+- `src/rndc.rs`, `src/rndc_conf_types.rs`: **(A4)** `RndcConfig` and `KeyBlock` use
+  a manual `Debug` that prints `secret: "[REDACTED]"` so the TSIG key cannot leak
+  via `{:?}` / panic / `.context()`.
+- `src/auth_test.rs`, `src/rndc_conf_parser_tests.rs`, `src/rndc_conf_types_tests.rs`,
+  `src/rndc_test.rs`: added regression tests for each (audience-bypass cases,
+  fail-closed posture, secret-not-in-error, secret-not-in-Debug).
+- `deploy/pod-hardening.yaml`: **(A5)** added an enforced Pod Security Admission
+  `restricted` label set on the `bindy-system` Namespace (real, applyable
+  backstop vs. the commented securityContext reference). **(A6)** scoped egress so
+  no rule is `0.0.0.0/0`: DNS to kube-system, API-server 443/6443 to a
+  fail-closed ipBlock placeholder that must be set to the real endpoint.
+- `docs/src/operations/env-vars.md`: documented audience enforcement, the
+  fail-closed allowlist behavior, and `BIND_ALLOW_ANY_SERVICEACCOUNT`.
+
+### Why
+RED-team sweep found a chainable confused-deputy: TokenReview trusted
+`authenticated:true` without checking `status.audiences` (A1) and the allowlists
+defaulted to allow-all (A2), so any valid cluster SA token granted full DNS
+create/delete/modify — DNS hijack / MITM potential in a regulated environment.
+A3/A4 close TSIG credential-disclosure paths. A5/A6 turn deploy hardening from
+advisory comments into enforced controls.
+
+### Impact
+- [x] Breaking change (TokenReview deployments with empty allowlists must set an
+      allowlist or `BIND_ALLOW_ANY_SERVICEACCOUNT=true`; tokens must carry the
+      configured audience)
+- [ ] Requires cluster rollout
+- [x] Config change (new env var; deploy manifest egress must set the API-server CIDR)
+- [ ] Documentation only
+
+## [2026-07-01 17:30] - Validate zone name on all remaining {name} handlers (CodeQL #2 + sweep completion)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/zones.rs`: `reload_zone`, `zone_status`, `freeze_zone`, `thaw_zone`,
+  `notify_zone`, `retransfer_zone`, `get_zone`, and `modify_zone` now call
+  `validate_zone_name(&zone_name)` before the caller-supplied `{name}` path
+  parameter reaches the RNDC executor or is joined into a filesystem path —
+  matching the existing guard in `create_zone`/`delete_zone`. Rejected names
+  return HTTP 400 (`ApiError::InvalidRequest`); handlers that emit an operation
+  metric also record a failed op (`zone_status`/`get_zone` record none).
+- `src/zones_test.rs`: added an offline `AppState` builder and eight async tests
+  asserting each handler rejects a path-traversal zone name before any sink.
+
+### Why
+Every handler taking a `{name}` path parameter now validates it consistently.
+CodeQL flagged the freeze/thaw/notify/reload/status handlers
+(`rust/path-injection` #2) which forwarded the raw name to an RNDC control
+command. A follow-up branch security review found the same gap in
+`retransfer_zone` and — more importantly — in `get_zone` and `modify_zone`,
+which join the name into a filesystem path (`zone_dir/{name}.zone`) and call
+`.exists()`: an unvalidated `../../..` name there was a genuine arbitrary-file
+existence oracle (and `get_zone` echoed the resolved path back). The records
+handlers (`add`/`remove`/`update_record`) were already covered via
+`validate_zone_for_updates` → `validate_zone_name`.
 
 ### Impact
 - [ ] Breaking change
-- [x] API change (malformed zone names now return 400 instead of a 500 from rndc)
+- [x] API change (malformed zone names now return 400 instead of a 500 from rndc
+  or a filesystem probe)
 - [ ] Config change only
-- [x] Security hardening
+- [x] Security hardening (closes a path-traversal existence oracle in
+  `get_zone`/`modify_zone`)
 
 ## [2026-07-01 00:00] - CodeQL rust/path-injection (#1, #3): defense-in-depth barrier on readiness zone-dir probe
 

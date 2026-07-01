@@ -92,13 +92,21 @@ pub(crate) fn validate_shared_secret(token: &str) -> Result<(), String> {
 /// # Errors
 /// Returns `Err` when a shared secret is configured but does not match.
 pub(crate) fn compare_shared_secret(token: &str, expected: Option<&str>) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
     use subtle::ConstantTimeEq;
 
     let Some(expected) = expected else {
         return Ok(());
     };
 
-    let matches: bool = token.as_bytes().ct_eq(expected.as_bytes()).into();
+    // Compare fixed-size SHA-256 digests rather than the raw bytes, so the
+    // comparison time does not depend on the secret's length (A15). `ct_eq`
+    // short-circuits on unequal lengths, which would otherwise leak whether the
+    // presented token matched the secret's length; equal-length digests remove
+    // that side channel while keeping the byte comparison constant-time.
+    let token_hash = Sha256::digest(token.as_bytes());
+    let expected_hash = Sha256::digest(expected.as_bytes());
+    let matches: bool = token_hash.as_slice().ct_eq(expected_hash.as_slice()).into();
     if matches {
         Ok(())
     } else {
@@ -153,6 +161,49 @@ pub fn check_startup_auth_posture(
         "refusing to start: the API is bound to a non-loopback interface ({bind_host}) without \
          real authentication. Enable the Kubernetes TokenReview feature, set {BIND_API_TOKEN_ENV}, \
          bind to loopback, or pass --i-know-this-is-insecure to override."
+    ))
+}
+
+/// Environment variable that explicitly opts into allow-all authorization when
+/// the Kubernetes TokenReview feature is active but no namespace / service-account
+/// allowlist is configured.
+///
+/// See [`check_authorization_posture`] (A2): without an allowlist, every
+/// authenticated ServiceAccount in the cluster is authorized for full DNS
+/// control, so bindcar refuses to start in that posture unless this is set.
+pub const ALLOW_ANY_SERVICE_ACCOUNT_ENV: &str = "BIND_ALLOW_ANY_SERVICEACCOUNT";
+
+/// Decide whether bindcar may start given its TokenReview authorization posture.
+///
+/// With the Kubernetes TokenReview feature active, an empty namespace /
+/// service-account allowlist authorizes **every** authenticated ServiceAccount in
+/// the cluster — a confused-deputy where any compromised pod's token grants full
+/// create/delete/modify over DNS zones (A2). bindcar refuses to start in that
+/// posture unless the operator explicitly accepts it, mirroring the
+/// [`check_startup_auth_posture`] pattern.
+///
+/// # Arguments
+/// * `authorization_restricted` - Whether an allowlist is configured
+///   ([`TokenReviewConfig::is_authorization_restricted`]).
+/// * `allow_any_override` - Whether the operator set [`ALLOW_ANY_SERVICE_ACCOUNT_ENV`].
+///
+/// # Errors
+/// Returns `Err` with an operator-facing message when authorization is
+/// unrestricted and the override was not set.
+#[cfg(feature = "k8s-token-review")]
+pub fn check_authorization_posture(
+    authorization_restricted: bool,
+    allow_any_override: bool,
+) -> Result<(), String> {
+    if authorization_restricted || allow_any_override {
+        return Ok(());
+    }
+
+    Err(format!(
+        "refusing to start: the Kubernetes TokenReview feature is enabled but neither \
+         BIND_ALLOWED_NAMESPACES nor BIND_ALLOWED_SERVICE_ACCOUNTS is set, so ANY authenticated \
+         ServiceAccount in the cluster would be authorized for full DNS control. Configure an \
+         allowlist, or set {ALLOW_ANY_SERVICE_ACCOUNT_ENV}=true to explicitly accept allow-all."
     ))
 }
 
@@ -235,6 +286,17 @@ impl TokenReviewConfig {
         }
         self.allowed_service_accounts
             .contains(&username.to_string())
+    }
+
+    /// Returns `true` if this configuration restricts authorization to an explicit
+    /// allowlist (at least one of the namespace / service-account lists is
+    /// non-empty).
+    ///
+    /// When this returns `false` every authenticated ServiceAccount in the cluster
+    /// is authorized (allow-all) — the over-broad default that the startup guard
+    /// [`check_authorization_posture`] refuses unless explicitly overridden (A2).
+    pub fn is_authorization_restricted(&self) -> bool {
+        !self.allowed_namespaces.is_empty() || !self.allowed_service_accounts.is_empty()
     }
 
     /// Extract namespace from service account username
@@ -390,6 +452,25 @@ pub(crate) async fn build_explicit_kube_client(
     Client::try_from(config).map_err(|e| format!("failed to create Kubernetes client: {}", e))
 }
 
+/// Process-wide cached `kube::Client`, built once on first use.
+///
+/// Rebuilding the client on every request re-read the token/CA files and
+/// reconstructed the whole TLS stack, amplifying auth-path load onto the API
+/// server (A8). `kube::Client` is cheaply cloneable (an `Arc` internally), so a
+/// single shared instance is reused. A failed first init is not cached, so a
+/// transient startup error can still be retried on the next request.
+#[cfg(feature = "k8s-token-review")]
+static KUBE_CLIENT: tokio::sync::OnceCell<Client> = tokio::sync::OnceCell::const_new();
+
+/// Return the shared `kube::Client`, building it once on first call (A8).
+#[cfg(feature = "k8s-token-review")]
+async fn cached_kube_client() -> Result<Client, String> {
+    KUBE_CLIENT
+        .get_or_try_init(build_kube_client)
+        .await
+        .cloned()
+}
+
 /// Build a `kube::Client` using the resolved auth mode.
 ///
 /// Priority order:
@@ -482,14 +563,18 @@ pub async fn authenticate(
         return Err((StatusCode::UNAUTHORIZED, Json(AuthError { error: e })));
     }
 
-    // Validate token with Kubernetes TokenReview API if feature is enabled
+    // Validate token with Kubernetes TokenReview API if feature is enabled.
+    // The detailed reason (namespace/SA/api error) is logged server-side only; the
+    // client gets a single generic "Unauthorized" so it cannot distinguish
+    // "valid token, wrong namespace" from "invalid token" from "apiserver
+    // unreachable" — an authorization/identity-enumeration oracle (A7).
     #[cfg(feature = "k8s-token-review")]
     if let Err(e) = validate_token_with_k8s(token).await {
         warn!("Token validation failed: {}", e);
         return Err((
             StatusCode::UNAUTHORIZED,
             Json(AuthError {
-                error: format!("Token validation failed: {}", e),
+                error: "Unauthorized".to_string(),
             }),
         ));
     }
@@ -501,6 +586,23 @@ pub async fn authenticate(
     debug!("Token validation: basic mode (presence check only)");
 
     Ok(next.run(request).await)
+}
+
+/// Returns `true` if the audiences echoed back by a TokenReview
+/// (`status.audiences`) are compatible with the audiences bindcar requested
+/// (`spec.audiences`) — i.e. their intersection is non-empty.
+///
+/// The Kubernetes TokenReview contract states that a client which sets
+/// `spec.audiences` **must** verify that a compatible identifier is returned in
+/// `status.audiences`; otherwise it cannot tell whether the authenticator is
+/// audience-aware. Trusting `status.authenticated == true` alone (A1) lets a
+/// token minted for a *different* audience through — notably the
+/// apiserver-audience ServiceAccount token auto-mounted into every pod, which
+/// would otherwise defeat the `BIND_TOKEN_AUDIENCES` scoping entirely
+/// (confused-deputy). An empty returned set is therefore treated as incompatible.
+#[cfg(feature = "k8s-token-review")]
+pub(crate) fn audiences_compatible(requested: &[String], returned: &[String]) -> bool {
+    requested.iter().any(|a| returned.contains(a))
 }
 
 /// Validate a token using Kubernetes TokenReview API
@@ -525,8 +627,9 @@ pub(crate) async fn validate_token_with_k8s(token: &str) -> Result<(), String> {
     // Load security configuration
     let config = TokenReviewConfig::from_env();
 
-    // Create Kubernetes client using the resolved auth mode.
-    let client = build_kube_client().await?;
+    // Reuse the process-wide cached client (built once) rather than rebuilding
+    // the TLS stack on every request (A8).
+    let client = cached_kube_client().await?;
 
     // Create TokenReview API client
     let token_reviews: Api<TokenReview> = Api::all(client);
@@ -567,6 +670,20 @@ pub(crate) async fn validate_token_with_k8s(token: &str) -> Result<(), String> {
             .unwrap_or_else(|| "Token not authenticated".to_string());
         warn!("Token authentication failed: {}", error_msg);
         return Err(error_msg);
+    }
+
+    // Enforce audience binding (A1). Because we set `spec.audiences`, the
+    // TokenReview contract requires confirming that a compatible audience is
+    // echoed back in `status.audiences`; relying on `authenticated == true` alone
+    // would accept a token minted for another audience (e.g. any pod's default
+    // ServiceAccount token) and silently defeat BIND_TOKEN_AUDIENCES scoping.
+    let returned_audiences = status.audiences.clone().unwrap_or_default();
+    if !audiences_compatible(&config.audiences, &returned_audiences) {
+        warn!(
+            "TokenReview returned incompatible audiences (requested={:?}, returned={:?})",
+            config.audiences, returned_audiences
+        );
+        return Err("Token audience is not valid for bindcar".to_string());
     }
 
     debug!("Token authenticated successfully");

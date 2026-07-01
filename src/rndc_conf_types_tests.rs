@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn test_key_block_debug_redacts_secret() {
+    // A4 regression: `{:?}` on a KeyBlock must never print the plaintext secret.
+    let key = KeyBlock::new(
+        "rndc-key".to_string(),
+        "hmac-sha256".to_string(),
+        "SUPERSECRETBASE64VALUE==".to_string(),
+    );
+    let debug = format!("{:?}", key);
+    assert!(
+        !debug.contains("SUPERSECRETBASE64VALUE"),
+        "TSIG secret leaked via Debug: {debug}"
+    );
+    assert!(debug.contains("[REDACTED]"), "expected redaction: {debug}");
+}
+
+#[test]
 fn test_key_block_serialization() {
     let key = KeyBlock::new(
         "rndc-key".to_string(),

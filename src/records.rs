@@ -170,19 +170,40 @@ pub(crate) fn validate_record_type(record_type: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Validate a record name, rejecting control characters.
+/// Validate a record name against the strict DNS owner-name character set.
 ///
-/// Record names are assembled into newline-delimited nsupdate command scripts,
-/// so a `\n`, `\r`, or NUL in the name could inject additional update commands
-/// (B-2). Legitimate DNS names never contain control characters.
+/// Record names flow into two sinks with different injection surfaces:
+/// * newline-delimited nsupdate command scripts (`add`/`update`/`remove`), where
+///   a `\n`/`\r`/NUL would inject additional update commands (B-2); and
+/// * the **start of a zone-file line** in [`ZoneConfig::to_zone_file`] for records
+///   embedded in a `create_zone` request, where a leading `$` plus whitespace/`;`
+///   would plant a master-file directive such as `$INCLUDE` (arbitrary file read
+///   into the zone) or `$GENERATE` (resource exhaustion) — even with no control
+///   character present (C-2 hardening).
+///
+/// Rejecting anything outside `[A-Za-z0-9._-]` plus the DNS name specials `@`
+/// (apex), `*` (wildcard), and `_` (underscore labels, e.g. `_dmarc`,
+/// `_sip._tcp`) closes both surfaces: no whitespace, `$`, `;`, quote, or paren
+/// can reach either sink. Master-file names that would legitimately need other
+/// bytes require backslash escaping, which this API does not emit, so they are
+/// intentionally unsupported.
 ///
 /// # Errors
-/// Returns [`ApiError::InvalidRecord`] (HTTP 400) if the name contains a control
-/// character.
+/// Returns [`ApiError::InvalidRecord`] (HTTP 400) if the name is empty or contains
+/// any character outside the permitted set.
 pub(crate) fn validate_record_name(name: &str) -> Result<(), ApiError> {
-    if let Some(bad) = name.chars().find(|c| c.is_control()) {
+    if name.is_empty() {
+        return Err(ApiError::InvalidRecord(
+            "Record name cannot be empty".to_string(),
+        ));
+    }
+
+    if let Some(bad) = name
+        .chars()
+        .find(|&c| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '@' | '*')))
+    {
         return Err(ApiError::InvalidRecord(format!(
-            "Record name contains illegal control character: {:?}",
+            "Record name contains illegal character: {:?} (allowed: A-Z a-z 0-9 . - _ @ *)",
             bad
         )));
     }

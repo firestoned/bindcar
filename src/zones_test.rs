@@ -1301,6 +1301,37 @@ fn test_validate_zone_config_content_rejects_injection_via_record_name() {
 }
 
 #[test]
+fn test_validate_zone_config_content_rejects_include_directive_without_control_char() {
+    // The record name is the first token on its zone-file line, so a directive
+    // planted with spaces + `;` (no newline, no control char) must be rejected.
+    let mut config = clean_zone_config();
+    config.records[0].name = "$INCLUDE /etc/bind/rndc.key ;".to_string();
+    assert!(
+        validate_zone_config_content(&config).is_err(),
+        "control-char-free $INCLUDE via record name must be rejected"
+    );
+
+    // $GENERATE resource-exhaustion via a control-char-free record name.
+    let mut config = clean_zone_config();
+    config.records[0].name = "$GENERATE 1-16777215 host$".to_string();
+    assert!(validate_zone_config_content(&config).is_err());
+}
+
+#[test]
+fn test_validate_zone_config_content_rejects_directive_via_glue_hostname() {
+    // Glue hostnames (nameServerIps keys) are also rendered at line start.
+    let mut config = clean_zone_config();
+    config.name_server_ips.insert(
+        "$INCLUDE /etc/shadow ;".to_string(),
+        "192.0.2.1".to_string(),
+    );
+    assert!(
+        validate_zone_config_content(&config).is_err(),
+        "control-char-free $INCLUDE via glue hostname must be rejected"
+    );
+}
+
+#[test]
 fn test_validate_zone_config_content_rejects_injection_via_soa_and_ns() {
     // SOA primaryNs / adminEmail.
     let mut config = clean_zone_config();
@@ -1383,6 +1414,51 @@ async fn test_notify_zone_rejects_invalid_zone_name() {
     assert!(
         matches!(result, Err(ApiError::InvalidRequest(_))),
         "notify_zone must reject an invalid zone name before touching rndc"
+    );
+}
+
+#[tokio::test]
+async fn test_retransfer_zone_rejects_invalid_zone_name() {
+    let state = offline_app_state();
+    let result = retransfer_zone(State(state), Path(MALICIOUS_ZONE_NAME.to_string())).await;
+    assert!(
+        matches!(result, Err(ApiError::InvalidRequest(_))),
+        "retransfer_zone must reject an invalid zone name before touching rndc"
+    );
+}
+
+#[tokio::test]
+async fn test_get_zone_rejects_invalid_zone_name() {
+    // get_zone joins the name into a filesystem path (zone_dir/{name}.zone), so
+    // an unvalidated traversal name is a path-traversal existence oracle. The
+    // name must be rejected before the path is ever constructed or probed.
+    let state = offline_app_state();
+    let result = get_zone(State(state), Path(MALICIOUS_ZONE_NAME.to_string())).await;
+    assert!(
+        matches!(result, Err(ApiError::InvalidRequest(_))),
+        "get_zone must reject an invalid zone name before building a filesystem path"
+    );
+}
+
+#[tokio::test]
+async fn test_modify_zone_rejects_invalid_zone_name() {
+    // modify_zone also joins the name into a filesystem path and forwards it to
+    // rndc; validation must run before either, even when the body is well-formed.
+    let state = offline_app_state();
+    let request = ModifyZoneRequest {
+        also_notify: Some(vec!["192.0.2.1".to_string()]),
+        allow_transfer: None,
+        allow_update: None,
+    };
+    let result = modify_zone(
+        State(state),
+        Path(MALICIOUS_ZONE_NAME.to_string()),
+        axum::Json(request),
+    )
+    .await;
+    assert!(
+        matches!(result, Err(ApiError::InvalidRequest(_))),
+        "modify_zone must reject an invalid zone name before building a filesystem path"
     );
 }
 

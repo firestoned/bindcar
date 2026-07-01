@@ -420,9 +420,103 @@ mod kube_client_builder_tests {
 // Kubernetes TokenReview tests (only when feature is enabled)
 #[cfg(feature = "k8s-token-review")]
 mod k8s_token_review_tests {
-    use crate::auth::{validate_token_with_k8s, TokenReviewConfig};
+    use crate::auth::{
+        audiences_compatible, check_authorization_posture, validate_token_with_k8s,
+        TokenReviewConfig,
+    };
     use serial_test::serial;
     use std::env;
+
+    // ---- A1: audience binding (status.audiences) ----
+
+    #[test]
+    fn test_audiences_compatible_exact_match() {
+        let requested = vec!["bindcar".to_string()];
+        let returned = vec!["bindcar".to_string()];
+        assert!(audiences_compatible(&requested, &returned));
+    }
+
+    #[test]
+    fn test_audiences_compatible_intersection() {
+        let requested = vec!["bindcar".to_string(), "https://bindcar.svc".to_string()];
+        let returned = vec!["https://bindcar.svc".to_string()];
+        assert!(audiences_compatible(&requested, &returned));
+    }
+
+    #[test]
+    fn test_audiences_incompatible_empty_returned() {
+        // The A1 exploit case: apiserver authenticates a valid token but echoes
+        // no compatible audience. Must be rejected, not accepted.
+        let requested = vec!["bindcar".to_string()];
+        let returned: Vec<String> = vec![];
+        assert!(!audiences_compatible(&requested, &returned));
+    }
+
+    #[test]
+    fn test_audiences_incompatible_apiserver_audience() {
+        // A pod's default SA token carries the apiserver audience, never "bindcar".
+        let requested = vec!["bindcar".to_string()];
+        let returned = vec!["https://kubernetes.default.svc".to_string()];
+        assert!(!audiences_compatible(&requested, &returned));
+    }
+
+    // ---- A2: fail-closed authorization posture ----
+
+    #[test]
+    fn test_authorization_posture_rejects_allow_all_default() {
+        // No allowlist + no override = allow-all: must refuse to start.
+        assert!(check_authorization_posture(false, false).is_err());
+    }
+
+    #[test]
+    fn test_authorization_posture_allows_restricted() {
+        assert!(check_authorization_posture(true, false).is_ok());
+    }
+
+    #[test]
+    fn test_authorization_posture_allows_explicit_override() {
+        assert!(check_authorization_posture(false, true).is_ok());
+    }
+
+    #[test]
+    #[serial]
+    fn test_is_authorization_restricted_empty_is_unrestricted() {
+        env::remove_var("BIND_TOKEN_AUDIENCES");
+        env::remove_var("BIND_ALLOWED_NAMESPACES");
+        env::remove_var("BIND_ALLOWED_SERVICE_ACCOUNTS");
+
+        let config = TokenReviewConfig::from_env();
+        assert!(!config.is_authorization_restricted());
+    }
+
+    #[test]
+    #[serial]
+    fn test_is_authorization_restricted_with_namespace() {
+        env::remove_var("BIND_TOKEN_AUDIENCES");
+        env::set_var("BIND_ALLOWED_NAMESPACES", "dns-system");
+        env::remove_var("BIND_ALLOWED_SERVICE_ACCOUNTS");
+
+        let config = TokenReviewConfig::from_env();
+        assert!(config.is_authorization_restricted());
+
+        env::remove_var("BIND_ALLOWED_NAMESPACES");
+    }
+
+    #[test]
+    #[serial]
+    fn test_is_authorization_restricted_with_service_account() {
+        env::remove_var("BIND_TOKEN_AUDIENCES");
+        env::remove_var("BIND_ALLOWED_NAMESPACES");
+        env::set_var(
+            "BIND_ALLOWED_SERVICE_ACCOUNTS",
+            "system:serviceaccount:dns-system:external-dns",
+        );
+
+        let config = TokenReviewConfig::from_env();
+        assert!(config.is_authorization_restricted());
+
+        env::remove_var("BIND_ALLOWED_SERVICE_ACCOUNTS");
+    }
 
     #[tokio::test]
     #[serial]
@@ -751,6 +845,17 @@ mod b4_auth_posture_tests {
         assert!(compare_shared_secret("valid-token", Some("s3cret-token")).is_err());
         assert!(compare_shared_secret("", Some("s3cret-token")).is_err());
         assert!(compare_shared_secret("s3cret-token-extra", Some("s3cret-token")).is_err());
+    }
+
+    #[test]
+    fn test_compare_shared_secret_length_independent() {
+        // A15: comparison is over fixed-size SHA-256 digests, so tokens of very
+        // different lengths still compare correctly (exact match passes, any
+        // mismatch fails) without a length-based short-circuit.
+        let secret = "a-reasonably-long-shared-secret-value";
+        assert!(compare_shared_secret(secret, Some(secret)).is_ok());
+        assert!(compare_shared_secret("x", Some(secret)).is_err());
+        assert!(compare_shared_secret(&"z".repeat(4096), Some(secret)).is_err());
     }
 
     #[test]

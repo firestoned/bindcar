@@ -44,6 +44,30 @@
 #   volumeMounts: [{ name: tmp, mountPath: /tmp }]
 #   volumes:      [{ name: tmp, emptyDir: { medium: Memory } }]
 ---
+# ENFORCED control (A5). The securityContext block above is a reference an
+# operator must transcribe into the bindy pod template — nothing stops a pod that
+# omits it. Pod Security Admission is the applyable backstop: with these labels
+# the API server REJECTS any pod admitted to bindy-system that is not
+# "restricted" (non-root, no privilege escalation, seccomp RuntimeDefault, all
+# capabilities dropped). "restricted" still permits adding back only
+# NET_BIND_SERVICE, so the co-located `named` container can bind port 53.
+#
+# If the bindy operator owns/creates this namespace, apply these labels to ITS
+# manifest instead of shipping a competing Namespace object, or run:
+#   kubectl label ns bindy-system \
+#     pod-security.kubernetes.io/enforce=restricted --overwrite
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bindy-system
+  labels:
+    app.kubernetes.io/name: bindcar
+    app.kubernetes.io/component: pod-security
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
 # Egress companion to deploy/networkpolicy.yaml (N-1). The ingress policy is
 # Ingress-only, which leaves egress wide open — a compromised pod could exfiltrate
 # the SA token or zone data anywhere. This restricts egress to what bindcar/named
@@ -65,15 +89,32 @@ spec:
   policyTypes:
     - Egress
   egress:
-    # DNS resolution (cluster DNS + upstream).
-    - ports:
+    # DNS resolution — scoped to the in-cluster DNS service (CoreDNS/kube-dns in
+    # kube-system). This removes the "DNS to anywhere" tunneling/exfil channel
+    # (A6). If `named` must reach EXTERNAL zone-transfer peers or upstream
+    # forwarders on 53, add their explicit CIDRs to the `to:` list below — do NOT
+    # drop the selector to make it open again.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+        # - ipBlock: { cidr: <secondary-or-forwarder-CIDR> }  # zone transfers / forwarding
+      ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
           port: 53
-    # Kubernetes API server for TokenReview. Replace with your API server
-    # endpoint/CIDR (or a namespaceSelector for the kube-apiserver service).
-    - ports:
+    # Kubernetes API server for TokenReview. This MUST be scoped to your API
+    # server endpoint. The placeholder below is intentionally restrictive
+    # (fail-closed): left unedited, TokenReview egress is denied and auth fails
+    # loudly, rather than the pod being able to reach ANY 443/6443 host on the
+    # network — which was the SA-token exfil / lateral-movement channel (A6).
+    # Replace the CIDR with your kube-apiserver address (or use a
+    # namespaceSelector for a private-endpoint service).
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.1/32 # REPLACE: kube-apiserver endpoint/CIDR
+      ports:
         - protocol: TCP
           port: 443
         - protocol: TCP

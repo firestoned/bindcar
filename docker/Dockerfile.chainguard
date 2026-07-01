@@ -29,7 +29,14 @@
 # to match the target platform (amd64 or arm64).
 
 # Runtime stage - Chainguard glibc-dynamic (zero CVEs)
-FROM cgr.dev/chainguard/glibc-dynamic:latest
+# SECURITY (A11): pinned to the MULTI-ARCH manifest-list digest (OCI image index,
+# linux/amd64 + linux/arm64), NOT a platform-specific digest — this preserves
+# reproducibility/SLSA provenance and closes the supply-chain substitution window
+# of the mutable `:latest` tag, matching the sibling docker/Dockerfile.
+# NOTE: Chainguard rebuilds :latest daily for CVE fixes; pinning freezes those
+# until the digest is bumped, so Dependabot's docker ecosystem must track it.
+# Re-resolve with: docker buildx imagetools inspect <image> --raw | sha256sum
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:ea9eab0adc5716fb9937ab60155a31bce9cbc8b56e6f2e21fb9af9218be195b7
 
 ARG TARGETARCH
 ARG VERSION=0.1.0
@@ -38,7 +45,7 @@ LABEL org.opencontainers.image.source="https://github.com/firestoned/bindcar"
 LABEL org.opencontainers.image.description="BIND9 RNDC API Server (Chainguard - Zero CVEs)"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.version="${VERSION}"
-LABEL org.opencontainers.image.base.name="cgr.dev/chainguard/glibc-dynamic:latest"
+LABEL org.opencontainers.image.base.name="cgr.dev/chainguard/glibc-dynamic:latest@sha256:ea9eab0adc5716fb9937ab60155a31bce9cbc8b56e6f2e21fb9af9218be195b7"
 
 # Copy the pre-built binary for the target architecture
 # TARGETARCH is automatically set by BuildKit (amd64 or arm64)
