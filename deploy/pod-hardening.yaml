@@ -1,0 +1,80 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: MIT
+#
+# Pod/container hardening reference for the bindcar sidecar (K-3) plus an egress
+# companion to the ingress NetworkPolicy (N-1).
+#
+# bindcar runs as a sidecar inside the BIND9 pods created by the bindy operator
+# and serves a privileged mutate API. Without a runtime securityContext, a single
+# RCE in the HTTP handler lands in a container that can read its auto-mounted
+# ServiceAccount token and pivot. These controls are independent defense-in-depth
+# layers; apply them to the bindcar container in the bindy pod template.
+#
+# This file is REFERENCE configuration: the snippet below shows the exact fields
+# to set on the bindy-managed pod (it is not directly applyable on its own).
+---
+# --- Container securityContext (apply to the bindcar sidecar container) -------
+# containers:
+#   - name: bindcar
+#     securityContext:
+#       allowPrivilegeEscalation: false      # no setuid escalation
+#       readOnlyRootFilesystem: true         # immutable rootfs; mount an
+#                                            #   emptyDir at $TMPDIR for the
+#                                            #   0600 TSIG key file (nsupdate -k)
+#       runAsNonRoot: true
+#       runAsUser: 65532                     # matches the distroless/chainguard image
+#       capabilities:
+#         drop: ["ALL"]                      # bindcar needs no Linux capabilities
+#       seccompProfile:
+#         type: RuntimeDefault
+#
+# --- Pod-level settings -------------------------------------------------------
+# spec:
+#   serviceAccountName: bindcar              # the least-privilege SA (deploy/rbac.yaml)
+#   automountServiceAccountToken: false      # withhold the token unless TokenReview
+#                                            #   is in use; in drone/explicit mode
+#                                            #   bindcar needs no cluster token
+#   securityContext:
+#     seccompProfile:
+#       type: RuntimeDefault
+#
+# NOTE: if readOnlyRootFilesystem is true, give bindcar a writable $TMPDIR so the
+# TSIG key file can be created (it is 0600 and removed immediately after nsupdate
+# exits). Mount a small tmpfs/emptyDir and set TMPDIR to it:
+#   volumeMounts: [{ name: tmp, mountPath: /tmp }]
+#   volumes:      [{ name: tmp, emptyDir: { medium: Memory } }]
+---
+# Egress companion to deploy/networkpolicy.yaml (N-1). The ingress policy is
+# Ingress-only, which leaves egress wide open — a compromised pod could exfiltrate
+# the SA token or zone data anywhere. This restricts egress to what bindcar/named
+# actually need: DNS resolution, the Kubernetes API server (TokenReview), and the
+# RNDC/zone-transfer peers. Tighten the CIDRs/selectors to your environment.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bindcar-egress-restrict
+  namespace: bindy-system
+  labels:
+    app.kubernetes.io/name: bindcar
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: bind9
+      app.kubernetes.io/part-of: bindy
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution (cluster DNS + upstream).
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Kubernetes API server for TokenReview. Replace with your API server
+    # endpoint/CIDR (or a namespaceSelector for the kube-apiserver service).
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443

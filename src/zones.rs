@@ -139,6 +139,105 @@ pub(crate) fn validate_rndc_identifier(field: &str, value: &str) -> Result<(), A
     Ok(())
 }
 
+/// Validate that every entry in an IP-address list parses as an [`IpAddr`].
+///
+/// `create_zone` interpolates these values directly into the `rndc addzone`
+/// configuration literal — `primaries {{ .. }}`, `also-notify {{ .. }}`,
+/// `allow-transfer {{ .. }}`. Without this check an entry such as
+/// `"1.2.3.4; }; zone \"x\" { type primary; ..."` would close the brace block
+/// and inject arbitrary configuration into the running `named` (B-8 / C-1).
+/// Requiring a strict `IpAddr` parse rejects every metacharacter (`}`, `{`,
+/// `;`, `"`, whitespace) since none can appear in a valid IPv4/IPv6 literal.
+///
+/// [`IpAddr`]: std::net::IpAddr
+///
+/// # Errors
+/// Returns [`ApiError::InvalidRequest`] (HTTP 400) if any entry is not a valid
+/// IP address.
+pub(crate) fn validate_ip_list(field: &str, ips: &[String]) -> Result<(), ApiError> {
+    for ip in ips {
+        if ip.parse::<std::net::IpAddr>().is_err() {
+            return Err(ApiError::InvalidRequest(format!(
+                "{} contains an invalid IP address: {:?}",
+                field, ip
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Reject a zone-file field containing a control character.
+///
+/// [`ZoneConfig::to_zone_file`] builds the zone file by directly interpolating
+/// these fields into newline-delimited records, so a `\n`, `\r`, or NUL would
+/// let an attacker emit additional zone-file lines — including directives such
+/// as `$INCLUDE` (which reads an arbitrary file into the zone) or `$GENERATE`
+/// (resource exhaustion) — poisoning or disclosing data (B-8 / C-2).
+/// Legitimate DNS names, emails, and record data never contain control
+/// characters.
+///
+/// # Errors
+/// Returns [`ApiError::InvalidRequest`] (HTTP 400) if `value` contains a control
+/// character.
+fn reject_zone_file_control_chars(field: &str, value: &str) -> Result<(), ApiError> {
+    if let Some(bad) = value.chars().find(|c| c.is_control()) {
+        return Err(ApiError::InvalidRequest(format!(
+            "{} contains an illegal control character: {:?}",
+            field, bad
+        )));
+    }
+
+    Ok(())
+}
+
+/// Validate the structured zone configuration before it is rendered into a zone
+/// file by [`ZoneConfig::to_zone_file`].
+///
+/// Every field that `to_zone_file` interpolates is checked here so that no
+/// user-controlled value can inject extra zone-file lines or directives (B-8 /
+/// C-2). This closes the gap where records embedded in a `create_zone` request
+/// reached the zone file without passing the per-request validation applied by
+/// the add/update/remove-record endpoints.
+///
+/// - SOA `primary_ns` / `admin_email`, name-server names, and glue hostnames are
+///   rejected if they contain control characters.
+/// - Glue record IPs must parse as an [`IpAddr`](std::net::IpAddr).
+/// - Each embedded record is held to the same rules as the add-record endpoint
+///   ([`validate_record_type`](crate::records::validate_record_type),
+///   [`validate_record_name`](crate::records::validate_record_name),
+///   [`validate_record_value`](crate::records::validate_record_value)).
+///
+/// # Errors
+/// Returns [`ApiError::InvalidRequest`] or [`ApiError::InvalidRecord`] (both
+/// HTTP 400) for the first field that fails validation.
+pub(crate) fn validate_zone_config_content(config: &ZoneConfig) -> Result<(), ApiError> {
+    reject_zone_file_control_chars("soa.primaryNs", &config.soa.primary_ns)?;
+    reject_zone_file_control_chars("soa.adminEmail", &config.soa.admin_email)?;
+
+    for ns in &config.name_servers {
+        reject_zone_file_control_chars("nameServers entry", ns)?;
+    }
+
+    for (host, ip) in &config.name_server_ips {
+        reject_zone_file_control_chars("nameServerIps key", host)?;
+        if ip.parse::<std::net::IpAddr>().is_err() {
+            return Err(ApiError::InvalidRequest(format!(
+                "nameServerIps[{:?}] is not a valid IP address: {:?}",
+                host, ip
+            )));
+        }
+    }
+
+    for record in &config.records {
+        crate::records::validate_record_type(&record.record_type)?;
+        crate::records::validate_record_name(&record.name)?;
+        crate::records::validate_record_value(&record.record_type, &record.value)?;
+    }
+
+    Ok(())
+}
+
 /// Resolve and validate the configured zone directory at startup.
 ///
 /// The zone directory comes from the `BIND_ZONE_DIR` environment variable, which
@@ -185,6 +284,42 @@ pub fn resolve_zone_dir(raw_dir: &str) -> Result<String, ApiError> {
             raw_dir
         ))
     })
+}
+
+/// Returns `true` if `path` is an absolute, fully-normalized directory path.
+///
+/// "Fully-normalized" means the path is absolute and contains no `..`
+/// (parent-directory) or `.` (current-directory) components — exactly the shape
+/// that [`resolve_zone_dir`] guarantees at startup.
+///
+/// # Why this exists
+///
+/// The configured zone directory is canonicalized once at startup, but it is
+/// read back inside HTTP handlers through the axum `State` extractor. CodeQL
+/// (`rust/path-injection`) models any value reaching a handler via `State` as
+/// untrusted, so it re-taints the already-safe path where it feeds a filesystem
+/// sink (e.g. `tokio::fs::metadata` in the readiness probe). Calling this guard
+/// immediately before such a sink is a defense-in-depth barrier: it re-asserts
+/// the [`resolve_zone_dir`] invariant at the point of use and rejects any path
+/// that is unexpectedly relative or contains traversal components, rather than
+/// touching an unintended location on the filesystem.
+///
+/// # Arguments
+/// * `path` - The configured zone directory path to check.
+///
+/// # Returns
+/// `true` if the path is absolute and free of `..`/`.` components, else `false`.
+pub fn is_normalized_zone_dir(path: &str) -> bool {
+    use std::path::{Component, Path};
+
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return false;
+    }
+
+    !path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
 }
 
 /// SOA (Start of Authority) record configuration
@@ -542,6 +677,34 @@ pub async fn create_zone(
         }
     }
 
+    // Validate the IP-list fields before they are interpolated into the rndc
+    // addzone config literal (C-1): a non-IP entry like "1.2.3.4; }; <config>"
+    // would otherwise break out of the brace block and inject arbitrary BIND
+    // configuration into the running named.
+    for (field, list) in [
+        ("primaries", &request.zone_config.primaries),
+        ("also-notify", &request.zone_config.also_notify),
+        ("allow-transfer", &request.zone_config.allow_transfer),
+    ] {
+        if let Some(ips) = list {
+            if let Err(e) = validate_ip_list(field, ips) {
+                metrics::record_zone_operation("create", false);
+                return Err(e);
+            }
+        }
+    }
+
+    // Validate the zone-file content fields before rendering (C-2). Records
+    // embedded in the create request never passed the per-request validation
+    // applied by the add-record endpoint, so a control character in any field
+    // could inject extra zone-file lines / directives ($INCLUDE, $GENERATE).
+    if request.zone_type == ZONE_TYPE_PRIMARY {
+        if let Err(e) = validate_zone_config_content(&request.zone_config) {
+            metrics::record_zone_operation("create", false);
+            return Err(e);
+        }
+    }
+
     // Generate zone file content from structured configuration (only for primary zones)
     let zone_content = if request.zone_type == ZONE_TYPE_PRIMARY {
         request.zone_config.to_zone_file()
@@ -782,6 +945,13 @@ pub async fn reload_zone(
 ) -> Result<Json<ZoneResponse>, ApiError> {
     info!("Reloading zone: {}", zone_name);
 
+    // Validate the caller-supplied zone name before it reaches rndc (defense
+    // against rndc command / path injection via the {name} path parameter).
+    if let Err(e) = validate_zone_name(&zone_name) {
+        metrics::record_zone_operation("reload", false);
+        return Err(e);
+    }
+
     let output = state.rndc.reload(&zone_name).await.map_err(|e| {
         error!("RNDC reload failed for {}: {}", zone_name, e);
         metrics::record_zone_operation("reload", false);
@@ -818,6 +988,10 @@ pub async fn zone_status(
 ) -> Result<Json<ZoneResponse>, ApiError> {
     info!("Getting status for zone: {}", zone_name);
 
+    // Validate the caller-supplied zone name before it reaches rndc (defense
+    // against rndc command / path injection via the {name} path parameter).
+    validate_zone_name(&zone_name)?;
+
     let output = state.rndc.zonestatus(&zone_name).await.map_err(|e| {
         error!("RNDC zonestatus failed for {}: {}", zone_name, e);
         if e.to_string().contains("not found") {
@@ -852,6 +1026,13 @@ pub async fn freeze_zone(
     Path(zone_name): Path<String>,
 ) -> Result<Json<ZoneResponse>, ApiError> {
     info!("Freezing zone: {}", zone_name);
+
+    // Validate the caller-supplied zone name before it reaches rndc (defense
+    // against rndc command / path injection via the {name} path parameter).
+    if let Err(e) = validate_zone_name(&zone_name) {
+        metrics::record_zone_operation("freeze", false);
+        return Err(e);
+    }
 
     let output = state.rndc.freeze(&zone_name).await.map_err(|e| {
         error!("RNDC freeze failed for {}: {}", zone_name, e);
@@ -888,6 +1069,13 @@ pub async fn thaw_zone(
 ) -> Result<Json<ZoneResponse>, ApiError> {
     info!("Thawing zone: {}", zone_name);
 
+    // Validate the caller-supplied zone name before it reaches rndc (defense
+    // against rndc command / path injection via the {name} path parameter).
+    if let Err(e) = validate_zone_name(&zone_name) {
+        metrics::record_zone_operation("thaw", false);
+        return Err(e);
+    }
+
     let output = state.rndc.thaw(&zone_name).await.map_err(|e| {
         error!("RNDC thaw failed for {}: {}", zone_name, e);
         metrics::record_zone_operation("thaw", false);
@@ -922,6 +1110,13 @@ pub async fn notify_zone(
     Path(zone_name): Path<String>,
 ) -> Result<Json<ZoneResponse>, ApiError> {
     info!("Notifying secondaries for zone: {}", zone_name);
+
+    // Validate the caller-supplied zone name before it reaches rndc (defense
+    // against rndc command / path injection via the {name} path parameter).
+    if let Err(e) = validate_zone_name(&zone_name) {
+        metrics::record_zone_operation("notify", false);
+        return Err(e);
+    }
 
     let output = state.rndc.notify(&zone_name).await.map_err(|e| {
         error!("RNDC notify failed for {}: {}", zone_name, e);

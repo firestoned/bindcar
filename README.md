@@ -126,6 +126,12 @@ Environment variables:
 - `RATE_LIMIT_PERIOD_SECS` - Rate limit period in seconds (default: `60`)
 - `RATE_LIMIT_BURST` - Burst size for rate limiting (default: `10`)
 
+> **Note:** rate limits are keyed on the real TCP peer IP, **not** the
+> `X-Forwarded-For`/`X-Real-IP`/`Forwarded` headers (which a client can forge to
+> evade the limit or exhaust another client's bucket). bindcar is reached
+> directly by the operator's pods, so it must not run behind an untrusted proxy
+> that rewrites the peer address.
+
 ### RNDC Configuration
 
 bindcar can be configured in two ways:
@@ -230,9 +236,13 @@ env:
 
 Because of the startup guard, `DISABLE_AUTH=true` on a non-loopback bind also requires
 `--i-know-this-is-insecure` (or `BINDCAR_ALLOW_INSECURE_AUTH=true`) — an explicit
-acknowledgement that you are relying on infrastructure-level controls. See also
-[`deploy/networkpolicy.yaml`](deploy/networkpolicy.yaml), which restricts the API to the
-bindy operator at the network layer.
+acknowledgement that you are relying on infrastructure-level controls.
+
+For defense-in-depth, the `deploy/` directory ships:
+
+- [`deploy/networkpolicy.yaml`](deploy/networkpolicy.yaml) — restricts the API (ingress) to the bindy operator.
+- [`deploy/rbac.yaml`](deploy/rbac.yaml) — least-privilege RBAC (only `system:auth-delegator` for TokenReview).
+- [`deploy/pod-hardening.yaml`](deploy/pod-hardening.yaml) — pod/container `securityContext` reference (drop all caps, read-only rootfs, non-root, no token auto-mount) plus an egress NetworkPolicy.
 
 See [Kubernetes TokenReview Validation](https://firestoned.github.io/bindcar/developer-guide/k8s-token-validation.html) for detailed configuration.
 

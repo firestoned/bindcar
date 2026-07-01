@@ -37,7 +37,7 @@ use bindcar::{
     zones,
 };
 use tower_governor::{
-    governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer,
+    governor::GovernorConfigBuilder, key_extractor::PeerIpKeyExtractor, GovernorLayer,
 };
 
 /// OpenAPI documentation structure
@@ -118,6 +118,17 @@ async fn health_check() -> Json<HealthResponse> {
     })
 }
 
+/// Map a readiness sub-check outcome to a non-sensitive status token.
+///
+/// `/health`, `/ready`, and `/metrics` are intentionally unauthenticated (for
+/// kubelet probes and Prometheus scraping), so their responses must never carry
+/// internal detail. This emits only `"<name>: ok"` / `"<name>: error"` — the
+/// underlying path or backend error text is logged server-side instead, never
+/// returned to the caller.
+fn ready_check_label(name: &str, ok: bool) -> String {
+    format!("{}: {}", name, if ok { "ok" } else { "error" })
+}
+
 /// Metrics endpoint for Prometheus scraping
 async fn metrics_handler() -> Response {
     match metrics::gather_metrics() {
@@ -127,14 +138,19 @@ async fn metrics_handler() -> Response {
             metrics_text,
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("Failed to gather metrics: {}", e),
-                details: None,
-            }),
-        )
-            .into_response(),
+        Err(e) => {
+            // Log the detail; return a generic message (this endpoint is
+            // unauthenticated, so the body must not leak internals).
+            error!("failed to gather metrics: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to gather metrics".to_string(),
+                    details: None,
+                }),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -143,30 +159,50 @@ async fn ready_check(State(state): State<AppState>) -> Json<ReadyResponse> {
     let mut checks = Vec::new();
     let mut ready = true;
 
-    // Check if zone directory is writable
-    match tokio::fs::metadata(&state.zone_dir).await {
-        Ok(metadata) => {
-            if !metadata.is_dir() {
-                ready = false;
-                checks.push(format!("zone_dir_not_directory: {}", state.zone_dir));
-            } else {
-                checks.push(format!("zone_dir_accessible: {}", state.zone_dir));
+    // Check the zone directory. The response carries only ok/error; the path and
+    // any IO error are logged server-side, never returned (the endpoint is
+    // unauthenticated and must not disclose the filesystem layout).
+    //
+    // Defense-in-depth barrier: `zone_dir` is canonicalized once at startup
+    // (`zones::resolve_zone_dir`), but it reaches this handler through the axum
+    // `State` extractor, which static analysis models as untrusted. Re-assert the
+    // startup invariant (absolute, no `..`/`.` components) immediately before the
+    // filesystem sink so we never `metadata()` an unexpected path.
+    let zone_dir_ok = if !zones::is_normalized_zone_dir(&state.zone_dir) {
+        warn!(
+            "zone directory {:?} is not a normalized absolute path; refusing to probe it",
+            state.zone_dir
+        );
+        false
+    } else {
+        match tokio::fs::metadata(&state.zone_dir).await {
+            Ok(metadata) => {
+                if metadata.is_dir() {
+                    true
+                } else {
+                    warn!("zone directory {:?} is not a directory", state.zone_dir);
+                    false
+                }
+            }
+            Err(e) => {
+                warn!("zone directory {:?} not accessible: {}", state.zone_dir, e);
+                false
             }
         }
-        Err(e) => {
-            ready = false;
-            checks.push(format!("zone_dir_error: {}", e));
-        }
-    }
+    };
+    ready &= zone_dir_ok;
+    checks.push(ready_check_label("zone_dir", zone_dir_ok));
 
-    // Check if rndc is available
-    if let Err(e) = state.rndc.status().await {
-        warn!("RNDC not ready: {}", e);
-        ready = false;
-        checks.push(format!("rndc_error: {}", e));
-    } else {
-        checks.push("rndc_available: true".to_string());
-    }
+    // Check if rndc is available. The backend error is logged, not returned.
+    let rndc_ok = match state.rndc.status().await {
+        Ok(_) => true,
+        Err(e) => {
+            warn!("RNDC not ready: {}", e);
+            false
+        }
+    };
+    ready &= rndc_ok;
+    checks.push(ready_check_label("rndc", rndc_ok));
 
     Json(ReadyResponse { ready, checks })
 }
@@ -455,9 +491,15 @@ async fn start_server(command: &Commands, insecure_override: bool) -> anyhow::Re
         let per_second = per_second.max(1); // Ensure at least 1 request per second
 
         // Build governor configuration
+        // A-1: key on the real TCP peer IP, NOT the spoofable X-Forwarded-For /
+        // X-Real-IP / Forwarded headers (SmartIpKeyExtractor). bindcar is reached
+        // directly by the operator's pods (no trusted L7 proxy in front), so
+        // trusting client-supplied forwarding headers would let any caller evade
+        // the limit (rotate the header) or exhaust another client's bucket
+        // (spoof the victim's IP).
         let governor_conf = Arc::new(
             GovernorConfigBuilder::default()
-                .key_extractor(SmartIpKeyExtractor)
+                .key_extractor(PeerIpKeyExtractor)
                 .per_second(per_second.into())
                 .burst_size(rate_limit_config.burst_size)
                 .finish()
@@ -497,3 +539,6 @@ async fn start_server(command: &Commands, insecure_override: bool) -> anyhow::Re
 
     Ok(())
 }
+
+#[cfg(test)]
+mod main_test;

@@ -157,7 +157,7 @@ async fn validate_zone_for_updates(state: &AppState, zone_name: &str) -> Result<
 }
 
 /// Validate DNS record type
-fn validate_record_type(record_type: &str) -> Result<(), ApiError> {
+pub(crate) fn validate_record_type(record_type: &str) -> Result<(), ApiError> {
     let upper = record_type.to_uppercase();
 
     if !VALID_RECORD_TYPES.contains(&upper.as_str()) {

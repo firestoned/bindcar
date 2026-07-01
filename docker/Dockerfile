@@ -21,7 +21,15 @@
 # to match the target platform (amd64 or arm64).
 
 # Runtime stage - Distroless with glibc
-FROM gcr.io/distroless/cc-debian13:nonroot
+# Pinned to the multi-arch manifest-list (OCI image index) digest, NOT a
+# platform-specific digest — BuildKit selects the native arch and reproducible
+# builds are guaranteed (the floating :nonroot tag could otherwise change bytes
+# between builds, breaking SLSA provenance). Resolved via:
+#   curl -sI -H 'Accept: application/vnd.oci.image.index.v1+json' \
+#     https://gcr.io/v2/distroless/cc-debian13/manifests/nonroot
+# Refresh with the get-multiarch-digest skill; Dependabot's docker ecosystem
+# keeps it current once pinned.
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:d3cda6e91129130d7229a1806b6a73d292ef245ab032da7851907798024cefba
 
 ARG TARGETARCH
 ARG VERSION=0.1.0
@@ -38,8 +46,10 @@ LABEL org.opencontainers.image.version="${VERSION}"
 # - arm64 → binaries/arm64/bindcar (aarch64-unknown-linux-gnu)
 COPY --chmod=755 binaries/${TARGETARCH}/bindcar /usr/local/bin/bindcar
 
-# Distroless runs as nonroot user (UID 65532) by default
-# No need to specify USER
+# Distroless's :nonroot tag defaults to UID 65532, but set it explicitly as a
+# second line of defense (defense-in-depth) so the container never runs as root
+# even if the base default ever changes.
+USER 65532:65532
 
 # Expose API port
 EXPOSE 8080

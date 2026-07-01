@@ -1,0 +1,51 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: MIT
+---
+# Least-privilege RBAC for bindcar's Kubernetes TokenReview authentication (K-2).
+#
+# bindcar makes EXACTLY ONE Kubernetes API call — `create` on
+# `authentication.k8s.io/v1 TokenReview` — and only when built/run with the
+# `k8s-token-review` feature. It never reads Secrets, Pods, ConfigMaps, or any
+# other resource. The correct permission is therefore the built-in
+# `system:auth-delegator` ClusterRole (it grants exactly `create tokenreviews`
+# and `create subjectaccessreviews`), NOT cluster-admin or a hand-rolled role.
+#
+# Shipping this manifest closes the gap where operators, lacking a reference,
+# over-grant RBAC to a sidecar that runs an internet-adjacent mutate API — so a
+# leaked sidecar token would otherwise do far more than token validation.
+#
+# Adjust `metadata.namespace` and the ServiceAccount name to match the BIND9
+# pods created by the bindy operator (set the pod's `serviceAccountName` to this
+# SA). If bindcar runs in `drone`/explicit mode with KUBE_TOKEN_PATH, bind that
+# token's identity instead.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bindcar
+  namespace: bindy-system
+  labels:
+    app.kubernetes.io/name: bindcar
+    app.kubernetes.io/component: serviceaccount
+# Recommended: do NOT auto-mount the SA token unless TokenReview is in use.
+# When bindcar runs without the k8s-token-review feature (drone/bare-metal) it
+# needs no cluster credentials at all, so withholding the token removes a
+# pivot primitive if the sidecar is compromised (see pod-hardening.yaml, K-3).
+automountServiceAccountToken: false
+---
+# Bind the bindcar ServiceAccount to the built-in auth-delegator role.
+# This is the entire cluster privilege bindcar requires.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bindcar-tokenreview
+  labels:
+    app.kubernetes.io/name: bindcar
+    app.kubernetes.io/component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: bindcar
+    namespace: bindy-system

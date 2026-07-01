@@ -1,12 +1,14 @@
 //! Rate limiting middleware for HTTP requests
 //!
 //! This module provides rate limiting functionality using the tower-governor crate,
-//! which implements the Generic Cell Rate Algorithm (GCRA). Rate limits can be
-//! configured globally and are tracked per client IP address.
+//! which implements the Generic Cell Rate Algorithm (GCRA). Rate limits are
+//! keyed on the real TCP peer IP ([`PeerIpKeyExtractor`]) rather than the
+//! spoofable `X-Forwarded-For` family of headers, so a client cannot evade the
+//! limit or exhaust another client's bucket by forging a forwarding header.
 
 // Re-export commonly used types for convenience
 pub use tower_governor::{
-    governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer,
+    governor::GovernorConfigBuilder, key_extractor::PeerIpKeyExtractor, GovernorLayer,
 };
 
 /// Rate limiting configuration
