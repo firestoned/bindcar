@@ -167,23 +167,36 @@ pub(crate) fn validate_ip_list(field: &str, ips: &[String]) -> Result<(), ApiErr
     Ok(())
 }
 
-/// Reject a zone-file field containing a control character.
+/// Validate a zone-file hostname field against the strict DNS name character set.
 ///
-/// [`ZoneConfig::to_zone_file`] builds the zone file by directly interpolating
-/// these fields into newline-delimited records, so a `\n`, `\r`, or NUL would
-/// let an attacker emit additional zone-file lines — including directives such
-/// as `$INCLUDE` (which reads an arbitrary file into the zone) or `$GENERATE`
-/// (resource exhaustion) — poisoning or disclosing data (B-8 / C-2).
-/// Legitimate DNS names, emails, and record data never contain control
-/// characters.
+/// [`ZoneConfig::to_zone_file`] interpolates these fields directly into the zone
+/// file — and glue hostnames (`nameServerIps` keys) are rendered at the **start
+/// of a line**, exactly where BIND master-file directives (`$INCLUDE`,
+/// `$GENERATE`, `$ORIGIN`, `$TTL`) are recognized. A control-char-only check is
+/// therefore insufficient: a value like `"$INCLUDE /etc/bind/rndc.key ;"`
+/// contains no control character yet plants a directive that reads an arbitrary
+/// file into the zone (disclosure via AXFR/query) or exhausts resources (B-8 /
+/// C-2). Restricting to `[A-Za-z0-9._-]` rejects whitespace, `$`, `;`, quotes,
+/// and parens, closing the directive-injection surface while still accepting
+/// every legitimate hostname/SOA-email form (FQDNs with a trailing dot).
 ///
 /// # Errors
-/// Returns [`ApiError::InvalidRequest`] (HTTP 400) if `value` contains a control
-/// character.
-fn reject_zone_file_control_chars(field: &str, value: &str) -> Result<(), ApiError> {
-    if let Some(bad) = value.chars().find(|c| c.is_control()) {
+/// Returns [`ApiError::InvalidRequest`] (HTTP 400) if `value` is empty or contains
+/// any character outside the permitted set.
+fn validate_zone_file_hostname(field: &str, value: &str) -> Result<(), ApiError> {
+    if value.is_empty() {
         return Err(ApiError::InvalidRequest(format!(
-            "{} contains an illegal control character: {:?}",
+            "{} cannot be empty",
+            field
+        )));
+    }
+
+    if let Some(bad) = value
+        .chars()
+        .find(|&c| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')))
+    {
+        return Err(ApiError::InvalidRequest(format!(
+            "{} contains an illegal character: {:?} (allowed: A-Z a-z 0-9 . - _)",
             field, bad
         )));
     }
@@ -200,8 +213,11 @@ fn reject_zone_file_control_chars(field: &str, value: &str) -> Result<(), ApiErr
 /// reached the zone file without passing the per-request validation applied by
 /// the add/update/remove-record endpoints.
 ///
-/// - SOA `primary_ns` / `admin_email`, name-server names, and glue hostnames are
-///   rejected if they contain control characters.
+/// - SOA `primary_ns` / `admin_email`, name-server names, and glue hostnames must
+///   match the strict DNS name charset `[A-Za-z0-9._-]`
+///   ([`validate_zone_file_hostname`]) — rejecting whitespace/`$`/`;` so a value
+///   rendered at the start of a zone-file line cannot plant a `$INCLUDE` /
+///   `$GENERATE` master-file directive.
 /// - Glue record IPs must parse as an [`IpAddr`](std::net::IpAddr).
 /// - Each embedded record is held to the same rules as the add-record endpoint
 ///   ([`validate_record_type`](crate::records::validate_record_type),
@@ -212,15 +228,15 @@ fn reject_zone_file_control_chars(field: &str, value: &str) -> Result<(), ApiErr
 /// Returns [`ApiError::InvalidRequest`] or [`ApiError::InvalidRecord`] (both
 /// HTTP 400) for the first field that fails validation.
 pub(crate) fn validate_zone_config_content(config: &ZoneConfig) -> Result<(), ApiError> {
-    reject_zone_file_control_chars("soa.primaryNs", &config.soa.primary_ns)?;
-    reject_zone_file_control_chars("soa.adminEmail", &config.soa.admin_email)?;
+    validate_zone_file_hostname("soa.primaryNs", &config.soa.primary_ns)?;
+    validate_zone_file_hostname("soa.adminEmail", &config.soa.admin_email)?;
 
     for ns in &config.name_servers {
-        reject_zone_file_control_chars("nameServers entry", ns)?;
+        validate_zone_file_hostname("nameServers entry", ns)?;
     }
 
     for (host, ip) in &config.name_server_ips {
-        reject_zone_file_control_chars("nameServerIps key", host)?;
+        validate_zone_file_hostname("nameServerIps key", host)?;
         if ip.parse::<std::net::IpAddr>().is_err() {
             return Err(ApiError::InvalidRequest(format!(
                 "nameServerIps[{:?}] is not a valid IP address: {:?}",
@@ -1153,6 +1169,13 @@ pub async fn retransfer_zone(
 ) -> Result<Json<ZoneResponse>, ApiError> {
     info!("Retransferring zone: {}", zone_name);
 
+    // Validate the caller-supplied zone name before it reaches rndc (defense
+    // against rndc command / path injection via the {name} path parameter).
+    if let Err(e) = validate_zone_name(&zone_name) {
+        metrics::record_zone_operation("retransfer", false);
+        return Err(e);
+    }
+
     let output = state.rndc.retransfer(&zone_name).await.map_err(|e| {
         error!("RNDC retransfer failed for {}: {}", zone_name, e);
         metrics::record_zone_operation("retransfer", false);
@@ -1252,6 +1275,12 @@ pub async fn get_zone(
 ) -> Result<Json<ZoneInfo>, ApiError> {
     info!("Getting zone: {}", zone_name);
 
+    // Validate the caller-supplied zone name before it is joined into a
+    // filesystem path (prevents path traversal: a name like "../../etc/passwd"
+    // would otherwise turn into an arbitrary-file existence oracle) or forwarded
+    // to rndc.
+    validate_zone_name(&zone_name)?;
+
     // Check if zone file exists
     let zone_file_name = format!("{}.zone", zone_name);
     let zone_file_path = PathBuf::from(&state.zone_dir).join(&zone_file_name);
@@ -1329,6 +1358,13 @@ pub async fn modify_zone(
     Json(request): Json<ModifyZoneRequest>,
 ) -> Result<Json<ZoneResponse>, ApiError> {
     info!("Modifying zone: {}", zone_name);
+
+    // Validate the caller-supplied zone name before it is joined into a
+    // filesystem path or forwarded to rndc modzone/zonestatus.
+    if let Err(e) = validate_zone_name(&zone_name) {
+        metrics::record_zone_operation("modify", false);
+        return Err(e);
+    }
 
     // Debug log the full request payload
     if let Ok(json_payload) = serde_json::to_string_pretty(&request) {

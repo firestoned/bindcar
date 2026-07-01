@@ -59,15 +59,17 @@ RNDC_SERVER=127.0.0.1:953
 RNDC_ALGORITHM=sha256
 ```
 
-Valid values:
-- `md5` (or `hmac-md5`)
-- `sha1` (or `hmac-sha1`)
+Valid values (SHA-2 family only):
 - `sha224` (or `hmac-sha224`)
 - `sha256` (or `hmac-sha256`)
 - `sha384` (or `hmac-sha384`)
 - `sha512` (or `hmac-sha512`)
 
 Both formats (with or without `hmac-` prefix) are accepted.
+
+> **Security note (A12):** the deprecated `hmac-md5` and `hmac-sha1` algorithms
+> are **rejected** for the RNDC control channel. Configure your `rndc.conf` /
+> BIND key with a SHA-2 algorithm (`hmac-sha256` recommended).
 
 ### RNDC_SECRET
 
@@ -227,6 +229,20 @@ Valid values:
 
 **WARNING**: Setting this to `true` disables all authentication. Only use in environments where authentication is handled by infrastructure (Linkerd service mesh, API gateway, etc.).
 
+### BIND_ENABLE_DOCS
+
+- **Type**: Boolean (`true`/`false`)
+- **Default**: `false`
+- **Required**: No
+- **Description**: Serve the Swagger UI (`/api/v1/docs`) and OpenAPI spec
+  (`/api/v1/openapi.json`). These endpoints are **unauthenticated** and disclose
+  the full mutate-API surface, so they are disabled by default (A13) and should
+  be enabled for local development only.
+
+```bash
+BIND_ENABLE_DOCS=true
+```
+
 ### BIND_TOKEN_AUDIENCES
 
 - **Type**: String (comma-separated)
@@ -242,6 +258,12 @@ Prevents token reuse across different services. Tokens must be created with matc
 ```bash
 kubectl create token my-app --audience=bindcar
 ```
+
+> **Security note (audience is enforced):** bindcar validates that the audience
+> is echoed back in the TokenReview `status.audiences` — a token that merely
+> authenticates but was minted for a *different* audience (for example the
+> default ServiceAccount token auto-mounted into every pod) is **rejected**.
+> Create tokens with an explicit `--audience` matching `BIND_TOKEN_AUDIENCES`.
 
 ### BIND_ALLOWED_NAMESPACES
 
@@ -270,6 +292,30 @@ BIND_ALLOWED_SERVICE_ACCOUNTS=system:serviceaccount:dns-system:external-dns,syst
 Format: `system:serviceaccount:<namespace>:<name>`
 
 Empty value allows all ServiceAccounts (default). When set, only specified ServiceAccounts are accepted.
+
+> **Fail-closed (A2):** with the `k8s-token-review` feature enabled, leaving
+> **both** `BIND_ALLOWED_NAMESPACES` and `BIND_ALLOWED_SERVICE_ACCOUNTS` unset
+> means *any* authenticated ServiceAccount in the cluster is authorized for full
+> DNS control. bindcar therefore **refuses to start** in that posture unless you
+> set at least one allowlist (recommended) or explicitly opt in via
+> `BIND_ALLOW_ANY_SERVICEACCOUNT` below.
+
+### BIND_ALLOW_ANY_SERVICEACCOUNT
+
+- **Type**: Boolean (`true`/`false`)
+- **Default**: `false`
+- **Required**: No (only when `k8s-token-review` feature enabled)
+- **Description**: Explicitly accept the allow-all authorization posture when no
+  namespace/ServiceAccount allowlist is configured. Without this, bindcar refuses
+  to start with empty allowlists (see fail-closed note above).
+
+```bash
+BIND_ALLOW_ANY_SERVICEACCOUNT=true
+```
+
+> **Do not set this in production.** It authorizes every authenticated
+> ServiceAccount in the cluster. Configure `BIND_ALLOWED_NAMESPACES` /
+> `BIND_ALLOWED_SERVICE_ACCOUNTS` instead.
 
 ## Rate Limiting Variables
 

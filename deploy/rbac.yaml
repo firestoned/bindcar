@@ -6,9 +6,11 @@
 # bindcar makes EXACTLY ONE Kubernetes API call — `create` on
 # `authentication.k8s.io/v1 TokenReview` — and only when built/run with the
 # `k8s-token-review` feature. It never reads Secrets, Pods, ConfigMaps, or any
-# other resource. The correct permission is therefore the built-in
-# `system:auth-delegator` ClusterRole (it grants exactly `create tokenreviews`
-# and `create subjectaccessreviews`), NOT cluster-admin or a hand-rolled role.
+# other resource. We therefore bind a purpose-built ClusterRole that grants ONLY
+# `create tokenreviews` (A10), rather than the built-in `system:auth-delegator`,
+# which additionally grants `create subjectaccessreviews` — an unused
+# cluster-wide authorization-enumeration primitive a leaked token could abuse for
+# reconnaissance.
 #
 # Shipping this manifest closes the gap where operators, lacking a reference,
 # over-grant RBAC to a sidecar that runs an internet-adjacent mutate API — so a
@@ -32,8 +34,23 @@ metadata:
 # pivot primitive if the sidecar is compromised (see pod-hardening.yaml, K-3).
 automountServiceAccountToken: false
 ---
-# Bind the bindcar ServiceAccount to the built-in auth-delegator role.
-# This is the entire cluster privilege bindcar requires.
+# Purpose-built ClusterRole: the ENTIRE cluster privilege bindcar requires is
+# `create` on TokenReview. Unlike system:auth-delegator, it does NOT grant
+# subjectaccessreviews (A10), so a leaked sidecar token cannot enumerate cluster
+# authorization.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bindcar-tokenreview
+  labels:
+    app.kubernetes.io/name: bindcar
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+# Bind the bindcar ServiceAccount to the minimal TokenReview role above.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -44,7 +61,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: system:auth-delegator
+  name: bindcar-tokenreview
 subjects:
   - kind: ServiceAccount
     name: bindcar

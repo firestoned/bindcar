@@ -101,11 +101,24 @@ impl Default for RndcConfFile {
 }
 
 /// Key block: authentication credentials
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct KeyBlock {
     pub name: String,
     pub algorithm: String,
     pub secret: String,
+}
+
+// Manual `Debug` that redacts the TSIG secret (A4). Because `RndcConfFile` derives
+// `Debug` and holds `KeyBlock`s, this also keeps the secret out of any debug print
+// of the whole parsed config.
+impl std::fmt::Debug for KeyBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyBlock")
+            .field("name", &self.name)
+            .field("algorithm", &self.algorithm)
+            .field("secret", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl KeyBlock {

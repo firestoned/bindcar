@@ -296,7 +296,30 @@ async fn start_server(command: &Commands, insecure_override: bool) -> anyhow::Re
 
         #[cfg(feature = "k8s-token-review")]
         {
-            use bindcar::auth::{detect_kube_auth_mode, KubeAuthMode};
+            use bindcar::auth::{
+                check_authorization_posture, detect_kube_auth_mode, KubeAuthMode,
+                TokenReviewConfig, ALLOW_ANY_SERVICE_ACCOUNT_ENV,
+            };
+
+            // Fail-closed authorization posture (A2): with TokenReview active but
+            // no namespace/service-account allowlist, any authenticated
+            // ServiceAccount in the cluster would be authorized. Refuse to start
+            // unless the operator configured an allowlist or explicitly opted in.
+            let tr_config = TokenReviewConfig::from_env();
+            let allow_any = std::env::var(ALLOW_ANY_SERVICE_ACCOUNT_ENV)
+                .ok()
+                .and_then(|v| v.parse::<bool>().ok())
+                .unwrap_or(false);
+            if let Err(e) =
+                check_authorization_posture(tr_config.is_authorization_restricted(), allow_any)
+            {
+                error!("{}", e);
+                return Err(anyhow::anyhow!(e));
+            }
+            if allow_any && !tr_config.is_authorization_restricted() {
+                warn!("⚠️  BIND_ALLOW_ANY_SERVICEACCOUNT is set: every authenticated ServiceAccount in the cluster is authorized");
+            }
+
             match detect_kube_auth_mode() {
                 KubeAuthMode::Explicit { ref server, .. } => {
                     info!(
@@ -511,9 +534,22 @@ async fn start_server(command: &Commands, insecure_override: bool) -> anyhow::Re
         api_routes
     };
 
+    // The Swagger UI and OpenAPI spec are served UNAUTHENTICATED and disclose the
+    // full mutate-API surface, so they are OFF by default and only mounted when
+    // BIND_ENABLE_DOCS is truthy (A13). Enable them for local development only.
+    let enable_docs = std::env::var("BIND_ENABLE_DOCS")
+        .ok()
+        .and_then(|v| v.parse::<bool>().ok())
+        .unwrap_or(false);
+
     // build main router
-    let app = Router::new()
-        .merge(SwaggerUi::new("/api/v1/docs").url("/api/v1/openapi.json", ApiDoc::openapi()))
+    let mut app = Router::new();
+    if enable_docs {
+        info!("serving unauthenticated API docs at /api/v1/docs (BIND_ENABLE_DOCS=true)");
+        app = app
+            .merge(SwaggerUi::new("/api/v1/docs").url("/api/v1/openapi.json", ApiDoc::openapi()));
+    }
+    let app = app
         .route("/api/v1/health", get(health_check))
         .route("/api/v1/ready", get(ready_check))
         .route("/metrics", get(metrics_handler))

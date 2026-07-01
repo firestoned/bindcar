@@ -136,10 +136,41 @@ mod validation_security_tests {
 
     #[test]
     fn test_validate_record_name_accepts_clean_names() {
-        for name in ["www", "@", "sub.example.com.", "_dmarc"] {
+        for name in [
+            "www",
+            "@",
+            "sub.example.com.",
+            "_dmarc",
+            "*",
+            "*.wildcard",
+            "_sip._tcp",
+            "host-1",
+        ] {
             assert!(
                 validate_record_name(name).is_ok(),
                 "expected name {name:?} to be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_record_name_rejects_zone_file_directives_without_control_chars() {
+        // The record name is rendered at the START of a zone-file line, so a
+        // value containing spaces / `$` / `;` can plant a `$INCLUDE`/`$GENERATE`
+        // master-file directive even though it holds no control character.
+        for name in [
+            "$INCLUDE /etc/bind/rndc.key ;",
+            "$GENERATE 1-16777215 host$",
+            "www example",    // embedded space
+            "a;comment",      // statement/comment metachar
+            "name\"quoted\"", // quote
+            "name(paren)",    // parens
+            "$ORIGIN evil.",  // directive
+            "",               // empty would emit a leading-space line
+        ] {
+            assert!(
+                validate_record_name(name).is_err(),
+                "expected name {name:?} to be rejected"
             );
         }
     }

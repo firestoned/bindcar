@@ -31,7 +31,7 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_until, take_while, take_while1},
     character::complete::{char, digit1, multispace0, multispace1},
-    combinator::{map, recognize, value},
+    combinator::{map, map_res, recognize, value},
     multi::{many0, separated_list0},
     sequence::{delimited, preceded},
     IResult, Parser,
@@ -216,9 +216,13 @@ fn ip_addr(input: &str) -> IResult<&str, IpAddr> {
     alt((ipv6_addr, ipv4_addr)).parse(input)
 }
 
-/// Parse a port number
+/// Parse a port number.
+///
+/// A value that overflows `u16` (e.g. `default-port 99999`) is a parse error
+/// rather than being silently masked to a default (A16): a config typo fails
+/// loudly instead of quietly redirecting the client to an unintended port.
 fn port_number(input: &str) -> IResult<&str, u16> {
-    map(digit1, |s: &str| s.parse::<u16>().unwrap_or(953)).parse(input)
+    map_res(digit1, |s: &str| s.parse::<u16>()).parse(input)
 }
 
 /// Parse a server address (hostname or IP)
@@ -234,10 +238,20 @@ fn server_address(input: &str) -> IResult<&str, ServerAddress> {
 // ========== Key Block Parser ==========
 
 /// Key block field types
-#[derive(Debug)]
 enum KeyField {
     Algorithm(String),
     Secret(String),
+}
+
+// Manual `Debug` that redacts the secret variant (A4) so an intermediate parse
+// value can never carry the plaintext TSIG secret into a debug print.
+impl std::fmt::Debug for KeyField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KeyField::Algorithm(a) => f.debug_tuple("Algorithm").field(a).finish(),
+            KeyField::Secret(_) => f.debug_tuple("Secret").field(&"[REDACTED]").finish(),
+        }
+    }
 }
 
 /// Parse algorithm field: algorithm hmac-sha256;
@@ -508,9 +522,32 @@ fn parse_rndc_conf_internal(input: &str) -> IResult<&str, RndcConfFile> {
 /// ```
 pub fn parse_rndc_conf_str(input: &str) -> ParseResult<RndcConfFile> {
     match parse_rndc_conf_internal(input) {
-        Ok((_, conf)) => Ok(conf),
+        Ok((remaining, conf)) => {
+            // Fail loudly on trailing unparsed input instead of silently
+            // discarding it. `many0` stops at the first line it cannot parse
+            // (e.g. a missing ';' after `secret "..."`), which previously caused
+            // the whole key to be dropped and yielded a client with an EMPTY
+            // secret. Report only the byte offset — never the remainder itself,
+            // which for an rndc.conf can contain the TSIG secret (A3).
+            if !remaining.trim().is_empty() {
+                let offset = input.len().saturating_sub(remaining.len());
+                return Err(RndcConfParseError::ParseError(format!(
+                    "malformed rndc.conf: unparsed input near byte {}",
+                    offset
+                )));
+            }
+            Ok(conf)
+        }
         Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
-            Err(RndcConfParseError::ParseError(format!("{:?}", e)))
+            // Never echo the unparsed remainder: for an rndc.conf it can contain
+            // the TSIG `secret "..."` value, which would then leak into logs or
+            // API error output (A3). Report only the byte offset and the nom
+            // error kind — enough to locate the fault, nothing sensitive.
+            let offset = input.len().saturating_sub(e.input.len());
+            Err(RndcConfParseError::ParseError(format!(
+                "malformed rndc.conf near byte {} ({:?})",
+                offset, e.code
+            )))
         }
         Err(nom::Err::Incomplete(_)) => Err(RndcConfParseError::Incomplete),
     }
@@ -530,14 +567,29 @@ pub fn parse_rndc_conf_str(input: &str) -> ParseResult<RndcConfFile> {
 /// ```
 pub fn parse_rndc_conf_file(path: &Path) -> ParseResult<RndcConfFile> {
     let mut visited = HashSet::new();
-    parse_rndc_conf_file_recursive(path, &mut visited)
+    parse_rndc_conf_file_recursive(path, &mut visited, 0)
 }
+
+/// Maximum depth of nested `include` directives.
+///
+/// Cycles are already blocked by the `visited` set, but a long *acyclic* include
+/// chain would recurse one stack frame per file and could exhaust the stack
+/// (A17). This bounds the nesting to a generous but finite depth.
+const MAX_INCLUDE_DEPTH: usize = 32;
 
 /// Recursively parse rndc.conf file with include resolution
 fn parse_rndc_conf_file_recursive(
     path: &Path,
     visited: &mut HashSet<PathBuf>,
+    depth: usize,
 ) -> ParseResult<RndcConfFile> {
+    if depth > MAX_INCLUDE_DEPTH {
+        return Err(RndcConfParseError::ParseError(format!(
+            "include nesting exceeds maximum depth of {}",
+            MAX_INCLUDE_DEPTH
+        )));
+    }
+
     // Check for circular includes
     let canonical_path = path
         .canonicalize()
@@ -570,7 +622,7 @@ fn parse_rndc_conf_file_recursive(
         };
 
         // Parse included file
-        let included_conf = parse_rndc_conf_file_recursive(&resolved_path, visited)?;
+        let included_conf = parse_rndc_conf_file_recursive(&resolved_path, visited, depth + 1)?;
 
         // Merge configurations
         for (name, key) in included_conf.keys {

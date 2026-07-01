@@ -18,11 +18,64 @@ use tracing::{debug, error, info};
 use crate::metrics;
 
 /// RNDC configuration parsed from rndc.conf
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RndcConfig {
     pub server: String,
     pub algorithm: String,
     pub secret: String,
+}
+
+// Manual `Debug` that redacts the TSIG secret (A4). The derived impl would print
+// the plaintext key on any `{:?}` / panic backtrace / `.context()`; redacting at
+// the type keeps that credential out of logs and diagnostics entirely.
+impl std::fmt::Debug for RndcConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RndcConfig")
+            .field("server", &self.server)
+            .field("algorithm", &self.algorithm)
+            .field("secret", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// HMAC algorithms accepted for the RNDC control channel (SHA-2 family only).
+/// HMAC-MD5 / HMAC-SHA1 are deprecated and intentionally excluded (A12).
+const ACCEPTED_RNDC_ALGORITHMS: &[&str] = &["sha224", "sha256", "sha384", "sha512"];
+
+/// Maximum length of a DNS zone name (RFC 1035 total name length).
+const MAX_ZONE_NAME_LEN: usize = 253;
+
+/// Default RNDC port when the address carries no explicit port.
+const DEFAULT_RNDC_PORT: u16 = 953;
+
+/// Re-validate a zone name at the RNDC sink (defense-in-depth, A9).
+///
+/// Every executor method interpolates a caller-supplied zone name into an RNDC
+/// control-channel command line. The HTTP handlers validate first, but this
+/// guard-at-the-sink means a missing caller-side check (which has regressed
+/// before, see commit `c514ff9`) cannot inject extra RNDC arguments. Only the
+/// DNS charset `[A-Za-z0-9._-]` (bounded length, no `..`) is accepted.
+///
+/// # Errors
+/// Returns an error if the name is empty, too long, contains `..`, or has a
+/// character outside the permitted set.
+pub(crate) fn validate_rndc_zone_name(zone_name: &str) -> Result<()> {
+    if zone_name.is_empty() || zone_name.len() > MAX_ZONE_NAME_LEN {
+        return Err(anyhow::anyhow!("invalid zone name length"));
+    }
+    if zone_name.contains("..") {
+        return Err(anyhow::anyhow!("zone name must not contain '..'"));
+    }
+    if let Some(bad) = zone_name
+        .chars()
+        .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')))
+    {
+        return Err(anyhow::anyhow!(
+            "zone name contains invalid character: {:?}",
+            bad
+        ));
+    }
+    Ok(())
 }
 
 /// RNDC command executor using native protocol
@@ -56,14 +109,14 @@ impl RndcExecutor {
 
         debug!("Using algorithm: {} for server: {}", algorithm, server);
 
-        // Validate algorithm - rndc crate v0.1.3 only supports these values
-        let valid_algorithms = ["md5", "sha1", "sha224", "sha256", "sha384", "sha512"];
-
-        if !valid_algorithms.contains(&algorithm.as_str()) {
+        // Validate algorithm. HMAC-MD5 and HMAC-SHA1 are deprecated and rejected
+        // for the RNDC control channel in this zero-trust posture (A12); only the
+        // SHA-2 family is accepted.
+        if !ACCEPTED_RNDC_ALGORITHMS.contains(&algorithm.as_str()) {
             return Err(anyhow::anyhow!(
-                "Invalid algorithm '{}'. Valid algorithms (without 'hmac-' prefix): {:?}",
+                "Invalid or deprecated algorithm '{}'. Accepted algorithms (without 'hmac-' prefix): {:?}",
                 algorithm,
-                valid_algorithms
+                ACCEPTED_RNDC_ALGORITHMS
             ));
         }
 
@@ -138,42 +191,49 @@ impl RndcExecutor {
     /// * `zone_name` - Name of the zone (e.g., "example.com")
     /// * `zone_config` - Zone configuration block (e.g., "{ type primary; file \"/var/cache/bind/example.com.zone\"; }")
     pub async fn addzone(&self, zone_name: &str, zone_config: &str) -> Result<String> {
+        validate_rndc_zone_name(zone_name)?;
         let command = format!("addzone {} {}", zone_name, zone_config);
         self.execute(&command).await
     }
 
     /// Delete a zone
     pub async fn delzone(&self, zone_name: &str) -> Result<String> {
+        validate_rndc_zone_name(zone_name)?;
         let command = format!("delzone {}", zone_name);
         self.execute(&command).await
     }
 
     /// Reload a zone
     pub async fn reload(&self, zone_name: &str) -> Result<String> {
+        validate_rndc_zone_name(zone_name)?;
         let command = format!("reload {}", zone_name);
         self.execute(&command).await
     }
 
     /// Get zone status
     pub async fn zonestatus(&self, zone_name: &str) -> Result<String> {
+        validate_rndc_zone_name(zone_name)?;
         let command = format!("zonestatus {}", zone_name);
         self.execute(&command).await
     }
 
     /// Freeze a zone (disable dynamic updates)
     pub async fn freeze(&self, zone_name: &str) -> Result<String> {
+        validate_rndc_zone_name(zone_name)?;
         let command = format!("freeze {}", zone_name);
         self.execute(&command).await
     }
 
     /// Thaw a zone (enable dynamic updates)
     pub async fn thaw(&self, zone_name: &str) -> Result<String> {
+        validate_rndc_zone_name(zone_name)?;
         let command = format!("thaw {}", zone_name);
         self.execute(&command).await
     }
 
     /// Notify secondaries about zone changes
     pub async fn notify(&self, zone_name: &str) -> Result<String> {
+        validate_rndc_zone_name(zone_name)?;
         let command = format!("notify {}", zone_name);
         self.execute(&command).await
     }
@@ -183,6 +243,7 @@ impl RndcExecutor {
     /// This command is used on secondary zones to discard the current zone data
     /// and initiate a fresh transfer from the primary server.
     pub async fn retransfer(&self, zone_name: &str) -> Result<String> {
+        validate_rndc_zone_name(zone_name)?;
         let command = format!("retransfer {}", zone_name);
         self.execute(&command).await
     }
@@ -193,6 +254,7 @@ impl RndcExecutor {
     /// * `zone_name` - Name of the zone (e.g., "example.com")
     /// * `zone_config` - Zone configuration block (e.g., "{ also-notify { 10.0.0.1; }; allow-transfer { 10.0.0.2; }; }")
     pub async fn modzone(&self, zone_name: &str, zone_config: &str) -> Result<String> {
+        validate_rndc_zone_name(zone_name)?;
         let command = format!("modzone {} {}", zone_name, zone_config);
         self.execute(&command).await
     }
@@ -205,6 +267,7 @@ impl RndcExecutor {
     /// # Returns
     /// The zone configuration in BIND9 format
     pub async fn showzone(&self, zone_name: &str) -> Result<String> {
+        validate_rndc_zone_name(zone_name)?;
         let command = format!("showzone {}", zone_name);
         self.execute(&command).await
     }
@@ -238,12 +301,24 @@ pub fn parse_rndc_conf(path: &str) -> Result<RndcConfig> {
     let conf_file = parse_rndc_conf_file(Path::new(path))
         .map_err(|e| anyhow::anyhow!("Failed to parse rndc.conf: {}", e))?;
 
-    // Extract default key (from options.default_key or first key)
-    let default_key_name = conf_file
-        .options
-        .default_key
-        .clone()
-        .or_else(|| conf_file.keys.keys().next().cloned());
+    // Select the key. Prefer an explicit `default-key`; otherwise pick
+    // deterministically and refuse to guess when the choice is ambiguous (A18) —
+    // the previous `keys().next()` returned an arbitrary HashMap entry, so with
+    // multiple keys the client could authenticate with an unintended one.
+    let default_key_name = match conf_file.options.default_key.clone() {
+        Some(name) => Some(name),
+        None => {
+            if conf_file.keys.len() > 1 {
+                return Err(anyhow::anyhow!(
+                    "rndc.conf defines {} keys but no `default-key`; specify one explicitly",
+                    conf_file.keys.len()
+                ));
+            }
+            let mut names: Vec<&String> = conf_file.keys.keys().collect();
+            names.sort();
+            names.first().map(|name| (*name).clone())
+        }
+    };
 
     let key_block = if let Some(ref key_name) = default_key_name {
         conf_file
@@ -253,6 +328,16 @@ pub fn parse_rndc_conf(path: &str) -> Result<RndcConfig> {
     } else {
         return Err(anyhow::anyhow!("No keys found in configuration"));
     };
+
+    // Reject an empty secret (A19): a key block with a missing/blank secret would
+    // otherwise flow into RndcClient with no credential, masking a
+    // misconfiguration that must fail fast.
+    if key_block.secret.trim().is_empty() {
+        return Err(anyhow::anyhow!(
+            "key '{}' has an empty secret",
+            default_key_name.as_deref().unwrap_or("unnamed")
+        ));
+    }
 
     // Extract server address from options or use default
     let server = conf_file
@@ -265,7 +350,7 @@ pub fn parse_rndc_conf(path: &str) -> Result<RndcConfig> {
     let server = if server.contains(':') {
         server
     } else {
-        let port = conf_file.options.default_port.unwrap_or(953);
+        let port = conf_file.options.default_port.unwrap_or(DEFAULT_RNDC_PORT);
         format!("{}:{}", server, port)
     };
 

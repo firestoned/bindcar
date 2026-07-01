@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn test_parse_error_does_not_leak_secret() {
+    // A3 regression: a malformed rndc.conf (missing ';' after the secret) must
+    // NOT echo the secret value into the parse error message.
+    let conf =
+        "key \"k\" {\n    algorithm hmac-sha256;\n    secret \"SUPERSECRETBASE64VALUE==\"\n};\n";
+    let err = parse_rndc_conf_str(conf).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        !msg.contains("SUPERSECRETBASE64VALUE"),
+        "TSIG secret leaked into parse error: {msg}"
+    );
+    assert!(
+        msg.contains("malformed rndc.conf") && msg.contains("byte"),
+        "expected position-only error, got: {msg}"
+    );
+}
+
+#[test]
 fn test_line_comment() {
     assert!(line_comment("// comment\n").is_ok());
     assert!(line_comment("// comment").is_ok());
@@ -58,6 +76,15 @@ fn test_ipv6_addr() {
 fn test_port_number() {
     assert_eq!(port_number("953").unwrap().1, 953);
     assert_eq!(port_number("8080").unwrap().1, 8080);
+}
+
+#[test]
+fn test_port_number_rejects_overflow() {
+    // A16: a value that overflows u16 must be a parse error, not silently masked
+    // to the default port.
+    assert!(port_number("99999").is_err());
+    assert!(port_number("65536").is_err());
+    assert_eq!(port_number("65535").unwrap().1, 65535);
 }
 
 #[test]

@@ -47,6 +47,16 @@ spec:
         - protocol: TCP
           port: 53
     # 2) bindcar REST API — ONLY from the bindy operator pods.
+    #    NOTE (A14): /metrics is served on this SAME port (8080), so it is already
+    #    restricted to the bindy operator by this rule and is NOT exposed
+    #    cluster-wide. To let Prometheus scrape /metrics, add an explicit ingress
+    #    rule for the monitoring namespace (example below) rather than opening
+    #    8080 broadly:
+    #      - from:
+    #          - namespaceSelector:
+    #              matchLabels:
+    #                kubernetes.io/metadata.name: monitoring
+    #        ports: [{ protocol: TCP, port: 8080 }]
     - from:
         - podSelector:
             matchLabels:
