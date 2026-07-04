@@ -20,6 +20,30 @@
 # The TARGETARCH build argument is automatically set by Docker BuildKit
 # to match the target platform (amd64 or arm64).
 
+# nsupdate builder stage — bindcar shells out to `nsupdate` (RFC 2136 dynamic
+# DNS updates) for record management. Install it from Debian 13 (the same distro
+# as the cc-debian13 runtime below) and stage the binary plus its shared-library
+# dependencies (glibc core excluded — the runtime base provides it). `/lib` deps
+# are remapped to `/usr/lib` because the runtime base's `/lib` is a usrmerge
+# symlink (COPYing a real `/lib` dir onto it fails). The digest
+# is pinned for reproducibility (A11); resolve with
+#   docker buildx imagetools inspect debian:13-slim --raw | sha256sum
+FROM debian:13-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2 AS nsupdate
+RUN apt-get update -qq \
+ && apt-get install -y -qq --no-install-recommends bind9-dnsutils \
+ && mkdir -p /staging/usr/bin \
+ && cp -L /usr/bin/nsupdate /staging/usr/bin/ \
+ && LD_TRACE_LOADED_OBJECTS=1 /usr/bin/nsupdate 2>/dev/null \
+      | awk '/=>/ { print $3 }' | grep -E '^/' \
+      | grep -Ev '/(libc|libm|libpthread|libdl|librt|libresolv|libnsl)\.so' \
+      | sort -u \
+      | while read -r lib; do \
+          dst="/staging$lib"; \
+          case "$lib" in /lib/*|/lib64/*) dst="/staging/usr$lib" ;; esac; \
+          mkdir -p "$(dirname "$dst")"; \
+          cp -L "$lib" "$dst"; \
+        done
+
 # Runtime stage - Distroless with glibc
 # Pinned to the multi-arch manifest-list (OCI image index) digest, NOT a
 # platform-specific digest — BuildKit selects the native arch and reproducible
@@ -46,6 +70,9 @@ LABEL org.opencontainers.image.version="${VERSION}"
 # - arm64 → binaries/arm64/bindcar (aarch64-unknown-linux-gnu)
 COPY --chmod=755 binaries/${TARGETARCH}/bindcar /usr/local/bin/bindcar
 
+# nsupdate + its shared libraries (for dynamic DNS record management)
+COPY --from=nsupdate /staging/ /
+
 # Distroless's :nonroot tag defaults to UID 65532, but set it explicitly as a
 # second line of defense (defense-in-depth) so the container never runs as root
 # even if the base default ever changes.
@@ -58,7 +85,9 @@ EXPOSE 8080
 ENV BIND_ZONE_DIR=/var/cache/bind
 ENV API_PORT=8080
 ENV RUST_LOG=info
-ENV DISABLE_AUTH=false
+# DISABLE_AUTH is intentionally not baked in: the binary defaults it to false,
+# and an ENV whose name matches "AUTH" trips BuildKit's SecretsUsedInArgOrEnv
+# lint. Set it explicitly at run time if ever required.
 
 # Start the API server
 ENTRYPOINT ["/usr/local/bin/bindcar"]

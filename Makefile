@@ -12,9 +12,15 @@ PLATFORMS ?= linux/amd64,linux/arm64
 NAMESPACE ?= dns-system
 KIND_CLUSTER ?= bindy-test
 
+# kind e2e: which bindcar image to run, and whether to build it locally.
+# CI overrides these to reuse the image built+pushed by an earlier pipeline
+# stage, e.g. `make kind-e2e BINDCAR_IMAGE=ghcr.io/org/bindcar:tag SKIP_IMAGE_BUILD=true`.
+BINDCAR_IMAGE ?= bindcar:e2e
+SKIP_IMAGE_BUILD ?= false
+
 .PHONY: help
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: build
 build: ## Build the binary in release mode
@@ -36,8 +42,66 @@ clippy: ## Run clippy
 check: fmt clippy test ## Run all checks
 
 #
+# Regression suite
+#
+
+.PHONY: fmt-check
+fmt-check: ## Verify formatting without modifying files
+	@echo "==> fmt --check"
+	cargo fmt --all --check
+
+.PHONY: clippy-all
+clippy-all: ## Clippy for default AND k8s-token-review features (deny warnings)
+	@echo "==> clippy (default features)"
+	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo clippy --all-targets -- -D warnings
+	@echo "==> clippy (k8s-token-review feature)"
+	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo clippy --all-targets --features k8s-token-review -- -D warnings
+
+.PHONY: unit-tests
+unit-tests: ## Unit + doctests for BOTH feature sets — no cluster required
+	@echo "==> unit tests (default features)"
+	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo test
+	@echo "==> unit tests (k8s-token-review feature)"
+	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo test --features k8s-token-review
+
+# Back-compat alias.
+.PHONY: test-all
+test-all: unit-tests ## Alias for unit-tests
+
+.PHONY: deploy-validate
+deploy-validate: ## Static validation of deploy manifests + security invariants (no cluster)
+	@echo "==> deploy manifest & security-invariant checks"
+	./scripts/validate-deploy.sh
+
+.PHONY: manifest-dry-run
+manifest-dry-run: ## kubectl client dry-run of deploy manifests (only when a cluster is reachable)
+	@echo "==> kubectl --dry-run=client (deploy manifests)"
+	@# Modern kubectl needs API discovery even for client dry-run, so only run it
+	@# when a cluster is actually reachable. Otherwise skip — deploy-validate does
+	@# the offline static checks, and kind-e2e does a real server-side dry-run.
+	@if command -v kubectl >/dev/null 2>&1 && kubectl cluster-info >/dev/null 2>&1; then \
+		kubectl apply --dry-run=client -f deploy/ >/dev/null && echo "  ✓ deploy/ manifests valid (client dry-run)"; \
+	else \
+		echo "  · no reachable cluster — skipping (deploy-validate covers static checks)"; \
+	fi
+
+.PHONY: regression
+regression: fmt-check clippy-all unit-tests deploy-validate manifest-dry-run ## No-cluster regression gate (fmt, clippy, unit-tests, deploy validate + dry-run — both feature sets)
+	@echo ""
+	@echo "✅ regression suite passed (no cluster)"
+
+.PHONY: regression-full
+regression-full: regression kind-e2e ## FULL regression: no-cluster gate + end-to-end tests ON kind (requires docker, kind, kubectl)
+	@echo ""
+	@echo "✅ full regression suite passed (incl. kind e2e)"
+
+#
 # Integration tests
 #
+
+.PHONY: kind-e2e
+kind-e2e: ## End-to-end test on kind (vars: BINDCAR_IMAGE, SKIP_IMAGE_BUILD; requires docker, kind, kubectl, curl, dig)
+	BINDCAR_IMAGE='$(BINDCAR_IMAGE)' SKIP_IMAGE_BUILD='$(SKIP_IMAGE_BUILD)' KIND_CLUSTER='$(KIND_CLUSTER)' ./integration-test/kind-e2e.sh
 
 .PHONY: drone-integration-test
 drone-integration-test: ## Run drone mode integration test (requires Docker, curl, dig)

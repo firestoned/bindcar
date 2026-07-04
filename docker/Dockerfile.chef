@@ -65,11 +65,14 @@ LABEL org.opencontainers.image.source="https://github.com/firestoned/bindcar"
 LABEL org.opencontainers.image.description="BIND9 RNDC API Server"
 LABEL org.opencontainers.image.licenses="MIT"
 
-# Install runtime dependencies
-# Binary is statically linked with musl, so no glibc needed
+# Install runtime dependencies.
+# Binary is statically linked with musl, so no glibc needed.
+# bind-tools provides `nsupdate`, which bindcar shells out to for dynamic DNS
+# record management (add/remove/update).
 RUN apk add --no-cache \
     ca-certificates \
-    curl
+    curl \
+    bind-tools
 
 # Create bindcar user and directories
 RUN addgroup -S bindcar && adduser -S -G bindcar bindcar && \

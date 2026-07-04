@@ -17,11 +17,14 @@ LABEL org.opencontainers.image.source="https://github.com/firestoned/bindcar"
 LABEL org.opencontainers.image.description="BIND9 RNDC API Server (Local Dev Build)"
 LABEL org.opencontainers.image.licenses="MIT"
 
-# Install required libraries for glibc compatibility
+# Install required libraries for glibc compatibility.
+# bind-tools provides `nsupdate`, which bindcar shells out to for dynamic DNS
+# record management (add/remove/update).
 RUN apk add --no-cache \
     ca-certificates \
     curl \
-    gcompat
+    gcompat \
+    bind-tools
 
 # Create bindcar user and directories
 RUN addgroup -S bindcar && adduser -S -G bindcar bindcar && \
@@ -44,7 +47,9 @@ EXPOSE 8080
 ENV BIND_ZONE_DIR=/var/cache/bind
 ENV API_PORT=8080
 ENV RUST_LOG=info
-ENV DISABLE_AUTH=false
+# NOTE: DISABLE_AUTH is intentionally NOT set here — the binary already defaults
+# it to false, and baking an ENV whose name matches "AUTH" trips BuildKit's
+# SecretsUsedInArgOrEnv lint. Set it explicitly at run time if ever needed.
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

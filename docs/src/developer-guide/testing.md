@@ -100,7 +100,7 @@ Tests run automatically on:
 - Pull requests
 - Pushes to main branch
 
-See `.github/workflows/pr.yml`.
+See `.github/workflows/build.yaml`.
 
 ## Next Steps
 

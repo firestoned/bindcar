@@ -12,9 +12,7 @@
 
 ### CI/CD Status
 
-[![Main Branch CI/CD](https://github.com/firestoned/bindcar/actions/workflows/main.yaml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/main.yaml)
-[![Pull Request Checks](https://github.com/firestoned/bindcar/actions/workflows/pr.yml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/pr.yml)
-[![Release Workflow](https://github.com/firestoned/bindcar/actions/workflows/release.yml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/release.yml)
+[![Build](https://github.com/firestoned/bindcar/actions/workflows/build.yaml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/build.yaml)
 [![Documentation](https://github.com/firestoned/bindcar/actions/workflows/docs.yaml/badge.svg)](https://github.com/firestoned/bindcar/actions/workflows/docs.yaml)
 
 ## What is bindcar?

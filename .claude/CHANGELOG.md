@@ -1,5 +1,445 @@
 # Changelog
 
+## [2026-07-04 13:10] - Fix nsupdate builder COPY: remap /lib to /usr/lib (usrmerge)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `docker/Dockerfile`, `docker/Dockerfile.chainguard`: the nsupdate builder now
+  stages libs under `/staging/usr/...` only, remapping any `ldd`/`LD_TRACE` dep
+  resolved under `/lib` or `/lib64` to `/usr/lib`. Previously `cp --parents`
+  created a real `/staging/lib` directory, and `COPY --from=nsupdate /staging/ /`
+  failed with `cannot copy to non-directory: .../lib` because the runtime bases'
+  `/lib` is a usrmerge **symlink** to `/usr/lib`.
+
+### Why
+The first CI build of the distroless image reached the final COPY and failed on
+the `/lib` symlink collision. Debian's `bind9-dnsutils` resolves several deps
+(e.g. `/lib/x86_64-linux-gnu/…`) under the symlinked `/lib`.
+
+### Verified
+Restaged from the Debian builder with the remap: top-level staged dir is `usr`
+only (no `/staging/lib`), and the staged `nsupdate 9.20.23` executes in the real
+`cc-debian13` base. A11 digest pins intact; `make regression` green.
+
+### Impact
+- [x] Fixes the docker build (distroless + chainguard nsupdate bundling)
+- [ ] Documentation only
+
+## [2026-07-04 12:40] - Drone integration test uses ISC bind9 image
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `integration-test/drone-external-bind9.sh`: default `BIND9_IMAGE` switched from
+  `ubuntu/bind9:latest` to the ISC official `internetsystemsconsortium/bind9:9.18`
+  (matching `kind-e2e.sh`). The ISC entrypoint is `named -u bind` (no foreground
+  flag; its default CMD is replaced when we pass args), so the `docker run` args
+  now pass `-g -c /etc/bind/named.conf` (foreground + log to stderr) instead of
+  just `-c /etc/bind/named.conf`.
+
+### Why
+Standardize both integration harnesses on the canonical, version-pinned ISC
+image. `ubuntu/bind9` is a downstream repackage; ISC is upstream.
+
+### Verified
+Ran the drone integration test end-to-end against `internetsystemsconsortium/bind9:9.18`:
+zone create (201) → SOA present → record add (201) → dig resolves 1.2.3.4 →
+delete → absent → zone delete → absent. PASSED.
+
+### Impact
+- [ ] Breaking change
+- [x] Test harness only
+- [ ] Documentation only
+
+## [2026-07-04 12:15] - Bundle nsupdate in the published Chainguard + distroless images
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `docker/Dockerfile.chainguard`: added a Wolfi builder stage (`bind-tools`) that
+  stages `nsupdate` + its shared-library deps (glibc core excluded — the
+  glibc-dynamic runtime provides it), then `COPY --from=nsupdate /staging/ /`
+  into the runtime. Wolfi matches the glibc-dynamic runtime's layout so libs land
+  in `/usr/lib` (default search path — no `LD_LIBRARY_PATH`, so the A-5 child-env
+  scrubbing is unaffected). Builder digest pinned (A11).
+- `docker/Dockerfile`: same technique with a Debian 13 builder (`bind9-dnsutils`)
+  matching the `cc-debian13` runtime. Builder digest pinned (A11).
+- Lib enumeration uses `LD_TRACE_LOADED_OBJECTS=1 <binary>` (the glibc loader's
+  built-in trace) rather than `ldd`, which Wolfi does not ship.
+
+### Why
+After reverting record management to the `nsupdate` CLI, the runtime image must
+contain `nsupdate`. The published Chainguard/distroless images did not, so record
+operations failed with HTTP 500 "Failed to spawn nsupdate process" — caught by
+the kind e2e (which runs the pushed Chainguard image): zone create (RNDC) passed,
+record add 500'd. chef/.local already had `bind-tools`; this closes the gap for
+the two published variants.
+
+### Verified
+Staged `nsupdate` + non-core libs from the Wolfi builder and executed it inside
+the real `cgr.dev/chainguard/glibc-dynamic` base (base glibc + staged bind libs
+only) — `nsupdate 9.20.24` ran. `make regression` green; all four FROM lines
+across both Dockerfiles are `@sha256`-pinned (A11).
+
+### Impact
+- [x] Larger published images (add nsupdate + ~24 bind/openssl libs)
+- [x] Fixes record management in the Chainguard/distroless images + the CI e2e
+- [ ] Documentation only
+
+## [2026-07-04 11:30] - Fix CI: deploy-validate uses grep, not rg
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `scripts/validate-deploy.sh`: replaced `rg` (ripgrep) with POSIX `grep -E` for
+  the A5/A11/A12 checks. GitHub Actions runners do not ship ripgrep, so
+  `make regression` failed in CI with `rg: command not found` (and the
+  `rg ... || fail` falsely reported the PSA check failing). Committed CI scripts
+  must be portable; the `rg` convention is for interactive dev search.
+
+### Impact
+- [x] CI/CD only (fixes the failing `test` job)
+
+
+## [2026-07-04 11:00] - Revert hickory migration back to the nsupdate CLI
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/nsupdate.rs`, `src/nsupdate_test.rs`: restored the subprocess
+  implementation (shells out to the `nsupdate` binary with a 0600 TSIG key file
+  via `-k`, scrubbed child env, control-char injection guard) from before the
+  hickory migration.
+- `Cargo.toml` / `Cargo.lock`: removed `hickory-client`, `hickory-proto`, and
+  `base64` (kept `sha2`, used by auth). Dependency count 342 → 326.
+- `docker/Dockerfile.chef`, `docker/Dockerfile.local`: re-added `bind-tools`
+  (provides `nsupdate`); kept the earlier `ENV DISABLE_AUTH` removal.
+- `src/records.rs`, `docs/src/user-guide/managing-records.md`: reverted the
+  hickory-era wording back to describing `nsupdate`.
+- Removed `.cargo/audit.toml` (no longer needed — the RUSTSEC advisories came
+  from `hickory-proto`).
+
+### Why
+`hickory-proto 0.25.2` carries RUSTSEC-2026-0118 and -0119, and `hickory-client`
+0.26 (which pulls the fixed proto ≥0.26.1) is not yet a stable release — so the
+`cargo audit` CI job failed with no clean upgrade path. Reverting to the CLI
+drops the heavy DNS dependency and its advisories entirely, and `nsupdate` ships
+with BIND9. `cargo audit` now passes.
+
+### Impact
+- [x] Removes a Rust dependency (hickory) and its RUSTSEC advisories
+- [x] Record management again requires the `nsupdate` binary in the image
+- [ ] Documentation only
+
+## [2026-07-04 10:15] - Consolidate CI: single `build.yaml` (pr + main + release)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/workflows/build.yaml`: new single "Build" workflow replacing `pr.yml`,
+  `main.yaml`, and `release.yml` (deleted), modelled on the 5-spot pattern. One
+  workflow triggered on `pull_request` + `push` (main) + `release` +
+  `workflow_dispatch`, with jobs gated by `github.event_name`:
+  - always: license-check, verify-commits, extract-version, build, test, security
+  - pull_request only: format, clippy
+  - non-release (PR + push): docker (build/push), kind-e2e, drone-integration,
+    coverage
+  - release only: docker-release (semver + Cosign), sign-artifacts, SLSA
+    provenance, upload-release-assets, publish-crate
+  Top-level `permissions: contents: read`; jobs escalate as needed. `verify-mode`
+  and image tagging are selected per event. actionlint-clean (one benign SC2129
+  style note — the standard `>> "$GITHUB_OUTPUT"` idiom).
+- `README.md`, `docs/src/index.md`: replaced the three CI badges with one Build
+  badge. `docs/src/developer-guide/testing.md`: point at `build.yaml`.
+- `integration-test/kind-e2e.sh`: added SRV and CAA record add→dig→delete
+  assertions (exercise the native master-file RData parser end-to-end).
+
+### Impact
+- [ ] Breaking change
+- [x] CI/CD only (workflow consolidation)
+- [ ] Documentation only
+
+## [2026-07-04 09:20] - Complete the hickory migration: all record types native (SRV/CAA)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/nsupdate.rs`: `build_rdata` now uses hickory's master-file record-data
+  parser (`RData::try_from_str`) instead of a hand-rolled per-type match. This
+  supports **every** record type hickory can parse — including the previously
+  unsupported **SRV and CAA** — using the same textual format `nsupdate`
+  accepted. Removed the per-type rdata imports/prototype limitation.
+- `src/records.rs`: corrected the validation rationale comments — control-char
+  rejection now protects the zone-file rendering path (C-2) and DNS-name
+  validity, not the (now-removed) nsupdate command-script sink (B-2).
+- `docs/src/user-guide/managing-records.md`: clarified that record updates are
+  sent natively (in-process DNS client, TSIG-signed), not via the `nsupdate`
+  binary — no `bind-tools` needed in the image.
+
+### Notes
+- The `NsupdateExecutor` type, `src/nsupdate.rs` module, and `NSUPDATE_*` env
+  vars are retained as the public/deployment contract (bindy depends on them);
+  only the implementation is native now. `NSUPDATE_TCP` is accepted but ignored
+  (native updates always use TCP).
+
+### Impact
+- [x] Fixes the SRV/CAA breaking limitation from the prototype (all types work)
+- [x] Removes the nsupdate binary dependency from all images (complete)
+- [ ] Documentation only
+
+## [2026-07-04 08:50] - kind e2e tears down the cluster on success
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `integration-test/kind-e2e.sh`: on a successful run the kind cluster is now
+  deleted regardless of whether it was created or reused (previously a *reused*
+  cluster survived because teardown was gated on `CREATED_CLUSTER`). Failure
+  still leaves the cluster up for investigation; `KEEP_CLUSTER=true` still keeps
+  it. Removed the now-dead `CREATED_CLUSTER` variable.
+
+### Impact
+- [ ] Breaking change
+- [x] CI/CD only (e2e cleanup)
+- [ ] Documentation only
+
+## [2026-07-04 08:45] - kind e2e: validate native updater; switch to ISC bind9:9.18
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `integration-test/kind-e2e.sh`: switched the DNS server image from
+  `ubuntu/bind9:latest` to the ISC official `internetsystemsconsortium/bind9:9.18`
+  (canonical, version-pinned). ISC's ENTRYPOINT is `named -u bind` with no
+  foreground flag, so the pod args now pass `-g` (the ubuntu image added it
+  itself). Also: recreate the pod on a reused cluster (delete before apply) so it
+  picks up a freshly-loaded image and regenerated secrets; create `bindy-system`
+  before the server-side manifest dry-run and make that step a real gate;
+  `imagePullPolicy: IfNotPresent` for bind9; removed backticks from a heredoc
+  comment that the shell was command-substituting.
+
+### Verified
+Ran the full kind e2e end-to-end (native RFC 2136 path, no nsupdate binary):
+zone create → SOA present → **record add (HTTP 201) → dig confirms 1.2.3.4** →
+record delete → dig absent → zone delete → absent. The native hickory-client
+TSIG-signed UPDATE is accepted by BIND9. Path B works.
+
+### Impact
+- [ ] Breaking change
+- [x] CI/CD only (e2e harness)
+- [ ] Documentation only
+
+## [2026-07-03 08:10] - Prototype: native RFC 2136 record updates (retire the nsupdate subprocess)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/nsupdate.rs`: reimplemented `NsupdateExecutor` to perform DNS UPDATE
+  (RFC 2136) natively via `hickory-client` with TSIG signing, instead of
+  shelling out to the external `nsupdate` binary. Public API unchanged
+  (`new`/`add_record`/`remove_record`/`update_record`), so `src/records.rs` and
+  `src/main.rs` are untouched. Retired all the subprocess machinery
+  (`create_tsig_key_file`, `build_nsupdate_args`, `minimal_child_env`,
+  `reject_injection_chars`) — the B-2/B-7/A-5 hardening is moot with no child
+  process.
+- `Cargo.toml`: added `hickory-client` + `hickory-proto` (feature `dnssec-ring`
+  for TSIG HMAC) and `base64` (decode the TSIG secret).
+- `src/nsupdate_test.rs`: replaced the subprocess tests with native unit tests
+  (TSIG algorithm mapping, RData construction, executor/TSIG validation).
+- `docker/Dockerfile.chef`, `docker/Dockerfile.local`: removed `bind-tools` — no
+  external `nsupdate` binary is needed anymore. The published **chainguard +
+  distroless** images now support record management with no changes at all.
+- `Makefile`: `manifest-dry-run` now only runs when a cluster is reachable
+  (modern kubectl needs API discovery even for client dry-run) — this also fixes
+  the CI Test job (no cluster) which `make regression` would otherwise fail.
+
+### Why
+Answers "why is nsupdate required at all": it shouldn't be. Records now use a
+native client like zones use native RNDC — removing the per-image binary
+dependency, the subprocess, and its injection surface.
+
+### Known limitation (prototype)
+- SRV and CAA record types are not yet built natively (`build_rdata` returns an
+  error); A/AAAA/CNAME/NS/PTR/TXT/MX are supported. TSIG limited to
+  hmac-sha256/384/512 (hickory-supported; matches the RNDC policy).
+- The live DNS-UPDATE round-trip (TSIG-on-the-wire against BIND) is not covered
+  by unit tests — verify via the kind e2e.
+
+### Impact
+- [x] Breaking change (SRV/CAA record types temporarily unsupported)
+- [ ] Requires cluster rollout
+- [x] Removes a runtime dependency (nsupdate binary) from all images
+- [ ] Documentation only
+
+## [2026-07-03 07:35] - Bundle nsupdate in chef image (record management runtime dep)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `docker/Dockerfile.chef`: add `bind-tools` (provides `nsupdate`) to the runtime
+  stage. bindcar shells out to `nsupdate` for dynamic record add/remove/update
+  (`src/nsupdate.rs:168`); without it those endpoints 500 with "Failed to spawn
+  nsupdate process". Found by running the kind e2e to the record step.
+
+### Open finding (needs decision)
+The **published** images — `docker/Dockerfile.chainguard` and `docker/Dockerfile`
+(distroless) — also do NOT include `nsupdate`, so record management is broken in
+those deployments too. Distroless has no package manager, so this needs an
+explicit approach (COPY the `nsupdate` binary + libs from a builder, or use a
+base that bundles bind-tools). Not changed here pending a decision.
+
+### Impact
+- [ ] Breaking change
+- [x] CI/CD only (chef image build; e2e)
+- [ ] Documentation only
+
+## [2026-07-03 07:20] - Fix kind e2e root cause: build a Linux image (not host Mach-O)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `integration-test/kind-e2e.sh`: build the local e2e image via
+  `docker/Dockerfile.chef` (compiles a statically-linked musl **Linux** binary
+  inside the builder) instead of `docker/Dockerfile.local`, which COPYs the
+  host-built binary — on macOS that is a Darwin Mach-O binary, so the container
+  crash-looped with `exec /usr/local/bin/bindcar: exec format error` on the
+  aarch64 Linux kind node. Also removed backticks from a comment inside the
+  unquoted `<<YAML` pod heredoc that the shell was evaluating (`rndc: command not
+  found`).
+
+### Why
+Ran the kind e2e end-to-end (with permission to `kind load`). bind9 came up
+cleanly; bindcar crash-looped purely due to the wrong-architecture binary baked
+by Dockerfile.local on a macOS host. CI is unaffected — it uses the real
+multi-arch Chainguard image.
+
+### Impact
+- [ ] Breaking change
+- [x] CI/CD only (local kind e2e image build)
+- [ ] Documentation only
+
+## [2026-07-02 11:45] - Fix kind e2e run-only failures + BuildKit lint
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `integration-test/kind-e2e.sh`: deploy the pod under an explicit,
+  synchronously-created `e2e-runner` ServiceAccount (`automountServiceAccountToken:
+  false`) instead of the namespace `default` SA — that SA is provisioned by a
+  controller that is slow/starved on a loaded machine, so the pod was rejected
+  with "serviceaccount default not found" even after a 76s wait; bump
+  `kind create --wait` to 300s and add an explicit
+  `kubectl wait --for=condition=Ready nodes` (control-plane Ready timed out on a
+  slow machine); drop the extra `-g` from the bind9 args to match the proven
+  drone-test invocation (the ubuntu/bind9 entrypoint already runs foreground).
+- `docker/Dockerfile.local`, `docker/Dockerfile`, `docker/Dockerfile.chainguard`:
+  removed the redundant `ENV DISABLE_AUTH=false` (the binary already defaults it
+  to false) which tripped BuildKit's `SecretsUsedInArgOrEnv` lint.
+
+### Why
+First real `make regression-full` run surfaced a namespace/ServiceAccount race
+and a node-readiness timeout in the kind harness, plus a Docker build warning.
+
+### Impact
+- [ ] Breaking change
+- [x] CI/CD only (kind e2e harness + image build hygiene)
+- [ ] Documentation only
+
+## [2026-07-02 11:15] - Wire kind e2e into CI reusing the pushed image
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/workflows/pr.yml`: new `kind-e2e` job that `needs: [docker,
+  extract-version]` — it runs AFTER the image is built+pushed and consumes that
+  exact artifact (no rebuild). Logs into ghcr, installs kind, and runs
+  `make kind-e2e BINDCAR_IMAGE=ghcr.io/<repo>:<tag> SKIP_IMAGE_BUILD=true` using
+  the `image-repository-chainguard` / `image-tag-chainguard` outputs.
+- `integration-test/kind-e2e.sh`: when `SKIP_IMAGE_BUILD=true`, pulls
+  `BINDCAR_IMAGE` if not already local, then `kind load`s it — so the same
+  script serves local (build Dockerfile.local) and CI (reuse pushed image).
+- `Makefile`: `kind-e2e` now accepts `BINDCAR_IMAGE` / `SKIP_IMAGE_BUILD` (and
+  `KIND_CLUSTER`) as overridable vars and forwards them to the script; added
+  `?=` defaults (`bindcar:e2e`, `false`). Fixed the `help` target regex to
+  include digits so `kind-e2e` (and any numeric target) is listed.
+
+### Why
+The kind e2e must exercise the real published image, not a throwaway rebuild —
+so it depends on the docker build stage and receives the image name as a make
+var, reusing the existing pipeline (binaries → images → e2e) end to end.
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [x] CI/CD only (new kind-e2e PR job consuming the pushed image)
+- [ ] Documentation only
+
+## [2026-07-02 10:30] - Restructure test targets: `unit-tests`, `manifest-dry-run`, kind e2e
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `Makefile`: renamed `test-all` → `unit-tests` (kept `test-all` as an alias) —
+  unit + doctests for both feature sets, **no cluster**. Added `manifest-dry-run`
+  (client-side `kubectl apply --dry-run=client -f deploy/`, skipped if kubectl
+  absent). `regression` is now the **no-cluster** gate (fmt-check, clippy-all,
+  unit-tests, deploy-validate, manifest-dry-run). Added `kind-e2e`;
+  `regression-full` = `regression` + `kind-e2e` (was regression + the Docker
+  drone test).
+- `integration-test/kind-e2e.sh`: new end-to-end suite that runs ON a kind
+  cluster — deploys a Pod with BIND9 (unprivileged :5353) + the bindcar sidecar
+  (`0.0.0.0:8080` with `BIND_API_TOKEN`, exercising the non-loopback auth
+  startup guard), then port-forwards and drives the full zone/record lifecycle
+  (create zone → dig SOA → add A → dig → delete → dig absent) plus an
+  unauthenticated-request-rejected (401) check, and server-side-validates
+  `deploy/rbac.yaml` + `deploy/networkpolicy.yaml`.
+
+### Why
+Make the test taxonomy explicit: `unit-tests` (no cluster), `regression` (no
+cluster, CI gate), `regression-full` (adds kind e2e). `make test` alone only
+ran default features and no cluster-level validation.
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [x] CI/CD only (new/renamed make targets; kind e2e requires docker+kind+kubectl)
+- [ ] Documentation only
+
+## [2026-07-02 09:00] - Full regression suite: `make regression`
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `Makefile`: added `regression` (and `regression-full`) plus building blocks
+  `fmt-check`, `clippy-all`, `test-all`, `deploy-validate`. `make regression`
+  runs the entire static+unit suite for **both** feature sets: `cargo fmt
+  --check`, clippy (`-D warnings`) for default AND `k8s-token-review`, all
+  tests+doctests for default AND `k8s-token-review`, and the deploy-invariant
+  checks. `regression-full` additionally runs the drone integration test.
+- `scripts/validate-deploy.sh`: new static validator asserting the RED-team
+  hardening cannot silently regress — YAML validity, PSA `restricted` (A5),
+  scoped NetworkPolicy egress / no implicit `0.0.0.0/0` (A6), no
+  `system:auth-delegator` roleRef + minimal `bindcar-tokenreview` role (A10),
+  digest-pinned production Dockerfiles (A11), SHA-2-only RNDC HMAC (A12). Self-
+  installs PyYAML if absent so CI stays a clean `make` call.
+- `.github/workflows/pr.yml`: the **Test** job now runs `make regression`
+  (was `make test`), so every PR is checked against both feature sets +
+  doctests + deploy invariants. This also enforces `cargo fmt --check` in CI
+  (the standalone `format` job runs mutating `make fmt`, which never failed on
+  unformatted code).
+
+### Why
+`make test` / CI ran only the default feature set and never validated the
+deploy manifests. `make regression` is the single command that exercises the
+full matrix and locks in the security invariants.
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [x] CI/CD only (new `make regression` target; suggest CI call it)
+- [ ] Documentation only
+
 ## [2026-07-01 16:20] - Bump firestoned/github-actions v1.3.6 → v1.3.7 (cargo login --stdin fix)
 
 **Author:** Erick Bourgeois
