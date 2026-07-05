@@ -28,7 +28,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-BIND9_IMAGE="${BIND9_IMAGE:-ubuntu/bind9:latest}"
+BIND9_IMAGE="${BIND9_IMAGE:-internetsystemsconsortium/bind9:9.18}"
 CONTAINER_NAME="bindcar-drone-integration-test"
 BIND9_DNS_PORT="${BIND9_DNS_PORT:-15353}"
 BIND9_RNDC_PORT="${BIND9_RNDC_PORT:-9953}"
@@ -237,7 +237,7 @@ docker run -d \
     -v      "${BIND9_CONF_DIR}:/etc/bind:ro" \
     -v      "${ZONE_DIR}:${ZONE_DIR}" \
     "$BIND9_IMAGE" \
-    -c /etc/bind/named.conf \
+    -g -c /etc/bind/named.conf \
     >/dev/null
 
 # Give named a moment to either start or crash on a bad config
