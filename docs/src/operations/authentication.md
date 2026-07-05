@@ -13,25 +13,33 @@ All other endpoints require a valid Bearer token in the Authorization header.
 
 ## Authentication Modes
 
-bindcar supports two authentication modes:
+The published bindcar images are built with the `k8s-token-review` feature
+compiled in, and the active mode is selected **at runtime**. Shared-secret and
+TokenReview auth are **mutually exclusive** — a single Bearer token cannot be
+both a shared secret and a valid ServiceAccount token — so `BIND_API_TOKEN`
+selects the mode:
 
-### Basic Mode (Default)
+### Shared-secret Mode (`BIND_API_TOKEN` set)
 
-- Validates token presence and format only
-- Does NOT verify token signatures
-- Does NOT check expiration
-- Suitable for trusted environments or when using external auth (API gateway, Linkerd service mesh)
+- The presented Bearer token must equal `BIND_API_TOKEN` (constant-time compare)
+- The Kubernetes TokenReview API is **not** consulted, and the fail-closed
+  TokenReview allowlist guard (below) is **not** enforced at startup
+- Suitable for drone/standalone deployments and trusted environments
 
-### TokenReview Mode (Optional)
+### TokenReview Mode (`BIND_API_TOKEN` unset, feature compiled)
 
-- Full token validation with Kubernetes TokenReview API
-- Verifies token signatures
-- Checks token expiration
-- Validates token audience
+- Full token validation with the Kubernetes TokenReview API
+- Verifies token signatures, checks expiration, validates token audience
 - Restricts to allowed namespaces and ServiceAccounts
-- **Recommended for production Kubernetes deployments**
+- **Fail-closed**: bindcar refuses to start unless an allowlist
+  (`BIND_ALLOWED_NAMESPACES` / `BIND_ALLOWED_SERVICE_ACCOUNTS`) is set or
+  `BIND_ALLOW_ANY_SERVICEACCOUNT=true` is explicitly configured
+- **Recommended for production Kubernetes deployments** (this is how bindy runs bindcar)
 
-Enable TokenReview mode by building with the `k8s-token-review` feature. See [Kubernetes TokenReview Validation](../developer-guide/k8s-token-validation.md) for detailed configuration.
+> A build **without** the `k8s-token-review` feature only validates token
+> presence/format (no signature check) — token verification must then be handled
+> by infrastructure (API gateway, Linkerd service mesh). See
+> [Kubernetes TokenReview Validation](../developer-guide/k8s-token-validation.md).
 
 ## Bearer Token Authentication
 

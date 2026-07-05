@@ -4,7 +4,9 @@
 # Makefile for bindcar
 
 # Configuration
-K8S_OPENAPI_ENABLED_VERSION ?= 1.32
+# Note: the k8s-openapi API version is pinned via the `k8s-token-review` feature
+# in Cargo.toml (k8s-openapi/v1_32), so no K8S_OPENAPI_ENABLED_VERSION env is
+# needed — setting it to a different version would conflict with the feature.
 IMAGE_NAME ?= bindcar
 IMAGE_TAG ?= latest
 REGISTRY ?= ghcr.io/firestoned
@@ -24,11 +26,11 @@ help: ## Show this help
 
 .PHONY: build
 build: ## Build the binary in release mode
-	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo build --release
+	cargo build --release
 
 .PHONY: test
 test: ## Run tests
-	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo test
+	cargo test
 
 .PHONY: fmt
 fmt: ## Format code
@@ -36,7 +38,7 @@ fmt: ## Format code
 
 .PHONY: clippy
 clippy: ## Run clippy
-	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo clippy -- -D warnings
+	cargo clippy -- -D warnings
 
 .PHONY: check
 check: fmt clippy test ## Run all checks
@@ -53,16 +55,16 @@ fmt-check: ## Verify formatting without modifying files
 .PHONY: clippy-all
 clippy-all: ## Clippy for default AND k8s-token-review features (deny warnings)
 	@echo "==> clippy (default features)"
-	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo clippy --all-targets -- -D warnings
+	cargo clippy --all-targets -- -D warnings
 	@echo "==> clippy (k8s-token-review feature)"
-	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo clippy --all-targets --features k8s-token-review -- -D warnings
+	cargo clippy --all-targets --features k8s-token-review -- -D warnings
 
 .PHONY: unit-tests
 unit-tests: ## Unit + doctests for BOTH feature sets — no cluster required
 	@echo "==> unit tests (default features)"
-	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo test
+	cargo test
 	@echo "==> unit tests (k8s-token-review feature)"
-	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo test --features k8s-token-review
+	cargo test --features k8s-token-review
 
 # Back-compat alias.
 .PHONY: test-all
@@ -147,7 +149,7 @@ docker-buildx: ## Build multi-arch Docker image
 .PHONY: run
 run: ## Run the API server locally
 	@mkdir -p .tmp/zones
-	K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) RUST_LOG=debug BIND_ZONE_DIR=.tmp/zones cargo run
+	RUST_LOG=debug BIND_ZONE_DIR=.tmp/zones cargo run
 
 .PHONY: clean
 clean: ## Clean build artifacts
@@ -164,7 +166,7 @@ docs: ## Build all documentation (MkDocs + rustdoc + OpenAPI)
 	@echo "Ensuring documentation dependencies are installed..."
 	@cd docs && poetry install --no-interaction --quiet
 	@echo "Building rustdoc API documentation..."
-	@K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo doc --no-deps --all-features
+	@cargo doc --no-deps --all-features
 	@echo "Building MkDocs documentation..."
 	@cd docs && poetry run mkdocs build
 	@echo "Copying rustdoc into documentation..."
@@ -228,7 +230,7 @@ docs-serve: ## Serve documentation locally with live reload (MkDocs)
 .PHONY: docs-rustdoc
 docs-rustdoc: ## Build and open rustdoc API documentation only
 	@echo "Building rustdoc API documentation..."
-	@K8S_OPENAPI_ENABLED_VERSION=$(K8S_OPENAPI_ENABLED_VERSION) cargo doc --no-deps --all-features --open
+	@cargo doc --no-deps --all-features --open
 
 .PHONY: docs-clean
 docs-clean: ## Clean documentation build artifacts

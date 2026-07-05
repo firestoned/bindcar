@@ -210,9 +210,19 @@ pub fn check_authorization_posture(
 /// Returns `true` if a real authenticator is configured at runtime: either the
 /// Kubernetes TokenReview feature is compiled in, or a shared secret is set.
 pub fn has_real_auth() -> bool {
-    if cfg!(feature = "k8s-token-review") {
-        return true;
-    }
+    cfg!(feature = "k8s-token-review") || shared_secret_configured()
+}
+
+/// Returns `true` when shared-secret authentication is the selected mode — i.e.
+/// [`BIND_API_TOKEN_ENV`] is set to a non-empty value.
+///
+/// Shared-secret and Kubernetes TokenReview are **mutually exclusive**: a single
+/// Bearer token cannot be both the shared secret and a valid ServiceAccount
+/// token. When a shared secret is configured it is the selected mode, so the
+/// TokenReview path is not consulted at request time and the fail-closed
+/// TokenReview authorization posture (A2) is not enforced at startup. TokenReview
+/// is used only when no shared secret is set (and the feature is compiled in).
+pub fn shared_secret_configured() -> bool {
     std::env::var(BIND_API_TOKEN_ENV)
         .map(|value| !value.is_empty())
         .unwrap_or(false)
@@ -563,24 +573,29 @@ pub async fn authenticate(
         return Err((StatusCode::UNAUTHORIZED, Json(AuthError { error: e })));
     }
 
-    // Validate token with Kubernetes TokenReview API if feature is enabled.
+    // Validate token with Kubernetes TokenReview API — but only when TokenReview
+    // is the active mode. A configured shared secret (BIND_API_TOKEN) selects
+    // shared-secret auth, which is mutually exclusive with TokenReview (see
+    // `shared_secret_configured`), so we do not also require the Bearer token to
+    // be a valid ServiceAccount token.
+    //
     // The detailed reason (namespace/SA/api error) is logged server-side only; the
     // client gets a single generic "Unauthorized" so it cannot distinguish
     // "valid token, wrong namespace" from "invalid token" from "apiserver
     // unreachable" — an authorization/identity-enumeration oracle (A7).
     #[cfg(feature = "k8s-token-review")]
-    if let Err(e) = validate_token_with_k8s(token).await {
-        warn!("Token validation failed: {}", e);
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(AuthError {
-                error: "Unauthorized".to_string(),
-            }),
-        ));
+    if !shared_secret_configured() {
+        if let Err(e) = validate_token_with_k8s(token).await {
+            warn!("Token validation failed: {}", e);
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(AuthError {
+                    error: "Unauthorized".to_string(),
+                }),
+            ));
+        }
+        debug!("Token validated with Kubernetes TokenReview API");
     }
-
-    #[cfg(feature = "k8s-token-review")]
-    debug!("Token validated with Kubernetes TokenReview API");
 
     #[cfg(not(feature = "k8s-token-review"))]
     debug!("Token validation: basic mode (presence check only)");
