@@ -78,7 +78,11 @@ sha2 = "0.10"
 
 [features]
 default = []
-k8s-token-review = ["kube", "k8s-openapi"]
+# Pin the k8s-openapi API version via the feature so a release binary build
+# (`cargo build --release --features k8s-token-review`) needs no
+# K8S_OPENAPI_ENABLED_VERSION env var — the version travels with the feature,
+# on host cargo and in the aarch64 cross container alike.
+k8s-token-review = ["kube", "k8s-openapi", "k8s-openapi/v1_32"]
 
 [dev-dependencies]
 # Testing

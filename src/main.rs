@@ -297,38 +297,47 @@ async fn start_server(command: &Commands, insecure_override: bool) -> anyhow::Re
         #[cfg(feature = "k8s-token-review")]
         {
             use bindcar::auth::{
-                check_authorization_posture, detect_kube_auth_mode, KubeAuthMode,
-                TokenReviewConfig, ALLOW_ANY_SERVICE_ACCOUNT_ENV,
+                check_authorization_posture, detect_kube_auth_mode, shared_secret_configured,
+                KubeAuthMode, TokenReviewConfig, ALLOW_ANY_SERVICE_ACCOUNT_ENV,
             };
 
-            // Fail-closed authorization posture (A2): with TokenReview active but
-            // no namespace/service-account allowlist, any authenticated
-            // ServiceAccount in the cluster would be authorized. Refuse to start
-            // unless the operator configured an allowlist or explicitly opted in.
-            let tr_config = TokenReviewConfig::from_env();
-            let allow_any = std::env::var(ALLOW_ANY_SERVICE_ACCOUNT_ENV)
-                .ok()
-                .and_then(|v| v.parse::<bool>().ok())
-                .unwrap_or(false);
-            if let Err(e) =
-                check_authorization_posture(tr_config.is_authorization_restricted(), allow_any)
-            {
-                error!("{}", e);
-                return Err(anyhow::anyhow!(e));
-            }
-            if allow_any && !tr_config.is_authorization_restricted() {
-                warn!("⚠️  BIND_ALLOW_ANY_SERVICEACCOUNT is set: every authenticated ServiceAccount in the cluster is authorized");
-            }
-
-            match detect_kube_auth_mode() {
-                KubeAuthMode::Explicit { ref server, .. } => {
-                    info!(
-                        "kubernetes auth mode: explicit (KUBE_API_SERVER={})",
-                        server
-                    );
+            // TokenReview and shared-secret auth are mutually exclusive: a
+            // configured shared secret (BIND_API_TOKEN) selects shared-secret
+            // mode, in which TokenReview is never consulted at request time
+            // (see auth::authenticate). Only enforce the fail-closed TokenReview
+            // authorization posture (A2) when TokenReview is the active mode.
+            if shared_secret_configured() {
+                info!("auth mode: shared-secret (BIND_API_TOKEN) — Kubernetes TokenReview is not active");
+            } else {
+                // Fail-closed authorization posture (A2): with TokenReview active
+                // but no namespace/service-account allowlist, any authenticated
+                // ServiceAccount in the cluster would be authorized. Refuse to
+                // start unless the operator configured an allowlist or opted in.
+                let tr_config = TokenReviewConfig::from_env();
+                let allow_any = std::env::var(ALLOW_ANY_SERVICE_ACCOUNT_ENV)
+                    .ok()
+                    .and_then(|v| v.parse::<bool>().ok())
+                    .unwrap_or(false);
+                if let Err(e) =
+                    check_authorization_posture(tr_config.is_authorization_restricted(), allow_any)
+                {
+                    error!("{}", e);
+                    return Err(anyhow::anyhow!(e));
                 }
-                KubeAuthMode::Default => {
-                    info!("kubernetes auth mode: try_default (KUBECONFIG / ~/.kube/config / in-cluster)");
+                if allow_any && !tr_config.is_authorization_restricted() {
+                    warn!("⚠️  BIND_ALLOW_ANY_SERVICEACCOUNT is set: every authenticated ServiceAccount in the cluster is authorized");
+                }
+
+                match detect_kube_auth_mode() {
+                    KubeAuthMode::Explicit { ref server, .. } => {
+                        info!(
+                            "kubernetes auth mode: explicit (KUBE_API_SERVER={})",
+                            server
+                        );
+                    }
+                    KubeAuthMode::Default => {
+                        info!("kubernetes auth mode: try_default (KUBECONFIG / ~/.kube/config / in-cluster)");
+                    }
                 }
             }
         }

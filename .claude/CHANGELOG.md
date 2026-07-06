@@ -1,5 +1,88 @@
 # Changelog
 
+## [2026-07-05 11:45] - Runtime-select auth mode: shared-secret and TokenReview mutually exclusive
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/auth.rs`: added `shared_secret_configured()` (BIND_API_TOKEN set → true).
+  `authenticate()` now consults the Kubernetes TokenReview API **only when
+  shared-secret mode is not selected** — the two modes are mutually exclusive.
+  Refactored `has_real_auth()` to reuse the helper.
+- `src/main.rs`: the A2 fail-closed TokenReview authorization guard runs **only
+  in TokenReview mode**; shared-secret mode logs that TokenReview is not active.
+- `src/auth_test.rs`: added `auth_mode_selection_tests`.
+- `docs/src/operations/authentication.md`: rewrote "Authentication Modes" — the
+  mode is now runtime-selected by `BIND_API_TOKEN` (the published image always
+  has the feature compiled in).
+
+### Why
+Shipping the `k8s-token-review` feature in the published image made TokenReview
+AND'd onto every request whenever the feature was compiled, and the A2 guard
+required an allowlist — which broke shared-secret/drone deployments: the kind e2e
+crashed at startup, and even past it, every shared-secret request would have
+401'd via TokenReview (a single Bearer token cannot be both the shared secret and
+a valid ServiceAccount token). Making the modes mutually exclusive lets one image
+serve both bindy (TokenReview) and drone/shared-secret deployments.
+
+### Verified
+Feature-enabled binary in shared-secret mode, no cluster: starts (guard skipped);
+no token / wrong token → 401; **right token → 200** (TokenReview skipped — would
+have 401'd if it had run). `make regression` green (351 tests incl. the new
+mode-selection tests). TokenReview mode (no `BIND_API_TOKEN`) is unchanged — the
+fail-closed guard is intact.
+
+### Impact
+- [x] Fixes shared-secret/drone auth in the feature-enabled image (kind e2e)
+- [x] TokenReview mode unchanged; A2 fail-closed guarantee preserved
+- [ ] Breaking change (a shared-secret deployment that also expected TokenReview
+      enforcement — impossible with one Bearer token — now cleanly uses shared
+      secret only)
+
+## [2026-07-05 09:30] - Ship k8s-token-review in published binaries; pin k8s-openapi version via feature
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/workflows/build.yaml`: the `Build binary` step now passes
+  `extra-args: "--features k8s-token-review"`. CI already lint/tested both feature
+  sets, but the **shipped** release binary was built feature-less, so the
+  published image could not perform Kubernetes TokenReview and tripped the
+  startup guard under bindy's config (the "Mode B" blocker).
+- `Cargo.toml`: the `k8s-token-review` feature now also enables
+  `k8s-openapi/v1_32`, pinning the API version. Previously the version came only
+  from a dev-dependency (tests) plus the `K8S_OPENAPI_ENABLED_VERSION` env var
+  (release builds), so `cargo build --release --features k8s-token-review`
+  without that env panicked ("None of the v1_* features are enabled").
+- Removed `K8S_OPENAPI_ENABLED_VERSION` from `Makefile`, the `build.yaml` env,
+  and the `Cross.toml` aarch64 passthrough — the feature is now the single source
+  of truth. (The env acts as a feature toggle: env `1.33` alongside the pinned
+  `v1_32` hard-errors "Both v1_32 and v1_33 features enabled", so keeping both was
+  a latent footgun.)
+
+### Why
+bindy runs bindcar with TokenReview enabled; the default (`default = []`) binary
+lacks the `kube`/`k8s-openapi` path. Pinning the version in the feature makes the
+release build work on host cargo AND in the aarch64 `cross` container with no env
+var to forget or mismatch.
+
+### Verified
+`cargo build --release --features k8s-token-review` (env unset) compiles (pulls
+`kube v4.0.0`, `k8s-openapi 0.28`); `make regression` (env unset) green — clippy
++ unit/doctests for both feature sets.
+
+### Follow-up (separate repo)
+The `firestoned/github-actions` `rust/generate-sbom` action has no `features`
+input, so the SBOM is generated feature-less and omits `kube`/`k8s-openapi`. Add
+a `features`/`extra-args` input there and pass `--features k8s-token-review` so
+the SBOM matches the shipped binary. Not fixed inline (composite-action rule).
+
+### Impact
+- [x] Published images can now do TokenReview (fixes bindy Mode B)
+- [x] `cargo build --release --features k8s-token-review` needs no env var
+- [ ] Breaking change
+- [x] CI/CD + build config
+
 ## [2026-07-04 13:10] - Fix nsupdate builder COPY: remap /lib to /usr/lib (usrmerge)
 
 **Author:** Erick Bourgeois

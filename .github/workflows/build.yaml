@@ -36,7 +36,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  K8S_OPENAPI_ENABLED_VERSION: "1.32"
 
 jobs:
 
@@ -200,6 +199,12 @@ jobs:
         uses: firestoned/github-actions/rust/build-binary@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
         with:
           target: ${{ matrix.platform.target }}
+          # Ship the k8s TokenReview auth path — bindy runs bindcar with
+          # TokenReview enabled, and the default (feature-less) binary trips the
+          # startup guard. The feature pins k8s-openapi's API version (v1_32) in
+          # Cargo.toml, so no K8S_OPENAPI_ENABLED_VERSION env is needed on host
+          # cargo or in the aarch64 cross container.
+          extra-args: "--features k8s-token-review"
 
       - name: Generate SBOM
         uses: firestoned/github-actions/rust/generate-sbom@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7

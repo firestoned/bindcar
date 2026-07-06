@@ -887,3 +887,46 @@ mod b4_auth_posture_tests {
         assert!(check_startup_auth_posture(true, false, "0.0.0.0", true).is_ok());
     }
 }
+
+/// Auth-mode selection (Option 1): shared-secret and TokenReview are mutually
+/// exclusive. A configured `BIND_API_TOKEN` selects shared-secret mode, in which
+/// TokenReview is not consulted and the A2 fail-closed guard is not enforced.
+#[cfg(test)]
+mod auth_mode_selection_tests {
+    use crate::auth::{has_real_auth, shared_secret_configured, BIND_API_TOKEN_ENV};
+    use serial_test::serial;
+    use std::env;
+
+    #[test]
+    #[serial]
+    fn test_shared_secret_configured_true_when_token_set() {
+        env::set_var(BIND_API_TOKEN_ENV, "s3cret-token");
+        assert!(shared_secret_configured());
+        env::remove_var(BIND_API_TOKEN_ENV);
+    }
+
+    #[test]
+    #[serial]
+    fn test_shared_secret_configured_false_when_unset() {
+        env::remove_var(BIND_API_TOKEN_ENV);
+        assert!(!shared_secret_configured());
+    }
+
+    #[test]
+    #[serial]
+    fn test_shared_secret_configured_false_when_empty() {
+        // An empty value is not a usable secret and must not select the mode.
+        env::set_var(BIND_API_TOKEN_ENV, "");
+        assert!(!shared_secret_configured());
+        env::remove_var(BIND_API_TOKEN_ENV);
+    }
+
+    #[test]
+    #[serial]
+    fn test_has_real_auth_true_with_shared_secret() {
+        env::remove_var(BIND_API_TOKEN_ENV);
+        env::set_var(BIND_API_TOKEN_ENV, "tok");
+        assert!(has_real_auth());
+        env::remove_var(BIND_API_TOKEN_ENV);
+    }
+}
