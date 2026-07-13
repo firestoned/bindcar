@@ -64,14 +64,14 @@ lazy_static! {
     )
     .expect("Failed to create RNDC_COMMAND_DURATION_SECONDS metric");
 
-    /// Total number of zones managed
-    pub static ref ZONES_MANAGED_TOTAL: Gauge = register_gauge!(
+    /// Current number of zones managed (Gauge, no _total suffix)
+    pub static ref ZONES_MANAGED: Gauge = register_gauge!(
         opts!(
-            "bindcar_zones_managed_total",
-            "Total number of zones currently managed"
+            "bindcar_zones_managed",
+            "Current number of zones managed"
         )
     )
-    .expect("Failed to create ZONES_MANAGED_TOTAL metric");
+    .expect("Failed to create ZONES_MANAGED metric");
 
     /// Application info metric
     pub static ref APP_INFO: CounterVec = register_counter_vec!(
@@ -141,7 +141,7 @@ pub fn record_rndc_command(command: &str, success: bool, duration: f64) {
 
 /// Update the total number of managed zones
 pub fn update_zones_count(count: i64) {
-    ZONES_MANAGED_TOTAL.set(count as f64);
+    ZONES_MANAGED.set(count as f64);
 }
 
 /// Record a rate limit check

@@ -92,7 +92,7 @@ curl http://localhost:8080/metrics
 - Results: `success`, `error`
 - Description: Total number of zone operations
 
-**`bindcar_zones_managed_total`**
+**`bindcar_zones_managed`**
 - Type: Gauge
 - Description: Current number of zones managed
 
