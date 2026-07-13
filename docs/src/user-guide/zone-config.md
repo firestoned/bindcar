@@ -147,28 +147,44 @@ For dynamic updates with TSIG authentication.
 
 Requires BIND9 to be configured with the named key.
 
+### Primaries
+
+IP addresses of primary servers for secondary zones. Supports the compact `ip:port` syntax.
+
+```json
+{
+  "primaries": ["192.0.2.1", "192.0.2.2:5353"]
+}
+```
+
+- **Type**: Array of strings
+- **Format**: Bare IP (defaults to port 53) or `ip:port` / `[ipv6]:port`
+- **Use Case**: Specify the primary DNS server(s) for a secondary zone
+- **BIND9 Directive**: `primaries { ... };`
+- **Required**: Yes, for `secondary` zone types
+
 ## Zone Transfer Configuration (Optional)
 
 Configure zone transfers for high availability with secondary DNS servers.
 
 ### Also Notify
 
-IP addresses of secondary servers to notify when the zone changes:
+IP addresses of secondary servers to notify when the zone changes. Supports the compact `ip:port` syntax.
 
 ```json
 {
-  "alsoNotify": ["10.244.2.101", "10.244.2.102"]
+  "alsoNotify": ["10.244.2.101", "10.244.2.102:5353"]
 }
 ```
 
 - **Type**: Array of strings
-- **Format**: IP addresses (IPv4 or IPv6)
+- **Format**: Bare IP (defaults to port 53) or `ip:port` / `[ipv6]:port`
 - **Use Case**: Automatically notify secondary servers of zone updates
 - **BIND9 Directive**: `also-notify { ... };`
 
 ### Allow Transfer
 
-IP addresses allowed to transfer the zone:
+IP addresses allowed to transfer the zone (bare IPs only, no port syntax):
 
 ```json
 {
