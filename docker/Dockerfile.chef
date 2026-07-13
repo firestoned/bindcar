@@ -11,7 +11,7 @@
 # The rust:1.91.0 image doesn't include it by default, so we install it in a separate stage.
 
 # Stage 1: Prepare cargo-chef
-FROM rust:1.96.0 AS chef
+FROM rust:1.97.0 AS chef
 RUN cargo install cargo-chef
 WORKDIR /workspace
 
