@@ -101,12 +101,12 @@ curl -X POST http://localhost:8080/api/v1/zones \
       },
       "nameServers": ["ns1.example.com."],
       "nameServerIps": {},
-      "primaries": ["192.0.2.1", "192.0.2.2"]
+      "primaries": ["192.0.2.1", "192.0.2.2:5353"]
     }
   }'
 ```
 
-**Note**: Secondary zones require the `primaries` field with at least one IP address of the primary server(s).
+**Note**: Secondary zones require the `primaries` field with at least one IP address of the primary server(s). Entries may optionally include a port using the compact `ip:port` syntax (e.g., `"192.0.2.2:5353"`). A bare IP defaults to port 53.
 
 ### Example - DNSSEC-Enabled Zone
 
@@ -307,7 +307,7 @@ Content-Type: application/json
 | `allowTransfer` | array[string] | No | IP addresses allowed to transfer the zone |
 | `allowUpdate` | array[string] | No | IP addresses allowed to perform dynamic updates to the zone |
 
-**Note**: At least one field must be provided. All fields are optional, but the request cannot be empty.
+**Note**: At least one field must be provided. All fields are optional, but the request cannot be empty. Entries must be bare IP addresses (`ip:port` syntax is not supported by the PATCH endpoint).
 
 ### Response
 

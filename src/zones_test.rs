@@ -1274,6 +1274,50 @@ fn test_validate_ip_list_rejects_rndc_config_injection() {
 }
 
 #[test]
+fn test_validate_ip_port_list_accepts_bare_and_ported_entries() {
+    let entries = vec![
+        "192.0.2.1".to_string(),
+        "2001:db8::1".to_string(),
+        "192.0.2.2:5353".to_string(),
+        "[2001:db8::2]:53".to_string(),
+    ];
+    assert!(validate_ip_port_list("primaries", &entries).is_ok());
+    assert!(validate_ip_port_list("also-notify", &[]).is_ok());
+}
+
+#[test]
+fn test_validate_ip_port_list_rejects_bad_entries() {
+    assert!(validate_ip_port_list("primaries", &["not-an-ip".to_string()]).is_err());
+    assert!(validate_ip_port_list("primaries", &["192.0.2.1:99999".to_string()]).is_err());
+    assert!(validate_ip_port_list("primaries", &["192.0.2.1:abc".to_string()]).is_err());
+    assert!(validate_ip_port_list("primaries", &["192.0.2.1 port 5353".to_string()]).is_err());
+    assert!(validate_ip_port_list("primaries", &["[bad]:5353".to_string()]).is_err());
+    assert!(validate_ip_port_list(
+        "primaries",
+        &[r#"1.2.3.4; }; zone "x" { type primary; "#.to_string()]
+    )
+    .is_err());
+    assert!(validate_ip_port_list("primaries", &["".to_string()]).is_err());
+}
+
+#[test]
+fn test_render_ip_port_entry() {
+    // Bare IPs pass through unchanged (with trailing "; ")
+    assert_eq!(render_ip_port_entry("192.0.2.1"), "192.0.2.1; ");
+    assert_eq!(render_ip_port_entry("2001:db8::1"), "2001:db8::1; ");
+    // IPv4:port converts to BIND "port" syntax
+    assert_eq!(
+        render_ip_port_entry("192.0.2.2:5353"),
+        "192.0.2.2 port 5353; "
+    );
+    // IPv6 bracketed:port converts to BIND "port" syntax (unbracketed)
+    assert_eq!(
+        render_ip_port_entry("[2001:db8::2]:53"),
+        "2001:db8::2 port 53; "
+    );
+}
+
+#[test]
 fn test_validate_zone_config_content_accepts_clean_config() {
     assert!(validate_zone_config_content(&clean_zone_config()).is_ok());
 }

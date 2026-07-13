@@ -167,6 +167,78 @@ pub(crate) fn validate_ip_list(field: &str, ips: &[String]) -> Result<(), ApiErr
     Ok(())
 }
 
+/// Parse an IP address entry with optional port.
+///
+/// Accepts:
+/// - Bare IPv4: `192.0.2.1`
+/// - Bare IPv6: `2001:db8::1`
+/// - IPv4 with port: `192.0.2.2:5353`
+/// - IPv6 with port (bracketed): `[2001:db8::1]:5353`
+///
+/// Returns `(address, port)` where port is `None` when not specified.
+/// Returns `None` for invalid input.
+pub(crate) fn parse_ip_port_entry(s: &str) -> Option<(&str, Option<u16>)> {
+    // Bracketed IPv6: [::1] or [::1]:5353
+    if let Some(inner) = s.strip_prefix('[') {
+        let (addr, rest) = inner.split_once(']')?;
+        addr.parse::<std::net::Ipv6Addr>().ok()?;
+        let port = match rest.strip_prefix(':') {
+            Some(p) => Some(p.parse::<u16>().ok()?),
+            None if rest.is_empty() => None,
+            _ => return None,
+        };
+        return Some((addr, port));
+    }
+
+    // Try last-colon split for ipv4:port
+    let mut parts = s.rsplitn(2, ':');
+    let last = parts.next().unwrap();
+    let prefix = parts.next();
+
+    if let Some(prefix) = prefix {
+        if let Ok(port) = last.parse::<u16>() {
+            if prefix.parse::<std::net::Ipv4Addr>().is_ok() {
+                return Some((prefix, Some(port)));
+            }
+        }
+    }
+
+    // Bare IP (v4 or v6)
+    s.parse::<std::net::IpAddr>().ok()?;
+    Some((s, None))
+}
+
+/// Render an IP:port entry into BIND config syntax (`ip port N`).
+pub(crate) fn render_ip_port_entry(s: &str) -> String {
+    if let Some((addr, Some(port))) = parse_ip_port_entry(s) {
+        format!("{} port {}; ", addr, port)
+    } else {
+        format!("{}; ", s)
+    }
+}
+
+/// Validate transfer endpoints rendered into BIND `primaries` / `also-notify` blocks.
+///
+/// Accepts either a bare IP address (`192.0.2.1`) or the compact `ip:port`
+/// syntax (`192.0.2.2:5353`, `[2001:db8::1]:5353`). This keeps bindcar backward
+/// compatible with existing bare-IP requests while allowing callers to run
+/// `named` on an unprivileged transfer port.
+///
+/// Entries are rendered to BIND's `port` keyword syntax internally.
+/// `allow-transfer` does not support per-endpoint ports and must use bare IPs.
+pub(crate) fn validate_ip_port_list(field: &str, entries: &[String]) -> Result<(), ApiError> {
+    for entry in entries {
+        if parse_ip_port_entry(entry).is_none() {
+            return Err(ApiError::InvalidRequest(format!(
+                "{} contains an invalid entry: {:?} (expected \"<ip>\" or \"<ip>:<port>\")",
+                field, entry
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 /// Validate a zone-file hostname field against the strict DNS name character set.
 ///
 /// [`ZoneConfig::to_zone_file`] interpolates these fields directly into the zone
@@ -693,20 +765,22 @@ pub async fn create_zone(
         }
     }
 
-    // Validate the IP-list fields before they are interpolated into the rndc
-    // addzone config literal (C-1): a non-IP entry like "1.2.3.4; }; <config>"
-    // would otherwise break out of the brace block and inject arbitrary BIND
-    // configuration into the running named.
-    for (field, list) in [
-        ("primaries", &request.zone_config.primaries),
-        ("also-notify", &request.zone_config.also_notify),
-        ("allow-transfer", &request.zone_config.allow_transfer),
-    ] {
-        if let Some(ips) = list {
-            if let Err(e) = validate_ip_list(field, ips) {
-                metrics::record_zone_operation("create", false);
-                return Err(e);
-            }
+    if let Some(primaries) = &request.zone_config.primaries {
+        if let Err(e) = validate_ip_port_list("primaries", primaries) {
+            metrics::record_zone_operation("create", false);
+            return Err(e);
+        }
+    }
+    if let Some(also_notify) = &request.zone_config.also_notify {
+        if let Err(e) = validate_ip_port_list("also-notify", also_notify) {
+            metrics::record_zone_operation("create", false);
+            return Err(e);
+        }
+    }
+    if let Some(allow_transfer) = &request.zone_config.allow_transfer {
+        if let Err(e) = validate_ip_list("allow-transfer", allow_transfer) {
+            metrics::record_zone_operation("create", false);
+            return Err(e);
         }
     }
 
@@ -784,7 +858,7 @@ pub async fn create_zone(
             if !primaries.is_empty() {
                 let primaries_list = primaries
                     .iter()
-                    .map(|ip| format!("{}; ", ip))
+                    .map(|s| render_ip_port_entry(s))
                     .collect::<String>();
                 config_parts.push(format!(r#"primaries {{ {} }}"#, primaries_list));
             }
@@ -801,7 +875,7 @@ pub async fn create_zone(
         if !also_notify.is_empty() {
             let notify_list = also_notify
                 .iter()
-                .map(|ip| format!("{}; ", ip))
+                .map(|s| render_ip_port_entry(s))
                 .collect::<String>();
             config_parts.push(format!(r#"also-notify {{ {} }}"#, notify_list));
         }

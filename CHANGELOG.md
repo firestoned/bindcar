@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+#### [2026-07-13] - Per-endpoint port support for zone transfer targets
+
+**Author:** Erick Bourgeois
+
+- `src/zones.rs`: `primaries` and `also-notify` entries in `POST /api/v1/zones`
+  now accept BIND's per-endpoint port syntax (`"<ip> port <n>"`) in addition to
+  a bare IP address, via a new `validate_ip_port_list` validator. The values are
+  rendered verbatim into the `rndc addzone` `primaries { ... }` / `also-notify
+  { ... }` config literals.
+- `allow-transfer` is unchanged (bare IPs only, via `validate_ip_list`), since it
+  is an ACL and takes no port.
+- Tests: `zones_test::test_validate_ip_port_list_accepts_bare_and_ported_entries`
+  and `..._rejects_bad_entries` cover bare IPs, `port <n>`, and rejection of
+  malformed/injection inputs.
+
+#### Why
+bindy runs `named` and needs cross-pod AXFR/NOTIFY. bindcar 0.7 only accepted
+bare IPs for `primaries`/`also-notify`, which forced transfers onto the default
+DNS port 53 and therefore required the operand pod to bind port 53 with the
+`NET_BIND_SERVICE` capability. Supporting an explicit per-endpoint port lets the
+operand run `named` on an unprivileged port (e.g. 5353) without that capability.
+The grammar is deliberately narrow (IP literal, exact `port` token, `u16`) so the
+existing C-1 `rndc addzone` injection guard is preserved.
+
+#### Impact
+- [ ] Breaking change (backward compatible: bare IPs still accepted)
+- [ ] Requires cluster rollout
+- [ ] Config change only
+- [ ] Documentation only
+
 ### Security
 
 #### [2026-06-09] - TSIG key out of argv (B-7)
