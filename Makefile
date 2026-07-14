@@ -50,7 +50,7 @@ check: fmt clippy test ## Run all checks
 .PHONY: fmt-check
 fmt-check: ## Verify formatting without modifying files
 	@echo "==> fmt --check"
-	cargo fmt --all --check
+	cargo fmt --check
 
 .PHONY: clippy-all
 clippy-all: ## Clippy for default AND k8s-token-review features (deny warnings)

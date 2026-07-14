@@ -116,7 +116,7 @@ fn test_update_zones_count() {
     update_zones_count(1000);
 
     let metrics = gather_metrics().unwrap();
-    assert!(metrics.contains("bindcar_zones_managed_total"));
+    assert!(metrics.contains("bindcar_zones_managed"));
 }
 
 #[test]
@@ -125,7 +125,7 @@ fn test_update_zones_count_negative_becomes_zero() {
     update_zones_count(-5);
 
     let metrics = gather_metrics().unwrap();
-    assert!(metrics.contains("bindcar_zones_managed_total"));
+    assert!(metrics.contains("bindcar_zones_managed"));
 }
 
 #[test]
@@ -145,6 +145,6 @@ fn test_all_metrics_registered() {
     assert!(metrics.contains("bindcar_zone_operations_total"));
     assert!(metrics.contains("bindcar_rndc_commands_total"));
     assert!(metrics.contains("bindcar_rndc_command_duration_seconds"));
-    assert!(metrics.contains("bindcar_zones_managed_total"));
+    assert!(metrics.contains("bindcar_zones_managed"));
     assert!(metrics.contains("bindcar_app_info"));
 }

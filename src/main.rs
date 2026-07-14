@@ -40,6 +40,9 @@ use tower_governor::{
     governor::GovernorConfigBuilder, key_extractor::PeerIpKeyExtractor, GovernorLayer,
 };
 
+/// Crate version used by both the OpenAPI info block and health endpoint.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// OpenAPI documentation structure
 #[derive(OpenApi)]
 #[openapi(
@@ -84,7 +87,7 @@ use tower_governor::{
     ),
     info(
         title = "Bindcar API",
-        version = "0.1.0",
+        version = VERSION,
         description = "HTTP REST API for managing BIND9 zones and DNS records via RNDC and nsupdate",
         license(name = "MIT")
     )
@@ -114,7 +117,7 @@ struct ReadyResponse {
 async fn health_check() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "healthy".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: VERSION.to_string(),
     })
 }
 
@@ -239,13 +242,10 @@ fn init_tracing(debug: bool) {
 
 async fn start_server(command: &Commands, insecure_override: bool) -> anyhow::Result<()> {
     match command {
-        Commands::Run => info!(
-            "starting bindcar v{} [sidecar mode]",
-            env!("CARGO_PKG_VERSION")
-        ),
+        Commands::Run => info!("starting bindcar v{} [sidecar mode]", VERSION),
         Commands::Drone => info!(
             "starting bindcar v{} [drone mode] - standalone, managing remote BIND9",
-            env!("CARGO_PKG_VERSION")
+            VERSION
         ),
     }
 
