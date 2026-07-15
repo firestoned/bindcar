@@ -1,5 +1,41 @@
 # Changelog
 
+## [2026-07-13 22:36] - Dependabot auto-merge gated on a self-contained e2e run
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/workflows/dependabot-auto-merge.yaml`: NEW — on every Dependabot PR,
+  runs the full e2e gate (via the reusable e2e workflow). Patch/minor updates
+  get auto-merge (squash) enabled on green; major updates are held open with a
+  comment for manual review; any failure leaves the PR open with a comment.
+  Ported from the bindy repo's identical automation.
+- `.github/workflows/e2e.yaml`: NEW — reusable (`workflow_call` /
+  `workflow_dispatch`) self-contained e2e workflow: drone integration test +
+  kind e2e, image built locally (no registry, no cross-workflow timing), all
+  logic in the `ci-e2e` Makefile target. Also triggers on PRs touching the e2e
+  plumbing itself.
+- `Makefile`: NEW `ci-e2e` target — `cargo build` + drone integration test,
+  then `kind-e2e` on a dedicated `bindcar-e2e` cluster.
+- `.github/workflows/build.yaml`: NEW `ci-gate` job ("PR Checks Passed") — a
+  single stable aggregate status-check context over all PR jobs (incl. Kind
+  E2E and Drone Integration Test), for use as a branch-protection required
+  check, mirroring bindy's `pr.yaml` pattern.
+- Repo settings (GitHub, not code): "Allow auto-merge" enabled. The `main`
+  ruleset still needs required status checks ("PR Checks Passed",
+  "Verify Signed Commits") added — pending manual approval.
+
+### Why
+Dependabot opens up to ~10 PRs weekly; low-risk (patch/minor) bumps that pass
+the full e2e suite should merge themselves, with majors and failures held for
+human review — the same automation already proven in the bindy repo.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [x] Config change only
+- [ ] Documentation only
+
 ## [2026-07-05 11:45] - Runtime-select auth mode: shared-secret and TokenReview mutually exclusive
 
 **Author:** Erick Bourgeois
