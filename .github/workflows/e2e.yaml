@@ -1,0 +1,89 @@
+# Copyright (c) 2025 Erick Bourgeois, firestoned
+# SPDX-License-Identifier: MIT
+#
+# Reusable end-to-end test workflow.
+#
+# Runs the full e2e gate, self-contained (no registry, no pushed image):
+#   1. Drone integration suite — bindcar binary in drone mode against a
+#      dockerized external BIND9 (integration-test/drone-external-bind9.sh)
+#   2. kind e2e suite          — BIND9 + bindcar sidecar Pod on a kind cluster,
+#      image built locally from docker/Dockerfile.chef and kind-loaded
+#      (integration-test/kind-e2e.sh)
+#
+# All logic lives in the `ci-e2e` Makefile target (workflows delegate to the
+# Makefile per repo convention).
+#
+# Callable via `workflow_call` (e.g. from dependabot-auto-merge.yaml) or run
+# manually via `workflow_dispatch`.
+
+name: E2E Tests
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/e2e.yaml'
+      - 'Makefile'
+      - 'integration-test/**'
+      - 'docker/Dockerfile.chef'
+  workflow_call: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  e2e:
+    name: Drone Integration + kind E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Rust build environment
+        uses: firestoned/github-actions/rust/setup-rust-build@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+        with:
+          target: x86_64-unknown-linux-gnu
+
+      - name: Cache cargo dependencies
+        uses: firestoned/github-actions/rust/cache-cargo@d0d51c638a90bffc2a1567fe7af112b37fe8854c # v1.3.7
+
+      - name: Install Kind
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
+        with:
+          install_only: true
+          version: v0.24.0
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5
+        with:
+          version: 'v1.31.0'
+
+      - name: Run full e2e (drone integration + kind)
+        run: make ci-e2e
+
+      - name: Dump Kubernetes diagnostics on failure
+        # kind-e2e.sh leaves the cluster up on failure — capture its state
+        # before the runner is torn down.
+        if: failure()
+        run: |
+          CTX=kind-bindcar-e2e
+          NS=bindcar-e2e
+          echo "::group::cluster summary ($CTX)"
+          kubectl --context "$CTX" get nodes -o wide 2>/dev/null || true
+          kubectl --context "$CTX" get pods -A -o wide 2>/dev/null || true
+          echo "::endgroup::"
+
+          echo "::group::events ($CTX)"
+          kubectl --context "$CTX" get events -A --sort-by=.lastTimestamp 2>/dev/null || true
+          echo "::endgroup::"
+
+          echo "::group::bindcar e2e pod ($CTX / $NS)"
+          kubectl --context "$CTX" -n "$NS" get pod,svc,secret,configmap -o wide 2>/dev/null || true
+          kubectl --context "$CTX" -n "$NS" describe pod bindcar-e2e 2>/dev/null || true
+          kubectl --context "$CTX" -n "$NS" logs bindcar-e2e -c bindcar --tail=300 2>/dev/null || true
+          kubectl --context "$CTX" -n "$NS" logs bindcar-e2e -c bind9 --tail=300 2>/dev/null || true
+          echo "::endgroup::"

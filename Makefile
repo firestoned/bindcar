@@ -115,6 +115,24 @@ drone-integration-test-ci: ## Run drone integration test in CI (uses pre-built b
 	./integration-test/drone-external-bind9.sh
 
 #
+# CI end-to-end gate
+#
+
+# Dedicated cluster name so the CI e2e never collides with a developer's
+# long-lived bindy-test cluster when run locally.
+CI_E2E_KIND_CLUSTER ?= bindcar-e2e
+
+.PHONY: ci-e2e
+ci-e2e: ## Self-contained full e2e for CI: drone integration test + kind e2e (builds its own image; requires docker, kind, kubectl, curl, dig). Used by .github/workflows/e2e.yaml.
+	@echo "==> Drone-mode integration test (bindcar binary + dockerized BIND9)"
+	cargo build
+	./integration-test/drone-external-bind9.sh
+	@echo "==> kind e2e (BIND9 + bindcar sidecar pod on kind)"
+	$(MAKE) kind-e2e KIND_CLUSTER=$(CI_E2E_KIND_CLUSTER)
+	@echo ""
+	@echo "✅ ci-e2e passed (drone integration + kind e2e)"
+
+#
 # Docker targets
 #
 
