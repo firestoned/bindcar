@@ -53,7 +53,7 @@ RUN apt-get update -qq \
 #     https://gcr.io/v2/distroless/cc-debian13/manifests/nonroot
 # Refresh with the get-multiarch-digest skill; Dependabot's docker ecosystem
 # keeps it current once pinned.
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:aded2458d026e046cb68199db0e5793e1028ffa143f7258f3c4278253e20add7
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:d97bc0a941b8d4be647dc0ee75b264ddbb772f1ac5ba690a4309c00723b23775
 
 ARG TARGETARCH
 ARG VERSION=0.1.0
