@@ -36,7 +36,7 @@
 # symlink (COPYing a real `/lib` dir onto it fails). The digest
 # is pinned for reproducibility (A11); resolve with
 #   docker buildx imagetools inspect cgr.dev/chainguard/wolfi-base:latest --raw | sha256sum
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795 AS nsupdate
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:003627df3c1e1bba0c4116afcddb314aca9594ee2328c7e876a8081a6c988b2e AS nsupdate
 RUN apk add --no-cache bind-tools \
  && mkdir -p /staging/usr/bin \
  && cp -L /usr/bin/nsupdate /staging/usr/bin/ \
