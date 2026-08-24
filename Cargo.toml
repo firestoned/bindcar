@@ -88,7 +88,7 @@ k8s-token-review = ["kube", "k8s-openapi", "k8s-openapi/v1_32"]
 # Testing
 serde_json = "1.0"
 tower = { version = "0.5", features = ["util"] }
-serial_test = "3.4"
+serial_test = "4.0"
 tempfile = "3.27"
 
 # Enable k8s-openapi version for tests and examples
