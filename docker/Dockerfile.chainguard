@@ -59,7 +59,7 @@ RUN apk add --no-cache bind-tools \
 # NOTE: Chainguard rebuilds :latest daily for CVE fixes; pinning freezes those
 # until the digest is bumped, so Dependabot's docker ecosystem must track it.
 # Re-resolve with: docker buildx imagetools inspect <image> --raw | sha256sum
-FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:57e5704e70a85b90191182eb6110d1c817df0d8e96035cb041195c5a351f0861
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:00ccb6b29976452b1fd7a8facec730d9b1a22edc7b7aa772511a68df21dabb5b
 
 ARG TARGETARCH
 ARG VERSION=0.1.0
