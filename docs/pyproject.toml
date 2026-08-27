@@ -24,7 +24,13 @@ mkdocs-redirects = "^1.2.1"
 mkdocs-macros-plugin = "^1.0.5"
 
 # Markdown extensions
-pymdown-extensions = "^10.7"
+pymdown-extensions = "^11.0.1"
+
+# Security floor (no upper cap): GitPython is a transitive dep of
+# mkdocs-git-revision-date-localized-plugin; >=3.1.58 clears the 2026
+# command-injection / file-overwrite advisories flagged by Dependabot.
+# Not imported directly.
+gitpython = ">=3.1.58"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
