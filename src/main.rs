@@ -170,29 +170,32 @@ async fn ready_check(State(state): State<AppState>) -> Json<ReadyResponse> {
     // (`zones::resolve_zone_dir`), but it reaches this handler through the axum
     // `State` extractor, which static analysis models as untrusted. Re-assert the
     // startup invariant (absolute, no `..`/`.` components) immediately before the
-    // filesystem sink so we never `metadata()` an unexpected path.
-    let zone_dir_ok = if !zones::is_normalized_zone_dir(&state.zone_dir) {
-        warn!(
-            "zone directory {:?} is not a normalized absolute path; refusing to probe it",
-            state.zone_dir
-        );
-        false
-    } else {
-        match tokio::fs::metadata(&state.zone_dir).await {
-            Ok(metadata) => {
-                if metadata.is_dir() {
-                    true
-                } else {
-                    warn!("zone directory {:?} is not a directory", state.zone_dir);
+    // filesystem sink so we never `metadata()` an unexpected path. The inline
+    // `contains("..")` is the guard shape CodeQL (`rust/path-injection`)
+    // recognizes as a path-traversal sanitizer.
+    let zone_dir_ok =
+        if !zones::is_normalized_zone_dir(&state.zone_dir) || state.zone_dir.contains("..") {
+            warn!(
+                "zone directory {:?} is not a normalized absolute path; refusing to probe it",
+                state.zone_dir
+            );
+            false
+        } else {
+            match tokio::fs::metadata(&state.zone_dir).await {
+                Ok(metadata) => {
+                    if metadata.is_dir() {
+                        true
+                    } else {
+                        warn!("zone directory {:?} is not a directory", state.zone_dir);
+                        false
+                    }
+                }
+                Err(e) => {
+                    warn!("zone directory {:?} not accessible: {}", state.zone_dir, e);
                     false
                 }
             }
-            Err(e) => {
-                warn!("zone directory {:?} not accessible: {}", state.zone_dir, e);
-                false
-            }
-        }
-    };
+        };
     ready &= zone_dir_ok;
     checks.push(ready_check_label("zone_dir", zone_dir_ok));
 

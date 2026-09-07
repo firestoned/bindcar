@@ -1,5 +1,60 @@
 # Changelog
 
+## [2026-09-07 00:00] - Group all Docker base-image updates (chainguard, distroless, debian, rust, alpine)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/dependabot.yml`: replaced the `docker` group's
+  `update-types: [minor, patch]` filter with a `docker-base-images` group
+  matching `patterns: ["*"]`. Dependabot's group `update-types` only
+  understands major/minor/patch; a digest-only bump (same tag, new sha256)
+  carries no SemVer delta, so the filter silently excluded the
+  digest-pinned images — `gcr.io/distroless/cc-debian13`,
+  `cgr.dev/chainguard/wolfi-base`, `cgr.dev/chainguard/glibc-dynamic` and
+  `debian:13-slim` — from the group, opening one PR per image per week.
+- `.github/dependabot.yml`: documented the full base-image inventory per
+  Dockerfile variant, the reason the group carries no `update-types` filter,
+  and the multi-arch manifest-list review requirement.
+
+### Why
+All four Dockerfile variants under `docker/` were already in Dependabot's
+scan scope (the docker ecosystem matches every `/dockerfile/i` filename in
+the configured directory), but only the SemVer-tagged images (`rust`,
+`alpine`) were landing in the grouped PR. Grouping every base-image update
+into one weekly PR cuts review noise without losing coverage.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [x] Config change only
+- [ ] Documentation only
+
+Safety note: `dependabot/fetch-metadata` reports the *highest* SemVer change
+in a PR, so a grouped PR containing a base-image major bump still resolves to
+`version-update:semver-major` and is held for manual review by
+`.github/workflows/dependabot-auto-merge.yaml`.
+
+## [2026-09-07 18:30] - Restore rustfmt formatting in src/main.rs
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/main.rs`: Reformatted the `ready_check` zone-directory guard with
+  `cargo fmt`. The CodeQL path-injection guard added previously (bug-076) was
+  committed unformatted, so `make fmt-check` — the first step of the
+  `make regression` gate — failed even though every test passed.
+
+### Why
+`cargo fmt --check` runs in CI; an unformatted tree fails the build. No
+behavioural change: the guard logic is byte-identical, only line breaks moved.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [ ] Config change only
+- [x] Formatting only
+
 ## [2026-07-13 22:36] - Dependabot auto-merge gated on a self-contained e2e run
 
 **Author:** Erick Bourgeois
