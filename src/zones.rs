@@ -393,6 +393,26 @@ pub fn resolve_zone_dir(raw_dir: &str) -> Result<String, ApiError> {
 /// that is unexpectedly relative or contains traversal components, rather than
 /// touching an unintended location on the filesystem.
 ///
+/// # Guard shape (required)
+///
+/// CodeQL's barrier guard is intra-procedural and only takes effect when the
+/// guard is an **early return** that leaves the sink in straight-line code,
+/// paired with an inline `contains("..")` check:
+///
+/// ```ignore
+/// if !is_normalized_zone_dir(dir) || dir.contains("..") {
+///     return /* not ready / error */;
+/// }
+/// // sink here, in straight-line code
+/// tokio::fs::read_dir(dir).await
+/// ```
+///
+/// Writing the same condition as `if bad { .. } else { /* sink */ }` does *not*
+/// sanitize the flow — that shape left the readiness probe flagged as
+/// code-scanning alert #7 on PR #114, while the early-return form in
+/// [`list_zones`] cleared. Keep guard and sink in the same function; calling
+/// this helper from a caller of the sink's function does not count.
+///
 /// # Arguments
 /// * `path` - The configured zone directory path to check.
 ///
