@@ -386,7 +386,8 @@ pub fn resolve_zone_dir(raw_dir: &str) -> Result<String, ApiError> {
 /// read back inside HTTP handlers through the axum `State` extractor. CodeQL
 /// (`rust/path-injection`) models any value reaching a handler via `State` as
 /// untrusted, so it re-taints the already-safe path where it feeds a filesystem
-/// sink (e.g. `tokio::fs::metadata` in the readiness probe). Calling this guard
+/// sink (e.g. `tokio::fs::metadata` in the readiness probe, `tokio::fs::read_dir`
+/// when listing zones). Calling this guard
 /// immediately before such a sink is a defense-in-depth barrier: it re-asserts
 /// the [`resolve_zone_dir`] invariant at the point of use and rejects any path
 /// that is unexpectedly relative or contains traversal components, rather than
@@ -1301,6 +1302,22 @@ pub async fn server_status(
 )]
 pub async fn list_zones(State(state): State<AppState>) -> Result<Json<ZoneListResponse>, ApiError> {
     info!("Listing all zones");
+
+    // Defense-in-depth barrier (CodeQL `rust/path-injection`): `zone_dir` is
+    // canonicalized once at startup (`resolve_zone_dir`), but it reaches this
+    // handler through the axum `State` extractor, which static analysis models
+    // as untrusted. Re-assert the startup invariant immediately before the
+    // `read_dir` sink — the inline `contains("..")` is the guard shape CodeQL
+    // recognizes as a path-traversal sanitizer.
+    if !is_normalized_zone_dir(&state.zone_dir) || state.zone_dir.contains("..") {
+        error!(
+            "zone directory {:?} is not a normalized absolute path; refusing to list it",
+            state.zone_dir
+        );
+        return Err(ApiError::InternalError(
+            "zone directory is not a normalized absolute path".to_string(),
+        ));
+    }
 
     // Get zone files from directory
     let mut zones = Vec::new();
