@@ -64,11 +64,34 @@ updates:
           - patch
 
   # ---------------------------------------------------------------------------
-  # Docker base images across all Dockerfiles in docker/
+  # Docker base images.
+  #
+  # Dependabot's docker ecosystem scans every file whose name matches
+  # /dockerfile/i in the configured directory, so a single "/docker" entry
+  # covers all four build variants and every base image they pull:
+  #
+  #   docker/Dockerfile             debian:13-slim (nsupdate stage)
+  #                                 gcr.io/distroless/cc-debian13 (runtime)
+  #   docker/Dockerfile.chainguard  cgr.dev/chainguard/wolfi-base (nsupdate)
+  #                                 cgr.dev/chainguard/glibc-dynamic (runtime)
+  #   docker/Dockerfile.chef        rust (chef/planner/builder), alpine (runtime)
+  #   docker/Dockerfile.local       alpine (local dev)
+  #
+  # If a new Dockerfile variant is added, put it under docker/ and name it
+  # Dockerfile.<variant> — it is then picked up with no config change here.
+  #
+  # GROUPING: the group intentionally has no `update-types` filter. Dependabot
+  # only supports major/minor/patch there, and a digest-only bump (same tag, new
+  # sha256 — how the distroless, chainguard and debian pins move) has no SemVer
+  # delta, so any update-types filter silently drops those images out of the
+  # group and opens one PR per image per week. Omitting the filter groups every
+  # base-image update — digest and SemVer alike — into one weekly PR.
   #
   # IMPORTANT: bindcar pins base images by multi-arch manifest-list digest.
   # Review Dependabot's digest bumps to ensure they point at the multi-arch
-  # manifest list, not a platform-specific digest (see CLAUDE.md).
+  # manifest list, not a platform-specific digest (see CLAUDE.md). A
+  # platform-specific digest breaks the linux/arm64 build with a QEMU
+  # emulator error.
   # ---------------------------------------------------------------------------
   - package-ecosystem: docker
     directory: "/docker"
@@ -82,7 +105,6 @@ updates:
     commit-message:
       prefix: "docker"
     groups:
-      docker:
-        update-types:
-          - minor
-          - patch
+      docker-base-images:
+        patterns:
+          - "*"

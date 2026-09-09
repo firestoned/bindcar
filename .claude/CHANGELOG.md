@@ -1,5 +1,145 @@
 # Changelog
 
+## [2026-09-08 00:00] - Fix CodeQL alert #7: early-return guard for the readiness zone_dir probe
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/main.rs`: extracted the readiness zone-directory probe out of
+  `ready_check` into a new `probe_zone_dir(zone_dir: &str) -> bool` helper that
+  uses an **early-return** guard (`if !is_normalized_zone_dir(..) ||
+  contains("..") { return false; }`) leaving `tokio::fs::metadata` in
+  straight-line code. `ready_check` now just calls it.
+- `src/main_test.rs`: NEW tests (written first, TDD) —
+  `test_probe_zone_dir_rejects_non_normalized_paths`,
+  `test_probe_zone_dir_rejects_missing_directory`,
+  `test_probe_zone_dir_rejects_regular_file`,
+  `test_probe_zone_dir_accepts_existing_directory`.
+- `src/zones.rs`: documented the required guard *shape* on
+  `is_normalized_zone_dir` — early return, not if/else, with guard and sink in
+  the same function.
+
+### Why
+CodeQL alert #7 (`rust/path-injection`, high) flagged
+`tokio::fs::metadata(&state.zone_dir)` in `ready_check` and failed the CodeQL
+check on PR #114. The flow is the same false positive as dismissed alerts
+#1/#4/#5 — `/api/v1/ready` takes no parameters and `zone_dir` is `BIND_ZONE_DIR`
+operator config canonicalized at startup by `resolve_zone_dir`; CodeQL taints it
+only because it arrives via the axum `State` extractor.
+
+The branch had already added the inline `contains("..")` sanitizer to both
+filesystem sinks, and CodeQL accepted only one of them: `zones::list_zones`
+(early-return guard, sink in straight-line code) cleared, while `ready_check`
+(`if bad { false } else { ...sink... }`) stayed flagged. The barrier guard does
+not take effect for a sink inside the `else` arm of an if-expression. Adopting
+the shape that demonstrably worked fixes the alert at the source rather than
+dismissing it again, and matches the early-return rule in
+`.claude/rules/rust-style.md`.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [ ] Config change only
+- [ ] Documentation only
+
+No behavior change to `/api/v1/ready`: the same four rejection paths return
+`zone_dir: error` and the same log lines are emitted. `cargo fmt`, `cargo clippy
+--all-targets --all-features -- -D warnings` and `cargo test` (331 tests) all
+pass.
+
+## [2026-09-08] - Dependabot auto-merge: approval now releases a held PR
+
+**Author:** Erick Bourgeois
+
+### Fixed
+- `.github/workflows/dependabot-auto-merge.yaml`: the workflow only triggered on
+  `pull_request`, so approving a held PR re-ran nothing and it sat open forever.
+  Added a `pull_request_review: [submitted]` trigger, gated on
+  `review.state == 'approved'` so a `changes_requested` or `commented` review is
+  not treated as a merge signal.
+
+### Changed
+- `.github/workflows/dependabot-auto-merge.yaml`: merge eligibility is decided
+  once in a new `Classify` step whose `auto-merge` output both the `auto-merge`
+  and `hold-major` jobs branch on, so their conditions cannot drift apart.
+  Eligible when patch/minor, **or** a human approved it, **or** the new version
+  contains no `.` (a commit SHA — an action pinned to a moving tag with no
+  release, which can never yield a semver delta).
+
+- `.github/workflows/dependabot-auto-merge.yaml`: the metadata job gated on
+  `github.actor == 'dependabot[bot]'`. github.actor flips to a human the moment
+  anyone merges, rebases or pushes to a Dependabot branch — and on a
+  `pull_request_review` event it is the *reviewer*, never the bot — so the whole
+  workflow would have skipped on every review. Now gates on
+  `github.event.pull_request.user.login`, matching the sibling repos.
+
+### Why
+`dependabot/fetch-metadata` reports a *group's* update-type as the highest across
+its members, and classifies an update with no comparable version as
+`semver-major`. Combined with the workflow only triggering on `pull_request`,
+that left grouped PRs held open with no way for a human to release them:
+approving one re-ran nothing. Ported from the sceau investigation.
+
+### Impact
+- [ ] Breaking change
+- [x] Config change only
+- [ ] Documentation only
+
+## [2026-09-07 00:00] - Group all Docker base-image updates (chainguard, distroless, debian, rust, alpine)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/dependabot.yml`: replaced the `docker` group's
+  `update-types: [minor, patch]` filter with a `docker-base-images` group
+  matching `patterns: ["*"]`. Dependabot's group `update-types` only
+  understands major/minor/patch; a digest-only bump (same tag, new sha256)
+  carries no SemVer delta, so the filter silently excluded the
+  digest-pinned images — `gcr.io/distroless/cc-debian13`,
+  `cgr.dev/chainguard/wolfi-base`, `cgr.dev/chainguard/glibc-dynamic` and
+  `debian:13-slim` — from the group, opening one PR per image per week.
+- `.github/dependabot.yml`: documented the full base-image inventory per
+  Dockerfile variant, the reason the group carries no `update-types` filter,
+  and the multi-arch manifest-list review requirement.
+
+### Why
+All four Dockerfile variants under `docker/` were already in Dependabot's
+scan scope (the docker ecosystem matches every `/dockerfile/i` filename in
+the configured directory), but only the SemVer-tagged images (`rust`,
+`alpine`) were landing in the grouped PR. Grouping every base-image update
+into one weekly PR cuts review noise without losing coverage.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [x] Config change only
+- [ ] Documentation only
+
+Safety note: `dependabot/fetch-metadata` reports the *highest* SemVer change
+in a PR, so a grouped PR containing a base-image major bump still resolves to
+`version-update:semver-major` and is held for manual review by
+`.github/workflows/dependabot-auto-merge.yaml`.
+
+## [2026-09-07 18:30] - Restore rustfmt formatting in src/main.rs
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/main.rs`: Reformatted the `ready_check` zone-directory guard with
+  `cargo fmt`. The CodeQL path-injection guard added previously (bug-076) was
+  committed unformatted, so `make fmt-check` — the first step of the
+  `make regression` gate — failed even though every test passed.
+
+### Why
+`cargo fmt --check` runs in CI; an unformatted tree fails the build. No
+behavioural change: the guard logic is byte-identical, only line breaks moved.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [ ] Config change only
+- [x] Formatting only
+
 ## [2026-07-13 22:36] - Dependabot auto-merge gated on a self-contained e2e run
 
 **Author:** Erick Bourgeois

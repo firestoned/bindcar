@@ -157,6 +157,60 @@ async fn metrics_handler() -> Response {
     }
 }
 
+/// Probes the zone directory for the readiness endpoint.
+///
+/// Returns `true` only when `zone_dir` is a normalized absolute path that
+/// exists and is a directory. The path and any IO error are logged
+/// server-side and never returned to the caller — `/api/v1/ready` is
+/// unauthenticated and must not disclose the filesystem layout.
+///
+/// # Arguments
+/// * `zone_dir` - The configured zone directory (`BIND_ZONE_DIR`)
+///
+/// # Returns
+/// `true` if the directory is usable, `false` otherwise. Never panics and
+/// never propagates an error.
+///
+/// # Security
+/// Defense-in-depth barrier for CodeQL `rust/path-injection`. `zone_dir` is
+/// canonicalized once at startup (`zones::resolve_zone_dir`) and is operator
+/// config, never HTTP input — but it reaches the handler through the axum
+/// `State` extractor, which CodeQL models as untrusted. The guard therefore
+/// re-asserts the startup invariant (absolute, no `..`/`.` components)
+/// immediately before the `tokio::fs::metadata` sink.
+///
+/// The shape matters as much as the check: CodeQL's barrier guard is
+/// intra-procedural and only takes effect when the guard is an early return
+/// leaving the sink in straight-line code — the same shape used by
+/// `zones::list_zones` before its `read_dir` sink. Expressing this as
+/// `if bad { false } else { ...metadata()... }` inside `ready_check` did *not*
+/// sanitize the flow (code-scanning alert #7 on PR #114). Do not inline this
+/// helper back into `ready_check` or convert the guard to an if/else.
+async fn probe_zone_dir(zone_dir: &str) -> bool {
+    if !zones::is_normalized_zone_dir(zone_dir) || zone_dir.contains("..") {
+        warn!(
+            "zone directory {:?} is not a normalized absolute path; refusing to probe it",
+            zone_dir
+        );
+        return false;
+    }
+
+    let metadata = match tokio::fs::metadata(zone_dir).await {
+        Ok(metadata) => metadata,
+        Err(e) => {
+            warn!("zone directory {:?} not accessible: {}", zone_dir, e);
+            return false;
+        }
+    };
+
+    if !metadata.is_dir() {
+        warn!("zone directory {:?} is not a directory", zone_dir);
+        return false;
+    }
+
+    true
+}
+
 /// Readiness check endpoint
 async fn ready_check(State(state): State<AppState>) -> Json<ReadyResponse> {
     let mut checks = Vec::new();
@@ -165,34 +219,7 @@ async fn ready_check(State(state): State<AppState>) -> Json<ReadyResponse> {
     // Check the zone directory. The response carries only ok/error; the path and
     // any IO error are logged server-side, never returned (the endpoint is
     // unauthenticated and must not disclose the filesystem layout).
-    //
-    // Defense-in-depth barrier: `zone_dir` is canonicalized once at startup
-    // (`zones::resolve_zone_dir`), but it reaches this handler through the axum
-    // `State` extractor, which static analysis models as untrusted. Re-assert the
-    // startup invariant (absolute, no `..`/`.` components) immediately before the
-    // filesystem sink so we never `metadata()` an unexpected path.
-    let zone_dir_ok = if !zones::is_normalized_zone_dir(&state.zone_dir) {
-        warn!(
-            "zone directory {:?} is not a normalized absolute path; refusing to probe it",
-            state.zone_dir
-        );
-        false
-    } else {
-        match tokio::fs::metadata(&state.zone_dir).await {
-            Ok(metadata) => {
-                if metadata.is_dir() {
-                    true
-                } else {
-                    warn!("zone directory {:?} is not a directory", state.zone_dir);
-                    false
-                }
-            }
-            Err(e) => {
-                warn!("zone directory {:?} not accessible: {}", state.zone_dir, e);
-                false
-            }
-        }
-    };
+    let zone_dir_ok = probe_zone_dir(&state.zone_dir).await;
     ready &= zone_dir_ok;
     checks.push(ready_check_label("zone_dir", zone_dir_ok));
 
