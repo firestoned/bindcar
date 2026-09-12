@@ -211,48 +211,56 @@ All tests pass. The changes are ready for you to build and deploy."
 **Status:** ✅ MANDATORY REQUIREMENT
 **Impact:** Documentation organization and discoverability
 
-**ALWAYS add plans or roadmaps to `docs/roadmaps/`, NO WHERE ELSE.**
+**ALWAYS add plans or roadmaps to `.github/community/`, NO WHERE ELSE.**
+[`ROADMAPS.md`](../ROADMAPS.md) at the repo root is the status board that
+indexes them; `.github/community/README.md` is the directory index.
+
+> Superseded 2026-09-12: roadmaps used to live in `docs/roadmaps/`, then in an
+> external set under `~/dev/roadmaps/bindcar/`. Both are retired — the external
+> set was migrated in on that date. `docs/roadmaps/` does not exist; do not
+> recreate it. This mirrors the layout the bindy repo already uses.
 
 **Why:**
 - **Centralized Location**: All planning documents in one discoverable location
-- **Documentation Structure**: Maintains consistent docs/ directory organization
+- **Out of the docs build**: `.github/` is not part of the mkdocs site, so
+  roadmaps do not leak into published user documentation
 - **Version Control**: Plans tracked alongside code changes
-- **Easy Reference**: Developers know exactly where to find planning documents
+- **Parity with bindy**: both repos read the same way
 
 **Naming Convention:**
-- **ALWAYS** use **lowercase** filenames (MANDATORY)
-- **ALWAYS** use **hyphens** (`-`) to separate words, NEVER underscores (`_`) (MANDATORY)
-- Use descriptive names indicating the purpose
+- **ALWAYS** `NN-lowercase-hyphenated-title.md` — a two-digit sequential
+  number, then an all-lowercase hyphenated title (MANDATORY)
+- **ALWAYS** use **hyphens** (`-`) to separate words, NEVER underscores (`_`)
 - NO uppercase letters anywhere in the filename
-- NO underscores anywhere in the filename
+- Numbering is **sequential**, not banded: a new roadmap takes the next free
+  number whatever its subject
+- Numbers are **stable once assigned** — never renumber, never reuse
+
+**Next free number: `09`** (`08` is reserved, see below).
 
 **Examples:**
 ```
 ✅ CORRECT:
-docs/roadmaps/integration-test-plan.md
-docs/roadmaps/phase4-implementation.md
-docs/roadmaps/feature-roadmap-2025.md
-docs/roadmaps/zones-from-label-selector-support.md
-docs/roadmaps/refactoring-complete.md
-docs/roadmaps/phase-1-2-implementation-plan.md
+.github/community/04-standalone-out-of-cluster.md
+.github/community/07-bindy-migration-v0-7-2.md
+.github/community/09-integration-test-plan.md
 
 ❌ WRONG:
-INTEGRATION_TEST_PLAN.md (root directory, uppercase, underscores)
-ROADMAP.md (root directory, uppercase)
-planning/test-plan.md (wrong directory)
-docs/roadmaps/ZONES_FROM_LABEL_SELECTOR.md (uppercase, underscores)
-docs/roadmaps/Phase_3_Analysis.md (uppercase and underscores)
-docs/roadmaps/Refactoring_Complete.md (uppercase and underscores)
-docs/roadmaps/REFACTORING-COMPLETE.md (uppercase)
+ROADMAP.md (root directory)
+docs/roadmaps/out-of-cluster-support.md (retired location)
+.github/community/out-of-cluster.md (no number)
+.github/community/09-STANDALONE-OUT-OF-CLUSTER.md (uppercase)
+.github/community/09_standalone_out_of_cluster.md (underscores)
 ```
 
-**CRITICAL RULE**: Before creating ANY file in `docs/roadmaps/`, verify the filename is:
-1. All lowercase letters
-2. Words separated by hyphens (`-`)
-3. No underscores (`_`)
-4. No uppercase letters
+**CRITICAL RULE**: Before creating ANY file in `.github/community/`, verify:
+1. It starts with the next free two-digit number
+2. The rest of the name is all lowercase, words separated by hyphens (`-`)
+3. No underscores (`_`), no uppercase letters
+4. It opens with a `> **Status:**` block
+5. A row is added to **both** `.github/community/README.md` and `ROADMAPS.md`
 
-**What Goes in docs/roadmaps/:**
+**What Goes in .github/community/:**
 - Integration test plans
 - Feature implementation roadmaps
 - Phase/milestone planning documents
@@ -260,7 +268,12 @@ docs/roadmaps/REFACTORING-COMPLETE.md (uppercase)
 - Architecture decision records (ADRs) planning
 - Migration plans
 
-**REMEMBER:** Before creating any planning document, ALWAYS put it in `docs/roadmaps/`. Never in the root directory or elsewhere.
+**What does NOT go there:** anything describing an unremediated security
+weakness in shipped code. **This repository is public.** Hold those externally
+and reserve the number (see the "Tracked privately" section of `ROADMAPS.md`;
+`08` is reserved this way today).
+
+**REMEMBER:** Before creating any planning document, ALWAYS put it in `.github/community/`. Never in the root directory or elsewhere.
 
 ---
 
@@ -968,14 +981,19 @@ After code changes: run `cargo fmt`, `cargo clippy`, `cargo test`, then inform t
 
 ---
 
-## 🚨 Plans and Roadmaps → `docs/roadmaps/`
+## 🚨 Plans and Roadmaps → `.github/community/`
 
-ALL planning documents MUST go in `docs/roadmaps/`. Filenames: **lowercase**, **hyphens only** (no underscores, no uppercase).
+ALL planning documents MUST go in `.github/community/`, named
+`NN-lowercase-hyphenated-title.md` with the next free sequential number (see
+the full rule above). Index every one in both `.github/community/README.md`
+and root `ROADMAPS.md`.
 
 ```
-✅ docs/roadmaps/out-of-cluster-support.md
-❌ ROADMAP.md  ❌ docs/roadmaps/OUT_OF_CLUSTER.md  ❌ docs/roadmaps/Phase_3.md
+✅ .github/community/04-standalone-out-of-cluster.md
+❌ ROADMAP.md  ❌ docs/roadmaps/out-of-cluster.md  ❌ .github/community/Phase_3.md
 ```
+
+Never put an unremediated security finding here — this repo is public.
 
 ---
 
