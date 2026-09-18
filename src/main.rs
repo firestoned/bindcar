@@ -544,10 +544,14 @@ async fn start_server(command: &Commands, insecure_override: bool) -> anyhow::Re
 
     // conditionally apply rate limiting layer
     let api_routes = if rate_limit_config.enabled {
-        // Calculate requests per second from period
-        let per_second =
-            rate_limit_config.requests_per_period / rate_limit_config.period_secs.max(1) as u32;
-        let per_second = per_second.max(1); // Ensure at least 1 request per second
+        // Governor is configured by the interval between replenished cells, not
+        // by requests-per-period. Deriving it here with integer division silently
+        // floored the budget: the 100-per-60s default became 1 request per
+        // second, and the operator's zone replay — a burst of create/freeze/
+        // update/thaw/notify calls issued whenever a BIND9 Pod comes back empty —
+        // ran straight into HTTP 429. The operator answers 429 with exponential
+        // backoff, so a ~30s recovery stretched to ~130s.
+        let replenish_period = rate_limit_config.replenish_period();
 
         // Build governor configuration
         // A-1: key on the real TCP peer IP, NOT the spoofable X-Forwarded-For /
@@ -559,7 +563,7 @@ async fn start_server(command: &Commands, insecure_override: bool) -> anyhow::Re
         let governor_conf = Arc::new(
             GovernorConfigBuilder::default()
                 .key_extractor(PeerIpKeyExtractor)
-                .per_second(per_second.into())
+                .period(replenish_period)
                 .burst_size(rate_limit_config.burst_size)
                 .finish()
                 .expect("Failed to create governor config"),
