@@ -38,12 +38,21 @@ carries no meaning for the numbering.
 | 03 | [`03-bind9-full-zone-config.md`](03-bind9-full-zone-config.md) | Parse and serialize the full BIND9 9.18+ zone statement option set |
 | 04 | [`04-standalone-out-of-cluster.md`](04-standalone-out-of-cluster.md) | Run bindcar outside Kubernetes against pre-existing BIND9, still on SA-token identity |
 
-## Reserved numbers
+### Security and compliance
 
-`05` is **assigned but deliberately absent**. It covers an unremediated
-transport-security weakness in shipped code, and this repository is public, so
-it is tracked privately until that work ships. Do not reuse the number — the
-next new roadmap takes `06`.
+| # | File | What |
+|---|---|---|
+| 05 | [`05-api-transport-tls.md`](05-api-transport-tls.md) | TLS and mutual TLS for the REST API transport |
+
+## Previously reserved numbers
+
+`05` was held outside this repository while it described an unremediated
+transport-security weakness in shipped code — this repo is public. TLS shipped
+on 2026-09-18 and the document was migrated in. Nothing is reserved now.
+
+Keep the rule it came from: **never** add a document here describing an
+unremediated security weakness in shipped code. Hold it externally and reserve
+its number until the fix lands.
 
 ## Consumer upgrade guides live in bindy
 

@@ -23,7 +23,7 @@ roadmap entry describes *what* and *why*, it does not skip the ADR for
 
 ## Index
 
-Statuses were verified against `did-code` @ `998bc5a` (bindcar 0.7.3) on 2026-09-12.
+Statuses were verified against `main` @ `82d4dc5` (bindcar 0.7.3) on 2026-09-18.
 
 ### Reference and analysis
 
@@ -41,8 +41,14 @@ Statuses were verified against `did-code` @ `998bc5a` (bindcar 0.7.3) on 2026-09
 
 | # | Roadmap | Status | Notes |
 |---|---|---|---|
-| [03](.github/community/03-bind9-full-zone-config.md) | BIND9 full zone configuration support | 🔶 | `rndc_types::ZoneConfig` models ~40 zone statement options against the 2 the doc recorded. Not audited option-by-option against the doc's list |
-| [04](.github/community/04-standalone-out-of-cluster.md) | Standalone / out-of-cluster bindcar | ✅ | `drone` subcommand (`src/cli.rs:44`) plus custom-kubeconfig TokenReview (`src/auth.rs:458`); covered by `integration-test/drone-external-bind9.sh` |
+| [03](.github/community/03-bind9-full-zone-config.md) | BIND9 full zone configuration support | ✅ | All 5 phases landed. ~40 options modelled directly plus the `raw_options` catch-all (`src/rndc_types.rs:342`) round-tripping the rest. Remaining items are marked optional in the doc |
+| [04](.github/community/04-standalone-out-of-cluster.md) | Standalone / out-of-cluster bindcar | 🔶 | **Phase 1 of 5.** K8s auth done (`build_kube_client`, `src/auth.rs:490`; `drone` subcommand). Phases 2–5 unstarted: no `zone_transport.rs`, no `instance.rs`, no `packaging/`, no new docs pages |
+
+### Security and compliance
+
+| # | Roadmap | Status | Notes |
+|---|---|---|---|
+| [05](.github/community/05-api-transport-tls.md) | TLS for the HTTP API transport | ✅ | Shipped 2026-09-18. `--tls-cert`/`--tls-key` (rustls, TLS 1.2+1.3) and `--tls-client-ca` for mTLS; plaintext remains the default and warns on non-loopback. Misconfiguration exits 1 rather than downgrading. 13 unit tests + `make tls-transport-test` |
 
 ## Consumer upgrade guides
 
@@ -51,12 +57,12 @@ They describe what the *bindy operator* must change to consume a bindcar
 release, so they live in bindy's own board as **53**–**56**; **56** covers
 v0.7.2 → v0.7.4 and is the current one.
 
-## Tracked privately
+## Previously tracked privately
 
-Roadmap number **05** is assigned but intentionally not published here: it
-covers an unremediated transport-security weakness in shipped code, and this
-repository is public. It is tracked privately until that work lands. The
-number is reserved — do not reuse it; the next new roadmap takes **06**.
+Roadmap **05** was held outside this repository while it described an
+unremediated transport-security weakness in shipped code — `firestoned/bindcar`
+is public. TLS shipped on 2026-09-18, so the document was migrated in and is
+indexed above. No numbers are reserved now; the next new roadmap takes **06**.
 
 ## Keeping this current
 

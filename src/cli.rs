@@ -32,6 +32,28 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub i_know_this_is_insecure: bool,
 
+    /// PEM certificate chain (leaf first) for the HTTPS listener.
+    ///
+    /// Must be given together with `--tls-key`. When neither is set bindcar
+    /// serves plaintext HTTP, preserving existing behaviour.
+    #[arg(long, env = "BIND_TLS_CERT", global = true)]
+    pub tls_cert: Option<String>,
+
+    /// PEM private key for the HTTPS listener (PKCS#8, PKCS#1 or SEC1).
+    ///
+    /// Must be given together with `--tls-cert`.
+    #[arg(long, env = "BIND_TLS_KEY", global = true)]
+    pub tls_key: Option<String>,
+
+    /// PEM CA bundle used to verify client certificates.
+    ///
+    /// Setting this turns on mutual TLS: a client presenting no certificate, or
+    /// one not chaining to this bundle, is rejected at the TLS handshake. In the
+    /// bindy topology both ends have stable in-cluster identities, so mTLS is a
+    /// better fit than server-only TLS and keeps the bearer token off the wire.
+    #[arg(long, env = "BIND_TLS_CLIENT_CA", global = true)]
+    pub tls_client_ca: Option<String>,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }

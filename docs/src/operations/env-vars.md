@@ -243,6 +243,54 @@ Valid values:
 BIND_ENABLE_DOCS=true
 ```
 
+### BIND_TLS_CERT
+
+- **Type**: String (file path)
+- **Default**: none (plaintext HTTP)
+- **Required**: No — but required together with `BIND_TLS_KEY`
+- **CLI equivalent**: `--tls-cert`
+- **Description**: PEM certificate chain (leaf first) for the HTTPS listener.
+  Setting this and `BIND_TLS_KEY` makes bindcar serve TLS instead of plaintext.
+
+```bash
+BIND_TLS_CERT=/etc/bindcar/tls/tls.crt
+```
+
+### BIND_TLS_KEY
+
+- **Type**: String (file path)
+- **Default**: none (plaintext HTTP)
+- **Required**: No — but required together with `BIND_TLS_CERT`
+- **CLI equivalent**: `--tls-key`
+- **Description**: PEM private key for the HTTPS listener (PKCS#8, PKCS#1 or
+  SEC1).
+
+```bash
+BIND_TLS_KEY=/etc/bindcar/tls/tls.key
+```
+
+**Fail-closed**: setting exactly one of `BIND_TLS_CERT` / `BIND_TLS_KEY` is a
+**startup error** (exit 1), not a silent fallback to plaintext. Set both to
+enable TLS, or neither to serve plaintext.
+
+### BIND_TLS_CLIENT_CA
+
+- **Type**: String (file path)
+- **Default**: none (no client certificate required)
+- **Required**: No
+- **CLI equivalent**: `--tls-client-ca`
+- **Description**: PEM CA bundle used to verify client certificates. Setting it
+  enables **mutual TLS**: a client presenting no certificate, or one that does
+  not chain to this bundle, is rejected at the TLS handshake. Requires
+  `BIND_TLS_CERT` and `BIND_TLS_KEY`; setting it alone is a startup error.
+
+```bash
+BIND_TLS_CLIENT_CA=/etc/bindcar/tls/ca.crt
+```
+
+See [TLS Transport](../advanced/tls.md) for certificate provisioning, probe
+configuration and the full behaviour matrix.
+
 ### BIND_TOKEN_AUDIENCES
 
 - **Type**: String (comma-separated)

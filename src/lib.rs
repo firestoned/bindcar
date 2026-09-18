@@ -148,6 +148,7 @@ pub mod rndc_conf_parser;
 pub mod rndc_conf_types;
 pub mod rndc_parser;
 pub mod rndc_types;
+pub mod tls;
 pub mod types;
 pub mod zones;
 
@@ -204,6 +205,8 @@ mod rndc_parser_tests;
 mod rndc_test;
 #[cfg(test)]
 mod rndc_types_tests;
+#[cfg(test)]
+mod tls_test;
 #[cfg(test)]
 mod types_test;
 #[cfg(test)]

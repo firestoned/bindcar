@@ -1,5 +1,91 @@
 # Changelog
 
+## [2026-09-18 00:00] - TLS transport for the HTTP API (roadmap 05) + roadmap status corrections
+
+**Author:** Erick Bourgeois
+
+### Added
+- `src/tls.rs`: NEW module. `resolve_tls_settings()` resolves the transport
+  configuration fail-closed; `build_server_config()` loads the PEM material and
+  builds the `rustls::ServerConfig`, with an optional `WebPkiClientVerifier` for
+  mutual TLS; `scheme_for()` reports the active scheme. `TlsError` carries a
+  distinct variant per failure so startup errors are actionable.
+- `src/tls_test.rs`: NEW, 13 unit tests written first (TDD) — plaintext default,
+  cert+key, mTLS, half-configured rejection, empty-string-as-unset, and the PEM
+  read/parse failure paths.
+- `src/cli.rs`: `--tls-cert`, `--tls-key`, `--tls-client-ca`, each with a
+  `BIND_TLS_*` environment equivalent (clap `env` feature enabled).
+- `src/main.rs`: TLS resolved before anything binds; `serve_tls()` runs a manual
+  accept loop wrapping each connection with `tokio_rustls::TlsAcceptor` and
+  injecting `ConnectInfo` so the rate limiter's `PeerIpKeyExtractor` keeps
+  working; `warn_plaintext_transport()` warns when serving plaintext on a
+  non-loopback address.
+- `integration-test/tls-transport.sh`: NEW e2e — 15 assertions covering a real
+  TLS handshake, plaintext refused on a TLS port, mTLS rejecting both a missing
+  and an untrusted client certificate, and every misconfiguration exiting
+  non-zero. Needs no BIND9 or cluster.
+- `Makefile`: `tls-transport-test` / `tls-transport-test-ci` targets; the e2e is
+  now the first stage of `ci-e2e`.
+- `docs/src/advanced/tls.md`: NEW user guide — configuration, mTLS,
+  fail-closed matrix, cert-manager provisioning, probe configuration under TLS
+  and mTLS, service-mesh interaction, protocol details.
+- `docs/src/operations/env-vars.md`: `BIND_TLS_CERT`, `BIND_TLS_KEY`,
+  `BIND_TLS_CLIENT_CA`.
+- `docs/src/advanced/security.md` + `docs/mkdocs.yml`: transport-security
+  section and nav entry.
+
+### Changed
+- `Cargo.toml`: added `rustls`, `tokio-rustls`, `rustls-pki-types`, `hyper`,
+  `hyper-util` as direct dependencies. All five were already in `Cargo.lock`
+  transitively (hyper/hyper-util via axum, rustls/tokio-rustls via kube), so the
+  dependency graph does not widen. `ring` is pinned as the crypto provider to
+  match kube's `rustls-tls`, since two providers panic at runtime. `clap` gained
+  the `env` feature.
+- `src/main.rs`: the Swagger URL in the startup banner now follows the active
+  scheme instead of hardcoding `http://`, and is only logged when the docs are
+  actually mounted.
+
+### Fixed
+- `Makefile` (`docs-openapi`): the target started bindcar without
+  `BIND_ENABLE_DOCS=true` (so `/api/v1/openapi.json` was never mounted) and bound
+  `0.0.0.0` (which the startup auth-posture guard refuses), then swallowed the
+  failure — `docs/site/openapi.json` had been silently stale. Now binds loopback,
+  enables docs, supplies placeholder RNDC credentials, and fails the build
+  instead of continuing.
+
+### Roadmaps
+- `.github/community/05-api-transport-tls.md`: migrated in from the external set
+  now that the fix has shipped, and closed ✅. It was deliberately held outside a
+  public repository while it described an unremediated weakness in shipped code.
+- `.github/community/04-standalone-out-of-cluster.md`: **corrected** ✅ → 🔶. Only
+  Phase 1 of 5 shipped; Phases 2–5 have no implementation (`zone_transport.rs`,
+  `instance.rs`, `packaging/` and the five docs pages do not exist). The previous
+  ✅ read the `drone` subcommand as the whole roadmap.
+- `.github/community/03-bind9-full-zone-config.md`: **corrected** 🔶 → ✅. The
+  `raw_options` catch-all round-trips every unmodelled option, which is what the
+  doc's success criteria require; the earlier hedge measured it against a goal
+  the design deliberately does not pursue.
+- `ROADMAPS.md` and `.github/community/README.md`: security section added, both
+  corrections reflected, reserved-number block retired.
+
+### Why
+bindcar's REST API carried a privileged bearer credential — a ServiceAccount
+token or `BIND_API_TOKEN` — over plaintext on every zone operation, readable by
+anything observing the pod network. Authentication proves identity; it does
+nothing for confidentiality, and the credential exposed is the one authorizing
+zone create/reload/delete. Derived from bindy audit finding P2-4.
+
+### Impact
+- [ ] Breaking change
+- [x] API change (additive: TLS is opt-in; plaintext remains the default)
+- [ ] Config change only
+- [ ] Documentation only
+
+Verified: `cargo fmt --check`, `cargo clippy --all-targets --all-features -D
+warnings`, `cargo test` (347 passing), `make tls-transport-test` (15/15),
+`make docs`. Manually confirmed a TLS 1.3 handshake, mTLS accepting a trusted
+client certificate and rejecting both an absent and an untrusted one.
+
 ## [2026-09-08 00:00] - Fix CodeQL alert #7: early-return guard for the readiness zone_dir probe
 
 **Author:** Erick Bourgeois

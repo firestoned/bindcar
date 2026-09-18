@@ -114,6 +114,15 @@ drone-integration-test: ## Run drone mode integration test (requires Docker, cur
 drone-integration-test-ci: ## Run drone integration test in CI (uses pre-built binary via BINDCAR_BIN env var)
 	./integration-test/drone-external-bind9.sh
 
+.PHONY: tls-transport-test
+tls-transport-test: ## Run TLS transport e2e test (no BIND9 needed; requires openssl, curl)
+	cargo build
+	./integration-test/tls-transport.sh
+
+.PHONY: tls-transport-test-ci
+tls-transport-test-ci: ## Run TLS transport e2e in CI (uses pre-built binary via BINDCAR_BIN env var)
+	./integration-test/tls-transport.sh
+
 #
 # CI end-to-end gate
 #
@@ -123,14 +132,16 @@ drone-integration-test-ci: ## Run drone integration test in CI (uses pre-built b
 CI_E2E_KIND_CLUSTER ?= bindcar-e2e
 
 .PHONY: ci-e2e
-ci-e2e: ## Self-contained full e2e for CI: drone integration test + kind e2e (builds its own image; requires docker, kind, kubectl, curl, dig). Used by .github/workflows/e2e.yaml.
-	@echo "==> Drone-mode integration test (bindcar binary + dockerized BIND9)"
+ci-e2e: ## Self-contained full e2e for CI: TLS transport + drone integration test + kind e2e (builds its own image; requires docker, kind, kubectl, curl, dig). Used by .github/workflows/e2e.yaml.
+	@echo "==> TLS transport e2e (no cluster or BIND9 required)"
 	cargo build
+	./integration-test/tls-transport.sh
+	@echo "==> Drone-mode integration test (bindcar binary + dockerized BIND9)"
 	./integration-test/drone-external-bind9.sh
 	@echo "==> kind e2e (BIND9 + bindcar sidecar pod on kind)"
 	$(MAKE) kind-e2e KIND_CLUSTER=$(CI_E2E_KIND_CLUSTER)
 	@echo ""
-	@echo "✅ ci-e2e passed (drone integration + kind e2e)"
+	@echo "✅ ci-e2e passed (TLS transport + drone integration + kind e2e)"
 
 #
 # Docker targets
@@ -213,14 +224,22 @@ docs: ## Build all documentation (MkDocs + rustdoc + OpenAPI)
 docs-openapi: ## Generate OpenAPI/Swagger specification
 	@echo "Starting temporary API server to extract OpenAPI spec..."
 	@mkdir -p .tmp/zones docs/site
-	@BIND_ZONE_DIR=.tmp/zones cargo run & \
+# BIND_ENABLE_DOCS=true mounts /api/v1/openapi.json (off by default, A13) and the
+# loopback bind satisfies the startup auth-posture guard (B-4) without needing the
+# insecure override. Without both, this step silently wrote a stale spec.
+# The RNDC credentials are placeholders: extracting the OpenAPI document never
+# opens the control channel, it only needs the executor to construct.
+	@BIND_ZONE_DIR=.tmp/zones BIND_API_ADDRESS=127.0.0.1 BIND_ENABLE_DOCS=true \
+	  RNDC_KEY_NAME=docs-placeholder RNDC_ALGORITHM=hmac-sha256 \
+	  RNDC_SECRET=$$(printf 'openapi-spec-generation-only' | base64) \
+	  cargo run & \
 		SERVER_PID=$$!; \
 		echo "Waiting for server to start..."; \
 		sleep 3; \
 		echo "Fetching OpenAPI specification..."; \
-		curl -s http://localhost:8080/api/v1/openapi.json > docs/site/openapi.json && \
+		curl -sf http://127.0.0.1:8080/api/v1/openapi.json > docs/site/openapi.json && \
 		echo "OpenAPI specification saved to docs/site/openapi.json" || \
-		echo "Failed to fetch OpenAPI specification"; \
+		{ echo "ERROR: failed to fetch OpenAPI specification"; kill $$SERVER_PID 2>/dev/null; exit 1; }; \
 		echo "Stopping server..."; \
 		kill $$SERVER_PID 2>/dev/null || true; \
 		sleep 1

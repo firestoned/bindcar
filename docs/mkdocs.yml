@@ -214,6 +214,7 @@ nav:
       - Security:
           - Overview: advanced/security.md
           - Authentication & Authorization: advanced/auth.md
+          - TLS Transport: advanced/tls.md
           - Access Control: advanced/access-control.md
           - DNSSEC: advanced/dnssec.md
       - Performance:
