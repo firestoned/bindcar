@@ -1,5 +1,96 @@
 # Changelog
 
+## [2026-09-12 01:00] - Move bindy upgrade guides to the bindy repo; write the v0.7.2 -> v0.7.4 delta
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/community/`: removed `05/06/07-bindy-migration-v0-7-{0,1,2}.md`.
+  They are not roadmaps — they tell the *bindy operator* what to change to
+  consume a bindcar release — so they moved to
+  `~/dev/bindy/.github/community/` as `53`/`54`/`55-BINDCAR-MIGRATION-V0-7-*.md`,
+  following that repo's banded SCREAMING-KEBAB convention.
+- NEW (in bindy): `56-BINDCAR-MIGRATION-V0-7-4.md` — the v0.7.2 -> v0.7.4
+  delta, written from `git diff v0.7.2..v0.7.4` (34 commits, PRs #72-#115).
+  Findings: the `bindcar_zones_managed_total` -> `bindcar_zones_managed` gauge
+  rename (silent dashboard/alert breakage, PR #83); `primaries`/`alsoNotify`
+  accepting `ip:port` (PR #82), which lets the bindy operand drop
+  `NET_BIND_SERVICE`; `sha2` 0.10 -> 0.11; version reporting fixed (pre-0.7.3
+  builds reported `0.7.0`, OpenAPI reported `0.1.0`); and the `v0.7.4` tag still
+  self-reporting `0.7.3`.
+- `ROADMAPS.md` and `.github/community/README.md`: the "bindy integration and
+  migration" section is gone; both now point at bindy's `53`-`56` and state
+  that consumer upgrade guides are written there, not here.
+- Reserved number moved `08` -> `05` (nothing was ever committed under the old
+  numbering, so the vacated numbers were reclaimed rather than left as holes).
+  Next free number is `06`.
+
+### Why
+Keeping consumer upgrade guides in the producer's roadmap index conflated two
+different things: bindcar's own plans, and instructions for a downstream repo
+that only bindy can act on. None of the action items in those guides can ever
+be closed from this repo.
+
+The delta was overdue — the series stopped at v0.7.2 while the tree is at
+v0.7.4, and it hid a breaking metric rename.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [ ] Config change only
+- [x] Documentation only
+
+No source, test or build changes.
+
+## [2026-09-12 00:00] - Move roadmaps in-repo to .github/community/ (bindy layout)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/community/`: NEW — 7 roadmap documents migrated in from the external
+  set at `~/dev/roadmaps/bindcar/`, renamed to `NN-lowercase-hyphenated-title.md`
+  with **sequential** numbering:
+  - `01-dnssec-feature-summary.md` (was `dnssec-feature-summary.md`)
+  - `02-feature-gate-http-server.md` (was `feature-gate-http-server.md`)
+  - `03-bind9-full-zone-config.md` (was `bind9-full-zone-config-support.md`)
+  - `04-standalone-out-of-cluster.md` (was `standalone-out-of-cluster.md`)
+  - `05/06/07-bindy-migration-v0-7-{0,1,2}.md` (were the three
+    `v0.6.0-to-v0.7.x-bindy-migration.md` guides)
+- `.github/community/README.md`: NEW — directory index. Numbering is sequential
+  and stable once assigned, not banded; the theme headings group the docs for
+  reading only. Directory location follows the bindy repo's layout.
+- `ROADMAPS.md`: NEW — root status board indexing all 7 with verified statuses.
+- Each migrated doc gained a `> **Status:**` block verified against `did-code`
+  @ `998bc5a` (0.7.3), and its original status line was relabelled
+  `**Original status (as written):**`.
+- Relative links inside the migrated docs were repointed: they were written
+  for `docs/roadmaps/`, so `../src/...` now reads `../../docs/src/...`. The
+  reference to the retired mdbook `SUMMARY.md` was neutralised.
+- `.claude/CLAUDE.md`: both "Plans and Roadmaps" sections now point at
+  `.github/community/` with the sequential/lowercase naming rules;
+  `docs/roadmaps/` is marked retired.
+
+### Not moved
+- `api-transport-tls.md` stays at `~/dev/roadmaps/bindcar/`. It documents an
+  unremediated TLS gap in shipped code (0.7.3, which bindy pins) and says in
+  its own header not to publish it yet. **`firestoned/bindcar` is public**, so
+  migrating it would disclose the weakness. Number `40` is reserved for it in
+  both indexes.
+
+### Why
+Consolidates planning documents into the repo under the same layout as bindy,
+so the two read the same way and roadmap status travels with the code. `.github/`
+keeps them out of the mkdocs site.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [ ] Config change only
+- [x] Documentation only
+
+No source, test or build changes — `src/`, `Cargo.toml` and the workflows are
+untouched.
+
 ## [2026-09-08 00:00] - Fix CodeQL alert #7: early-return guard for the readiness zone_dir probe
 
 **Author:** Erick Bourgeois
