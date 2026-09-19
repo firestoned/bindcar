@@ -222,27 +222,38 @@ docs: ## Build all documentation (MkDocs + rustdoc + OpenAPI)
 
 .PHONY: docs-openapi
 docs-openapi: ## Generate OpenAPI/Swagger specification
-	@echo "Starting temporary API server to extract OpenAPI spec..."
+	@echo "Building bindcar (needed before the spec can be extracted)..."
 	@mkdir -p .tmp/zones docs/site
-# BIND_ENABLE_DOCS=true mounts /api/v1/openapi.json (off by default, A13) and the
-# loopback bind satisfies the startup auth-posture guard (B-4) without needing the
-# insecure override. Without both, this step silently wrote a stale spec.
-# The RNDC credentials are placeholders: extracting the OpenAPI document never
-# opens the control channel, it only needs the executor to construct.
+#
+# Notes on the env below:
+#   BIND_ENABLE_DOCS=true   mounts /api/v1/openapi.json, which is off by default (A13).
+#   BIND_API_ADDRESS=127... satisfies the startup auth-posture guard (B-4) without
+#                           needing the insecure override.
+#   RNDC_*                  placeholders — extracting the OpenAPI document never opens
+#                           the control channel, the executor just has to construct.
+#
+# The binary is built FIRST and the server is then polled for readiness. The previous
+# `cargo run & sleep 3` raced: on a cold CI checkout the 3s elapsed while cargo was
+# still compiling, so curl hit nothing and a stale spec was published (PR #124).
+	@cargo build --quiet
 	@BIND_ZONE_DIR=.tmp/zones BIND_API_ADDRESS=127.0.0.1 BIND_ENABLE_DOCS=true \
 	  RNDC_KEY_NAME=docs-placeholder RNDC_ALGORITHM=hmac-sha256 \
 	  RNDC_SECRET=$$(printf 'openapi-spec-generation-only' | base64) \
-	  cargo run & \
+	  ./target/debug/bindcar run >.tmp/openapi-server.log 2>&1 & \
 		SERVER_PID=$$!; \
-		echo "Waiting for server to start..."; \
-		sleep 3; \
+		echo "Waiting for API server (pid $$SERVER_PID)..."; \
+		for i in $$(seq 1 60); do \
+			curl -sf --max-time 2 http://127.0.0.1:8080/api/v1/openapi.json >/dev/null 2>&1 && break; \
+			kill -0 $$SERVER_PID 2>/dev/null || { echo "ERROR: server exited early"; cat .tmp/openapi-server.log; exit 1; }; \
+			sleep 0.5; \
+		done; \
 		echo "Fetching OpenAPI specification..."; \
-		curl -sf http://127.0.0.1:8080/api/v1/openapi.json > docs/site/openapi.json && \
+		curl -sf --max-time 10 http://127.0.0.1:8080/api/v1/openapi.json > docs/site/openapi.json && \
 		echo "OpenAPI specification saved to docs/site/openapi.json" || \
-		{ echo "ERROR: failed to fetch OpenAPI specification"; kill $$SERVER_PID 2>/dev/null; exit 1; }; \
+		{ echo "ERROR: failed to fetch OpenAPI specification"; cat .tmp/openapi-server.log; kill $$SERVER_PID 2>/dev/null; exit 1; }; \
 		echo "Stopping server..."; \
 		kill $$SERVER_PID 2>/dev/null || true; \
-		sleep 1
+		wait $$SERVER_PID 2>/dev/null || true
 
 .PHONY: docs-serve
 docs-serve: export PATH := $(HOME)/.local/bin:$(PATH)

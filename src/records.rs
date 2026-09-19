@@ -15,92 +15,19 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
-use utoipa::ToSchema;
 
 use crate::{
     metrics, rndc_parser, rndc_types,
     types::{ApiError, AppState},
 };
 
-/// Request to add a new DNS record
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AddRecordRequest {
-    /// Record name (e.g., "www", "@" for apex)
-    pub name: String,
-
-    /// Record type (e.g., "A", "AAAA", "CNAME", "MX", "TXT")
-    #[serde(rename = "type")]
-    pub record_type: String,
-
-    /// Record value (e.g., "192.0.2.1" for A record)
-    pub value: String,
-
-    /// TTL in seconds (default: 3600)
-    #[serde(default = "default_ttl")]
-    pub ttl: u32,
-
-    /// Priority (for MX and SRV records)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub priority: Option<u16>,
-}
-
-/// Request to remove a DNS record
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveRecordRequest {
-    /// Record name (e.g., "www", "@" for apex)
-    pub name: String,
-
-    /// Record type (e.g., "A", "AAAA", "CNAME")
-    #[serde(rename = "type")]
-    pub record_type: String,
-
-    /// Record value to remove (optional - if omitted, removes all records of this type)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<String>,
-}
-
-/// Request to update a DNS record
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateRecordRequest {
-    /// Record name (e.g., "www", "@" for apex)
-    pub name: String,
-
-    /// Record type (e.g., "A", "AAAA", "CNAME")
-    #[serde(rename = "type")]
-    pub record_type: String,
-
-    /// Current record value
-    pub current_value: String,
-
-    /// New record value
-    pub new_value: String,
-
-    /// TTL in seconds (default: 3600)
-    #[serde(default = "default_ttl")]
-    pub ttl: u32,
-
-    /// Priority (for MX and SRV records)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub priority: Option<u16>,
-}
-
-/// Response from record operations
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct RecordResponse {
-    pub success: bool,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<serde_json::Value>,
-}
-
-fn default_ttl() -> u32 {
-    3600
-}
+// Pure record data types live in `records_types` so a library consumer can take
+// them without the HTTP stack (roadmap 02, phase 1). Re-exported unchanged so
+// `bindcar::records::AddRecordRequest` and friends keep resolving.
+pub use crate::records_types::{
+    AddRecordRequest, RecordResponse, RemoveRecordRequest, UpdateRecordRequest,
+};
 
 /// Supported DNS record types
 const VALID_RECORD_TYPES: &[&str] = &["A", "AAAA", "CNAME", "MX", "TXT", "NS", "PTR", "SRV", "CAA"];

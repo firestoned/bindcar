@@ -1,14 +1,42 @@
 # Feature-gate the HTTP server (so type-only consumers can opt out)
 
-> **Status:** ⛔ Not started. `Cargo.toml` `[features]` carries only `default = []`
-> and `k8s-token-review` — there is no `http-server` (or equivalent) gate, so a
-> library-only consumer still inherits the full server stack. The doc targeted
-> 0.7.0; the tree is at 0.7.3 and it did not land.
+> **Status:** 🔶 Phase 1 of 6 complete (2026-09-18).
+>
+> - **Phase 1 (split mixed files) — ✅ done.** `src/zones_types.rs` (303 lines) and
+>   `src/records_types.rs` (94 lines) now hold the pure data types; both are free
+>   of `axum`, `ApiError` and `AppState`. `zones.rs`/`records.rs` re-export them,
+>   so every public path is unchanged — verified by compiling a probe against
+>   `bindcar::ZoneConfig`, `bindcar::zones::ZoneConfig` and
+>   `bindcar::zones_types::ZoneConfig` and asserting they are the same type.
+>   The `ApiError`-returning validators stayed behind, as designed.
+> - **Phases 2–6 — ⛔.** No `server` feature yet; `Cargo.toml` `[features]` still
+>   carries only `default = []` and `k8s-token-review`, so a library-only consumer
+>   still inherits the full server stack.
 >
 > *Migrated 2026-09-12 from the external roadmap set into `.github/community/`.
 > Verified against `did-code` @ `998bc5a`, bindcar 0.7.3.*
 
 ---
+
+> **Driver re-measured 2026-09-18 against `main` @ `8ac3071`.** The original
+> headline — a duplicate `sha2 0.10.x` pulled in via `utoipa-swagger-ui` →
+> `rust-embed` → `rust-embed-utils` — **no longer exists**: `rust-embed-utils
+> v8.12.0` now uses `sha2 v0.11.0`, the same version bindcar uses, so
+> out-of-scope follow-up #3 at the bottom of this file was resolved upstream.
+>
+> The case is nonetheless **stronger** than when it was written, measured rather
+> than estimated:
+>
+> | | crates |
+> |---|---|
+> | Total unique normal deps today | **178** |
+> | Reachable from the server stack | 135 |
+> | Reachable from the always-on set | 92 |
+> | **Shed by `--no-default-features`** | **82 (46% of the graph)** |
+>
+> The TLS transport added in roadmap 05 makes this slightly worse: `rustls`,
+> `tokio-rustls`, `rustls-pki-types`, `hyper` and `hyper-util` are now direct
+> dependencies and belong in the `server` feature group defined below.
 
 **Original status (as written):**
 **Created:** 2026-05-02
@@ -80,6 +108,12 @@ server = [
     "dep:utoipa",
     "dep:utoipa-swagger-ui",
     "dep:tower_governor",
+    # added by roadmap 05 (TLS transport)
+    "dep:rustls",
+    "dep:tokio-rustls",
+    "dep:rustls-pki-types",
+    "dep:hyper",
+    "dep:hyper-util",
 ]
 
 k8s-token-review = ["server", "dep:kube", "dep:k8s-openapi"]
@@ -109,8 +143,8 @@ utoipa-swagger-ui = { version = "9",    features = ["axum"], optional = true }
 tower_governor    = { version = "0.8",  optional = true }
 
 # k8s-token-review only:
-kube         = { version = "3.1", features = ["client", "rustls-tls"], optional = true }
-k8s-openapi  = { version = "0.27", default-features = false, optional = true }
+kube         = { version = "4.0", features = ["client", "rustls-tls"], optional = true }
+k8s-openapi  = { version = "0.28", default-features = false, optional = true }
 ```
 
 Rationale:
@@ -214,12 +248,19 @@ Inspect whether `metrics.rs` registers a router or only constructs a `prometheus
 
 ## Migration plan
 
-### Phase 1 — split mixed files (no feature gate yet)
+### Phase 1 — split mixed files (no feature gate yet) ✅ COMPLETE 2026-09-18
 
 1. Create `src/zones_types.rs`, move pure structs + constants out of `zones.rs`. Re-export from `zones.rs` so handlers still compile.
 2. Same for `src/records_types.rs`.
 3. Run `cargo-quality` skill (fmt + clippy + test). Confirm no behavioural change.
 4. Commit. This is a pure refactor — safe to merge independently.
+
+> **Done.** `zones.rs` 1639 → 1361 lines, `records.rs` 547 → 474. Note the split
+> landed at a different boundary than the line numbers above predicted: the
+> `pub(crate)` validators in `zones.rs` return `ApiError` and so stayed with the
+> handlers rather than moving with the structs. `impl ZoneConfig::to_zone_file()`
+> returns `String` and moved cleanly. `default_ttl()` moved with
+> `records_types.rs` because the structs reference it via `#[serde(default)]`.
 
 ### Phase 2 — introduce the feature flag
 
@@ -308,11 +349,11 @@ Documented here so they don't get lost:
 
 1. **Split into `bindcar-types` + `bindcar`** — revisit if more consumers (operators, controllers, CLIs) need the types-only library. Once 3+ consumers are on `default-features = false`, the case for a separate crate strengthens.
 2. **Drop `utoipa-swagger-ui`** — independent of this work. Could move to RapiDoc, Scalar, or a CDN-served Swagger UI shell. Would eliminate `rust-embed` from the bindcar binary too.
-3. **Upstream PR to `pyrossh/rust-embed`** bumping `rust-embed-utils` to `sha2 = "0.11"`. Helps the broader ecosystem; complementary to this work.
+3. ~~**Upstream PR to `pyrossh/rust-embed`** bumping `rust-embed-utils` to `sha2 = "0.11"`.~~ **Resolved upstream** — `rust-embed-utils v8.12.0` ships `sha2 0.11`. Verified 2026-09-18.
 
 ## Tracking
 
 - Owner: Erick
-- Linked downstream item: `/Users/erick/dev/bindy/docs/roadmaps/hickory-client-stable-upgrade.md` — different scope, but same broader goal of trimming bindy's dep graph.
+- Linked downstream item: bindy roadmap [`52-HICKORY-CLIENT-MIGRATION-TARGET.md`](https://github.com/firestoned/bindy/blob/main/.github/community/52-HICKORY-CLIENT-MIGRATION-TARGET.md) — different scope, same broader goal of trimming bindy's dep graph.
 - Target release: bindcar 0.7.0
 - Re-evaluation if blocked: 2026-06-01

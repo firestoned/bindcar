@@ -35,7 +35,7 @@ Statuses were verified against `main` @ `82d4dc5` (bindcar 0.7.3) on 2026-09-18.
 
 | # | Roadmap | Status | Notes |
 |---|---|---|---|
-| [02](.github/community/02-feature-gate-http-server.md) | Feature-gate the HTTP server | ⛔ | `[features]` has only `default = []` and `k8s-token-review` — no server gate, so library-only consumers still pull the whole stack. Targeted 0.7.0; tree is at 0.7.3 |
+| [02](.github/community/02-feature-gate-http-server.md) | Feature-gate the HTTP server | 🔶 | **Phase 1 of 6 done** — pure types split into `zones_types.rs`/`records_types.rs`, public paths unchanged. No `server` feature yet. Driver re-measured: **82 of 178 crates (46%) shed** by `--no-default-features`; the original sha2-duplicate justification is gone (fixed upstream) |
 
 ### Features
 

@@ -143,6 +143,7 @@ pub mod middleware;
 pub mod nsupdate;
 pub mod rate_limit;
 pub mod records;
+pub mod records_types;
 pub mod rndc;
 pub mod rndc_conf_parser;
 pub mod rndc_conf_types;
@@ -151,6 +152,7 @@ pub mod rndc_types;
 pub mod tls;
 pub mod types;
 pub mod zones;
+pub mod zones_types;
 
 // Re-export commonly used types
 

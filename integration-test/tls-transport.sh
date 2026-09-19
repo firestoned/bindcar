@@ -79,6 +79,9 @@ start_bindcar() {
 wait_for_api() {
     local scheme="$1" port="$2"; shift 2
     local i
+    # The listener binds in well under a second; 60 polls is headroom for a slow
+    # CI runner, not an expectation. A genuinely rejected handshake still burns
+    # the whole budget, so callers print diagnostics on failure.
     for i in $(seq 1 60); do
         if curl -sk "$@" --max-time 2 "${scheme}://127.0.0.1:${port}/api/v1/health" >/dev/null 2>&1; then
             return 0
@@ -98,35 +101,84 @@ RNDC_SECRET="$(openssl rand -base64 32)"
 # --- [1/6] Fixtures ---------------------------------------------------------
 log "[1/6] generating certificate fixtures"
 
-openssl req -x509 -newkey rsa:2048 -nodes \
+# Extensions are stated EXPLICITLY rather than inherited from the platform's
+# openssl.cnf. The defaults differ between distributions and OpenSSL versions:
+# a CA generated without an explicit `basicConstraints=critical,CA:TRUE` is not
+# usable as a trust anchor by rustls' path building, and a client leaf without
+# `extendedKeyUsage=clientAuth` is not guaranteed to be accepted for client
+# auth. Relying on those defaults made this suite pass on macOS and fail on the
+# Ubuntu CI runner (PR #124).
+cat >"${TEST_ROOT}/ca.ext" <<'EXT'
+basicConstraints = critical, CA:TRUE
+keyUsage         = critical, keyCertSign, cRLSign
+subjectKeyIdentifier = hash
+EXT
+
+cat >"${TEST_ROOT}/server.ext" <<'EXT'
+basicConstraints = critical, CA:FALSE
+keyUsage         = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName   = DNS:localhost, IP:127.0.0.1
+EXT
+
+cat >"${TEST_ROOT}/client.ext" <<'EXT'
+basicConstraints = critical, CA:FALSE
+keyUsage         = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth
+EXT
+
+# Self-signed server certificate (its own trust anchor; curl uses -k anyway).
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 \
     -keyout "${TEST_ROOT}/server-key.pem" -out "${TEST_ROOT}/server.pem" \
     -days 1 -subj "/CN=localhost" \
+    -extensions v3_req -addext "basicConstraints=critical,CA:FALSE" \
+    -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+    -addext "extendedKeyUsage=serverAuth" \
     -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null
 
-openssl req -x509 -newkey rsa:2048 -nodes \
+# Trusted CA + a client certificate it signs.
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 \
     -keyout "${TEST_ROOT}/ca-key.pem" -out "${TEST_ROOT}/ca.pem" \
-    -days 1 -subj "/CN=bindcar-test-ca" 2>/dev/null
+    -days 1 -subj "/CN=bindcar-test-ca" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
 
-openssl req -newkey rsa:2048 -nodes \
+openssl req -newkey rsa:2048 -nodes -sha256 \
     -keyout "${TEST_ROOT}/client-key.pem" -out "${TEST_ROOT}/client.csr" \
     -subj "/CN=bindy-operator" 2>/dev/null
-openssl x509 -req -in "${TEST_ROOT}/client.csr" \
+openssl x509 -req -sha256 -in "${TEST_ROOT}/client.csr" \
     -CA "${TEST_ROOT}/ca.pem" -CAkey "${TEST_ROOT}/ca-key.pem" -CAcreateserial \
+    -extfile "${TEST_ROOT}/client.ext" \
     -out "${TEST_ROOT}/client.pem" -days 1 2>/dev/null
 
 # A client cert from a CA the server does NOT trust, to prove the verifier
 # checks the chain rather than merely the presence of a certificate.
-openssl req -x509 -newkey rsa:2048 -nodes \
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 \
     -keyout "${TEST_ROOT}/rogue-ca-key.pem" -out "${TEST_ROOT}/rogue-ca.pem" \
-    -days 1 -subj "/CN=rogue-ca" 2>/dev/null
-openssl req -newkey rsa:2048 -nodes \
+    -days 1 -subj "/CN=rogue-ca" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
+openssl req -newkey rsa:2048 -nodes -sha256 \
     -keyout "${TEST_ROOT}/rogue-key.pem" -out "${TEST_ROOT}/rogue.csr" \
     -subj "/CN=rogue-client" 2>/dev/null
-openssl x509 -req -in "${TEST_ROOT}/rogue.csr" \
+openssl x509 -req -sha256 -in "${TEST_ROOT}/rogue.csr" \
     -CA "${TEST_ROOT}/rogue-ca.pem" -CAkey "${TEST_ROOT}/rogue-ca-key.pem" -CAcreateserial \
+    -extfile "${TEST_ROOT}/client.ext" \
     -out "${TEST_ROOT}/rogue.pem" -days 1 2>/dev/null
 
-pass "server, CA, client and rogue-client certificates generated"
+# Fail fast and loudly if the platform's openssl produced something unusable,
+# rather than surfacing it later as a confusing "valid cert rejected".
+if ! openssl x509 -in "${TEST_ROOT}/ca.pem" -noout -text | grep -q "CA:TRUE"; then
+    fail "generated CA lacks basicConstraints CA:TRUE — openssl $(openssl version)"
+fi
+if ! openssl x509 -in "${TEST_ROOT}/client.pem" -noout -text | grep -q "TLS Web Client Authentication"; then
+    fail "generated client cert lacks extendedKeyUsage clientAuth — openssl $(openssl version)"
+fi
+if ! openssl verify -CAfile "${TEST_ROOT}/ca.pem" "${TEST_ROOT}/client.pem" >/dev/null 2>&1; then
+    fail "client certificate does not verify against its own CA"
+fi
+
+pass "server, CA, client and rogue-client certificates generated (openssl $(openssl version | awk '{print $2}'))"
 
 if [[ ! -x "$BINDCAR_BIN" ]]; then
     log "binary not found — running cargo build ..."
@@ -203,6 +255,18 @@ if wait_for_api https "$PORT" --cert "${TEST_ROOT}/client.pem" --key "${TEST_ROO
     pass "client presenting a trusted certificate is accepted"
 else
     fail "mTLS listener rejected a valid client certificate"
+    # Without this the only signal is a 15s timeout, which says nothing about
+    # why. Print what both ends saw.
+    echo "--- curl (verbose) ---"
+    curl -sk -v --max-time 5 \
+        --cert "${TEST_ROOT}/client.pem" --key "${TEST_ROOT}/client-key.pem" \
+        "https://127.0.0.1:${PORT}/api/v1/health" 2>&1 | sed 's/^/    /' | tail -25
+    echo "--- client certificate ---"
+    openssl x509 -in "${TEST_ROOT}/client.pem" -noout -subject -issuer -dates -ext basicConstraints,keyUsage,extendedKeyUsage 2>&1 | sed 's/^/    /'
+    echo "--- trusted CA ---"
+    openssl x509 -in "${TEST_ROOT}/ca.pem" -noout -subject -dates -ext basicConstraints,keyUsage 2>&1 | sed 's/^/    /'
+    echo "--- bindcar log ---"
+    tail -20 "${TEST_ROOT}/mtls.log" | sed 's/^/    /'
 fi
 
 if curl -sk --max-time 5 "https://127.0.0.1:${PORT}/api/v1/health" >/dev/null 2>&1; then
