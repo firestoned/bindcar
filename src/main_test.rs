@@ -65,3 +65,41 @@ async fn test_probe_zone_dir_accepts_existing_directory() {
 
     assert!(probe_zone_dir(path).await);
 }
+
+/// A binary built without the `tls` feature must refuse to start when TLS was
+/// configured, rather than silently serving plaintext on a deployment whose
+/// operator believes TLS is on. This is the same fail-closed rule the runtime
+/// TLS config follows, extended to compile-time capability.
+#[test]
+fn test_check_tls_support_rejects_configured_tls_in_a_build_without_it() {
+    let err = super::check_tls_support(true, false)
+        .expect_err("configured TLS on a non-TLS build must be refused");
+    let msg = err.to_string();
+
+    assert!(
+        msg.contains("tls"),
+        "the error must name the missing feature: {msg}"
+    );
+    assert!(
+        msg.contains("--features tls") || msg.contains("feature"),
+        "the error must say how to fix it: {msg}"
+    );
+}
+
+/// Every other combination starts normally.
+#[test]
+fn test_check_tls_support_allows_the_supported_combinations() {
+    // TLS wanted and compiled in
+    assert!(super::check_tls_support(true, true).is_ok());
+    // TLS not wanted, compiled in — the common case for a plaintext deployment
+    assert!(super::check_tls_support(false, true).is_ok());
+    // TLS not wanted, not compiled in — a minimal build serving plaintext
+    assert!(super::check_tls_support(false, false).is_ok());
+}
+
+/// The constant must track the actual build configuration, so the check above
+/// is wired to reality rather than a hardcoded value.
+#[test]
+fn test_tls_supported_reflects_the_build() {
+    assert_eq!(super::TLS_SUPPORTED, cfg!(feature = "tls"));
+}

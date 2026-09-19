@@ -207,7 +207,7 @@ mod rndc_parser_tests;
 mod rndc_test;
 #[cfg(test)]
 mod rndc_types_tests;
-#[cfg(test)]
+#[cfg(all(test, feature = "tls"))]
 mod tls_test;
 #[cfg(test)]
 mod types_test;

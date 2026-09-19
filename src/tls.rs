@@ -32,16 +32,23 @@
 //!   accepting the flag and ignoring it.
 //! - Unreadable or unparseable PEM → an error before the listener binds.
 
+#[cfg(feature = "tls")]
 use std::sync::{Arc, RwLock};
 
+#[cfg(feature = "tls")]
 use tracing::{debug, info, warn};
 
+#[cfg(feature = "tls")]
 use rustls::server::WebPkiClientVerifier;
+#[cfg(feature = "tls")]
 use rustls::{RootCertStore, ServerConfig};
+#[cfg(feature = "tls")]
 use rustls_pki_types::pem::PemObject;
+#[cfg(feature = "tls")]
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 
 /// ALPN protocols advertised by the TLS listener, preferred order first.
+#[cfg(feature = "tls")]
 ///
 /// `h2` before `http/1.1` matches the HTTP versions the hyper auto-builder
 /// serves, so a client negotiating either lands on a protocol bindcar speaks.
@@ -73,21 +80,21 @@ pub enum TlsError {
     ClientCaWithoutTls,
 
     /// The certificate file could not be read or contained no certificates.
-    #[error("failed to read TLS certificate from {path}: {source}")]
+    #[error("failed to read TLS certificate from {path}: {reason}")]
     CertRead {
         /// The configured certificate path.
         path: String,
-        /// The underlying PEM error.
-        source: rustls_pki_types::pem::Error,
+        /// The underlying error, rendered.
+        reason: String,
     },
 
     /// The private key file could not be read.
-    #[error("failed to read TLS private key from {path}: {source}")]
+    #[error("failed to read TLS private key from {path}: {reason}")]
     KeyRead {
         /// The configured key path.
         path: String,
-        /// The underlying PEM error.
-        source: rustls_pki_types::pem::Error,
+        /// The underlying error, rendered.
+        reason: String,
     },
 
     /// The private key did not match the certificate, or was otherwise rejected.
@@ -100,12 +107,12 @@ pub enum TlsError {
     },
 
     /// The client CA bundle could not be read.
-    #[error("failed to read TLS client CA bundle from {path}: {source}")]
+    #[error("failed to read TLS client CA bundle from {path}: {reason}")]
     ClientCaRead {
         /// The configured client CA path.
         path: String,
-        /// The underlying PEM error.
-        source: rustls_pki_types::pem::Error,
+        /// The underlying error, rendered.
+        reason: String,
     },
 
     /// The client CA bundle parsed but produced no usable trust anchors.
@@ -210,6 +217,7 @@ pub fn scheme_for(settings: Option<&TlsSettings>) -> &'static str {
     "http"
 }
 
+#[cfg(feature = "tls")]
 /// Load the client CA bundle and build a verifier demanding a valid client certificate.
 ///
 /// # Errors
@@ -220,13 +228,13 @@ pub(crate) fn build_client_verifier(
 ) -> Result<Arc<dyn rustls::server::danger::ClientCertVerifier>, TlsError> {
     let mut roots = RootCertStore::empty();
 
-    for cert in CertificateDer::pem_file_iter(path).map_err(|source| TlsError::ClientCaRead {
+    for cert in CertificateDer::pem_file_iter(path).map_err(|e| TlsError::ClientCaRead {
         path: path.to_string(),
-        source,
+        reason: e.to_string(),
     })? {
-        let cert = cert.map_err(|source| TlsError::ClientCaRead {
+        let cert = cert.map_err(|e| TlsError::ClientCaRead {
             path: path.to_string(),
-            source,
+            reason: e.to_string(),
         })?;
         roots.add(cert).map_err(|e| TlsError::ClientCaInvalid {
             path: path.to_string(),
@@ -249,6 +257,7 @@ pub(crate) fn build_client_verifier(
         })
 }
 
+#[cfg(feature = "tls")]
 /// Build the [`rustls::ServerConfig`] for the API listener.
 ///
 /// Loads the certificate chain and private key from disk, and — when a client
@@ -264,21 +273,20 @@ pub(crate) fn build_client_verifier(
 /// piece of material failed to load. All are fatal at startup.
 pub fn build_server_config(settings: &TlsSettings) -> Result<ServerConfig, TlsError> {
     let certs = CertificateDer::pem_file_iter(&settings.cert_path)
-        .map_err(|source| TlsError::CertRead {
+        .map_err(|e| TlsError::CertRead {
             path: settings.cert_path.clone(),
-            source,
+            reason: e.to_string(),
         })?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|source| TlsError::CertRead {
+        .map_err(|e| TlsError::CertRead {
             path: settings.cert_path.clone(),
-            source,
+            reason: e.to_string(),
         })?;
 
-    let key =
-        PrivateKeyDer::from_pem_file(&settings.key_path).map_err(|source| TlsError::KeyRead {
-            path: settings.key_path.clone(),
-            source,
-        })?;
+    let key = PrivateKeyDer::from_pem_file(&settings.key_path).map_err(|e| TlsError::KeyRead {
+        path: settings.key_path.clone(),
+        reason: e.to_string(),
+    })?;
 
     let builder = ServerConfig::builder();
 
@@ -308,6 +316,7 @@ pub fn build_server_config(settings: &TlsSettings) -> Result<ServerConfig, TlsEr
 /// a rotation that silently never takes effect.
 pub const DEFAULT_RELOAD_INTERVAL_SECS: u64 = 60;
 
+#[cfg(feature = "tls")]
 /// Fingerprint the TLS material currently on disk.
 ///
 /// Kubernetes `Secret` and projected volumes do not rewrite files in place —
@@ -335,20 +344,20 @@ pub fn fingerprint(settings: &TlsSettings) -> Result<[u8; 32], TlsError> {
 
     let cert = std::fs::read(&settings.cert_path).map_err(|e| TlsError::CertRead {
         path: settings.cert_path.clone(),
-        source: rustls_pki_types::pem::Error::Io(e.kind().into()),
+        reason: e.to_string(),
     })?;
     hasher.update(&cert);
 
     let key = std::fs::read(&settings.key_path).map_err(|e| TlsError::KeyRead {
         path: settings.key_path.clone(),
-        source: rustls_pki_types::pem::Error::Io(e.kind().into()),
+        reason: e.to_string(),
     })?;
     hasher.update(&key);
 
     if let Some(ca_path) = &settings.client_ca_path {
         let ca = std::fs::read(ca_path).map_err(|e| TlsError::ClientCaRead {
             path: ca_path.clone(),
-            source: rustls_pki_types::pem::Error::Io(e.kind().into()),
+            reason: e.to_string(),
         })?;
         hasher.update(&ca);
     }
@@ -356,6 +365,7 @@ pub fn fingerprint(settings: &TlsSettings) -> Result<[u8; 32], TlsError> {
     Ok(hasher.finalize().into())
 }
 
+#[cfg(feature = "tls")]
 /// Holds the live [`rustls::ServerConfig`] and swaps it when the files change.
 ///
 /// The accept loop reads [`TlsReloader::current`] once per connection, so a swap
@@ -380,6 +390,7 @@ pub struct TlsReloader {
     last_fingerprint: RwLock<[u8; 32]>,
 }
 
+#[cfg(feature = "tls")]
 impl TlsReloader {
     /// Build the initial configuration and capture its fingerprint.
     ///

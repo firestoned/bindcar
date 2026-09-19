@@ -114,6 +114,13 @@ drone-integration-test: ## Run drone mode integration test (requires Docker, cur
 drone-integration-test-ci: ## Run drone integration test in CI (uses pre-built binary via BINDCAR_BIN env var)
 	./integration-test/drone-external-bind9.sh
 
+.PHONY: check-no-default-features
+check-no-default-features: ## Verify bindcar still builds and tests without the `tls` feature
+	@echo "==> build + clippy + test with --no-default-features (TLS off)"
+	cargo build --no-default-features
+	cargo clippy --all-targets --no-default-features -- -D warnings
+	cargo test --no-default-features
+
 .PHONY: tls-transport-test
 tls-transport-test: ## Run TLS transport e2e test (no BIND9 needed; requires openssl, curl)
 	cargo build

@@ -20,6 +20,7 @@ use axum::{
 use clap::Parser;
 use serde::Serialize;
 use std::net::SocketAddr;
+#[cfg(feature = "tls")]
 use std::sync::Arc as StdArc;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
@@ -28,8 +29,11 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 // Import from the library
+#[cfg(feature = "tls")]
 use axum::extract::ConnectInfo;
-use bindcar::tls::{scheme_for, TlsReloader, TlsSettings, DEFAULT_RELOAD_INTERVAL_SECS};
+#[cfg(feature = "tls")]
+use bindcar::tls::TlsReloader;
+use bindcar::tls::{scheme_for, TlsSettings, DEFAULT_RELOAD_INTERVAL_SECS};
 use bindcar::{
     auth::authenticate,
     cli::{Cli, Commands},
@@ -39,6 +43,7 @@ use bindcar::{
     types::{AppState, ErrorResponse},
     zones,
 };
+#[cfg(feature = "tls")]
 use tower::Service as _;
 use tower_governor::{
     governor::GovernorConfigBuilder, key_extractor::PeerIpKeyExtractor, GovernorLayer,
@@ -46,6 +51,35 @@ use tower_governor::{
 
 /// Crate version used by both the OpenAPI info block and health endpoint.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Whether this binary was compiled with the `tls` feature.
+const TLS_SUPPORTED: bool = cfg!(feature = "tls");
+
+/// Refuse to start when TLS was configured but is not compiled in.
+///
+/// The same fail-closed reasoning as the runtime TLS config, extended to
+/// compile-time capability: quietly ignoring `--tls-cert` would serve plaintext
+/// on a deployment whose operator believes TLS is on. The flags are always
+/// accepted by the parser so this produces an actionable error rather than an
+/// "unknown argument".
+///
+/// # Arguments
+/// * `tls_requested` - whether any TLS option was supplied
+/// * `tls_supported` - whether this build has the `tls` feature
+///
+/// # Errors
+/// Returns an error naming the missing feature when TLS was requested but the
+/// binary cannot provide it.
+fn check_tls_support(tls_requested: bool, tls_supported: bool) -> anyhow::Result<()> {
+    if tls_requested && !tls_supported {
+        anyhow::bail!(
+            "TLS options were supplied but this bindcar binary was built without the \
+`tls` feature, so it can only serve plaintext. Rebuild with `--features tls` \
+(it is enabled by default), or remove the TLS options to serve plaintext deliberately."
+        );
+    }
+    Ok(())
+}
 
 /// OpenAPI documentation structure
 #[derive(OpenApi)]
@@ -253,6 +287,12 @@ async fn main() -> anyhow::Result<()> {
             .ok()
             .and_then(|v| v.parse::<bool>().ok())
             .unwrap_or(false);
+
+    // Refuse loudly if TLS was asked for but this build cannot provide it,
+    // before anything binds.
+    let tls_requested =
+        cli.tls_cert.is_some() || cli.tls_key.is_some() || cli.tls_client_ca.is_some();
+    check_tls_support(tls_requested, TLS_SUPPORTED)?;
 
     // Resolve the TLS transport config before anything binds. A half-configured
     // listener is fatal here rather than a silent downgrade to plaintext.
@@ -645,42 +685,61 @@ async fn start_server(
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-    let Some(tls_settings) = tls_settings else {
-        // Plaintext path — unchanged from previous releases.
+    // A build without the `tls` feature can only serve plaintext. `main` has
+    // already refused to start if TLS was configured, so reaching here means
+    // plaintext was intended.
+    #[cfg(not(feature = "tls"))]
+    {
+        let _ = (tls_settings, tls_reload_interval);
         warn_plaintext_transport(&bind_host);
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
         )
         .await
-        .context("server error")?;
-        return Ok(());
-    };
-
-    if tls_settings.requires_client_auth() {
-        info!(
-            "mutual TLS enabled; clients must present a certificate trusted by the configured CA"
-        );
+        .context("server error")
     }
 
-    // A failure here is fatal: there is no known-good configuration to fall back
-    // to, and serving plaintext instead would be a silent downgrade.
-    let reloader =
-        StdArc::new(TlsReloader::new(tls_settings).context("failed to build TLS config")?);
+    #[cfg(feature = "tls")]
+    {
+        let Some(tls_settings) = tls_settings else {
+            // Plaintext path — unchanged from previous releases.
+            warn_plaintext_transport(&bind_host);
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .context("server error")?;
+            return Ok(());
+        };
 
-    if TlsReloader::reloading_enabled(tls_reload_interval) {
-        info!(
+        if tls_settings.requires_client_auth() {
+            info!(
+            "mutual TLS enabled; clients must present a certificate trusted by the configured CA"
+        );
+        }
+
+        // A failure here is fatal: there is no known-good configuration to fall back
+        // to, and serving plaintext instead would be a silent downgrade.
+        let reloader =
+            StdArc::new(TlsReloader::new(tls_settings).context("failed to build TLS config")?);
+
+        if TlsReloader::reloading_enabled(tls_reload_interval) {
+            info!(
             "watching TLS certificate material for renewals every {}s (BIND_TLS_RELOAD_INTERVAL=0 to disable)",
             tls_reload_interval
         );
-        spawn_tls_reload_task(StdArc::clone(&reloader), tls_reload_interval);
-    } else {
-        info!("TLS certificate reloading is disabled; a renewal requires a restart");
-    }
+            spawn_tls_reload_task(StdArc::clone(&reloader), tls_reload_interval);
+        } else {
+            info!("TLS certificate reloading is disabled; a renewal requires a restart");
+        }
 
-    serve_tls(listener, app, reloader).await
+        serve_tls(listener, app, reloader).await
+    }
 }
 
+#[cfg(feature = "tls")]
 /// Poll the TLS material for renewals, and reload on `SIGHUP`.
 ///
 /// Polling rather than watching is deliberate: Kubernetes swaps a `..data`
@@ -752,6 +811,7 @@ cross the network in the clear. Set --tls-cert/--tls-key (BIND_TLS_CERT/BIND_TLS
     );
 }
 
+#[cfg(feature = "tls")]
 /// Serve the router over TLS.
 ///
 /// Runs a manual accept loop so each connection is wrapped by
