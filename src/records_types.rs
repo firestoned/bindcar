@@ -13,10 +13,12 @@
 //! the server behind a cargo feature.
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "server")]
 use utoipa::ToSchema;
 
 /// Request to add a new DNS record
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AddRecordRequest {
     /// Record name (e.g., "www", "@" for apex)
@@ -39,7 +41,8 @@ pub struct AddRecordRequest {
 }
 
 /// Request to remove a DNS record
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveRecordRequest {
     /// Record name (e.g., "www", "@" for apex)
@@ -55,7 +58,8 @@ pub struct RemoveRecordRequest {
 }
 
 /// Request to update a DNS record
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateRecordRequest {
     /// Record name (e.g., "www", "@" for apex)
@@ -81,7 +85,8 @@ pub struct UpdateRecordRequest {
 }
 
 /// Response from record operations
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 pub struct RecordResponse {
     pub success: bool,
     pub message: String,

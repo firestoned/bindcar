@@ -115,11 +115,13 @@ drone-integration-test-ci: ## Run drone integration test in CI (uses pre-built b
 	./integration-test/drone-external-bind9.sh
 
 .PHONY: check-no-default-features
-check-no-default-features: ## Verify bindcar still builds and tests without the `tls` feature
+check-no-default-features: ## Verify the library still builds/tests with no features (no server, no TLS)
 	@echo "==> build + clippy + test with --no-default-features (TLS off)"
 	cargo build --no-default-features
 	cargo clippy --all-targets --no-default-features -- -D warnings
 	cargo test --no-default-features
+	@echo "==> the shared-types example must build for a library-only consumer"
+	cargo build --example use_shared_types --no-default-features
 
 .PHONY: tls-transport-test
 tls-transport-test: ## Run TLS transport e2e test (no BIND9 needed; requires openssl, curl)

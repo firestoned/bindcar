@@ -1,25 +1,28 @@
 # Feature-gate the HTTP server (so type-only consumers can opt out)
 
-> **Status:** 🔶 Phase 1 of 6 complete (2026-09-18).
+> **Status:** 🔶 Phases 1–4 complete (2026-09-19); phases 5–6 are release and
+> adoption steps.
 >
-> - **Phase 1 (split mixed files) — ✅ done.** `src/zones_types.rs` (303 lines) and
->   `src/records_types.rs` (94 lines) now hold the pure data types; both are free
->   of `axum`, `ApiError` and `AppState`. `zones.rs`/`records.rs` re-export them,
->   so every public path is unchanged — verified by compiling a probe against
->   `bindcar::ZoneConfig`, `bindcar::zones::ZoneConfig` and
->   `bindcar::zones_types::ZoneConfig` and asserting they are the same type.
->   The `ApiError`-returning validators stayed behind, as designed.
-> - **Phase 2, partial — 🔶 (2026-09-19).** A `tls` feature now exists
->   (`default = ["tls"]`) gating `rustls`, `tokio-rustls`, `rustls-pki-types`,
->   `hyper` and `hyper-util`. `--no-default-features` sheds **8 crates**:
->   `rustls`, `tokio-rustls`, `rustls-webpki`, `rustls-pki-types`, `ring`,
->   `untrusted`, `zeroize`, `getrandom 0.2`. This establishes the feature-gating
->   pattern and the CI guard (`make check-no-default-features`) that the wider
->   `server` feature will reuse.
-> - **Phases 2 (rest)–6 — ⛔.** There is still no `server` feature: `axum`,
->   `tower-http`, `utoipa`, `utoipa-swagger-ui` and `tower_governor` remain
->   unconditional, so a library-only consumer still inherits the HTTP stack.
->   That is where the bulk of the measured 82-crate win lives.
+> - **Phase 1 (split mixed files) — ✅.** `src/zones_types.rs`,
+>   `src/records_types.rs`; public paths unchanged.
+> - **Phase 2 (introduce the feature) — ✅.** `default = ["server", "tls"]`.
+>   `server` gates axum, tower, tower-http, utoipa, utoipa-swagger-ui and
+>   tower_governor; `tls` implies `server`; `k8s-token-review` implies `server`
+>   (it is axum middleware). The binary carries `required-features = ["server"]`
+>   — it *is* the server. `ToSchema` is applied via
+>   `#[cfg_attr(feature = "server", derive(ToSchema))]` (design Option A).
+> - **Phase 3 (verify) — ✅.** Build, clippy `-D warnings` and test all pass
+>   under both `--all-features` and `--no-default-features`.
+> - **Phase 4 (CI) — ✅.** `make check-no-default-features` runs in the Clippy
+>   job and also builds `examples/use_shared_types.rs` as a library-only
+>   consumer.
+> - **Phase 5 (release) — ⛔.** Needs a version bump and a published release.
+> - **Phase 6 (adopt in bindy) — ⛔.** bindy must set
+>   `default-features = false` to actually collect the saving.
+>
+> **Measured result: 178 → 98 crates, 80 shed (45%)** — against the 82 the
+> analysis below predicted. `--no-default-features` leaves the data types, the
+> RNDC/nsupdate executors and the config parsers.
 >
 > *Migrated 2026-09-12 from the external roadmap set into `.github/community/`.
 > Verified against `did-code` @ `998bc5a`, bindcar 0.7.3.*
@@ -270,7 +273,7 @@ Inspect whether `metrics.rs` registers a router or only constructs a `prometheus
 > returns `String` and moved cleanly. `default_ttl()` moved with
 > `records_types.rs` because the structs reference it via `#[serde(default)]`.
 
-### Phase 2 — introduce the feature flag
+### Phase 2 — introduce the feature flag ✅ COMPLETE 2026-09-19
 
 1. Edit `Cargo.toml` per the design above. `default = ["server"]` so nothing changes for default users.
 2. Add `#[cfg(feature = "server")] pub mod ...` gates in `lib.rs`.
@@ -278,7 +281,7 @@ Inspect whether `metrics.rs` registers a router or only constructs a `prometheus
 4. Apply the `#[cfg_attr(feature = "server", derive(utoipa::ToSchema))]` pattern to type structs.
 5. Move `axum`, `tower`, `tower-http`, `utoipa`, `utoipa-swagger-ui`, `tower_governor` to `optional = true`.
 
-### Phase 3 — verify
+### Phase 3 — verify ✅ COMPLETE 2026-09-19
 
 ```bash
 cargo build                         # default features (server on)
@@ -292,13 +295,18 @@ cargo clippy --all-targets --no-default-features -- -D warnings
 
 Each invocation must succeed cleanly.
 
-### Phase 4 — CI
+### Phase 4 — CI ✅ COMPLETE 2026-09-19
 
 Add a `cargo build --no-default-features` job to the bindcar CI matrix so we don't regress.
 
+> **Done** as `make check-no-default-features` (build + clippy + test + the
+> shared-types example), wired into the Clippy job in `build.yaml`.
+
 ### Phase 5 — release
 
-1. Bump `Cargo.toml` to `0.7.0` (minor — adding features is non-breaking; module reorg is breaking only for code that imported `bindcar::auth::Foo` directly, which we'll call out).
+1. Bump `Cargo.toml` (minor — adding features is non-breaking). **Note:** the
+   crate is still at `0.7.3` and unreleased work has accumulated well past it;
+   the next release is a `0.8.0`, not a `0.7.x`.
 2. CHANGELOG entry with `**Author:**` (per project convention) listing:
    - new features `server`, `k8s-token-review`
    - default features unchanged
@@ -314,7 +322,9 @@ In `/Users/erick/dev/bindy/Cargo.toml`:
 bindcar = { version = "0.7", default-features = false }
 ```
 
-Verify with `cargo tree -i sha2:0.10.9` — the only remaining 0.10 should disappear, since `rust-embed-utils` is no longer in bindy's tree.
+Verify with `cargo tree -d` and by counting the graph. (The original
+`sha2 0.10` check no longer applies — `rust-embed-utils` ships `sha2 0.11`
+now, so there was never a duplicate left to remove.)
 
 Then bump bindy's CHANGELOG, run cargo-quality + cargo audit, push.
 

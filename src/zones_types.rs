@@ -16,6 +16,7 @@
 //! phase 1 of putting the server behind a cargo feature.
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "server")]
 use utoipa::ToSchema;
 
 /// Zone type constants
@@ -31,7 +32,8 @@ pub const ZONE_TYPE_SECONDARY: &str = "secondary";
 /// - `retry`: 600 seconds
 /// - `expire`: 604800 seconds (7 days)
 /// - `negative_ttl`: 86400 seconds (1 day)
-#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SoaRecord {
     /// Primary nameserver (e.g., "ns1.example.com.")
@@ -85,7 +87,8 @@ fn default_negative_ttl() -> u32 {
 }
 
 /// DNS record entry
-#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DnsRecord {
     /// Record name (e.g., "www", "@")
@@ -108,7 +111,8 @@ pub struct DnsRecord {
 }
 
 /// Structured zone configuration
-#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ZoneConfig {
     /// Default TTL for the zone (e.g., 3600)
@@ -232,7 +236,8 @@ impl ZoneConfig {
 }
 
 /// Request to create a new zone
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateZoneRequest {
     /// Zone name (e.g., "example.com")
@@ -249,7 +254,8 @@ pub struct CreateZoneRequest {
 }
 
 /// Request to modify a zone configuration
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ModifyZoneRequest {
     /// IP addresses of secondary servers to notify when zone changes (BIND9 also-notify)
@@ -269,7 +275,8 @@ pub struct ModifyZoneRequest {
 }
 
 /// Response from zone operations
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 pub struct ZoneResponse {
     pub success: bool,
     pub message: String,
@@ -278,13 +285,15 @@ pub struct ZoneResponse {
 }
 
 /// Server status response
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 pub struct ServerStatusResponse {
     pub status: String,
 }
 
 /// Zone information
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ZoneInfo {
     pub name: String,
@@ -296,7 +305,8 @@ pub struct ZoneInfo {
 }
 
 /// List of zones response
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
 pub struct ZoneListResponse {
     pub zones: Vec<String>,
     pub count: usize,

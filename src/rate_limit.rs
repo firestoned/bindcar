@@ -18,7 +18,10 @@ use std::time::Duration;
 /// operator answers with exponential backoff, turning a ~30s recovery into ~130s.
 pub const MIN_BURST_FOR_ZONE_REPLAY: u32 = 50;
 
-// Re-export commonly used types for convenience
+// Re-export commonly used types for convenience. These are the only part of
+// this module that touches the HTTP stack — `RateLimitConfig` below is pure
+// configuration and stays available to a library-only consumer.
+#[cfg(feature = "server")]
 pub use tower_governor::{
     governor::GovernorConfigBuilder, key_extractor::PeerIpKeyExtractor, GovernorLayer,
 };

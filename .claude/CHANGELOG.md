@@ -1,5 +1,61 @@
 # Changelog
 
+## [2026-09-19 01:00] - Feature-gate the HTTP server (roadmap 02 phases 2-4)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `Cargo.toml`: `axum`, `tower`, `tower-http`, `utoipa`, `utoipa-swagger-ui`
+  and `tower_governor` are now optional behind a new `server` feature.
+  `default = ["server", "tls"]`. `tls` implies `server` (TLS is the transport
+  *for* the server); `k8s-token-review` implies `server` (it is axum
+  middleware). The `[[bin]]` target carries `required-features = ["server"]` —
+  the binary *is* the server, so `--no-default-features` builds the library
+  alone.
+- `src/lib.rs`: `auth`, `middleware`, `records`, `types` and `zones` are gated
+  on `server`. The crate-root re-exports now come from `zones_types` /
+  `records_types` instead of `zones` / `records`, so `bindcar::ZoneConfig` and
+  friends keep resolving in a library-only build — which is what the phase 1
+  type split existed to enable.
+- `src/zones_types.rs`, `src/records_types.rs`: `ToSchema` is applied through
+  `#[cfg_attr(feature = "server", derive(ToSchema))]` (the roadmap's Option A),
+  so the types carry OpenAPI schemas when the server is present and drop the
+  utoipa dependency when it is not.
+- `src/rate_limit.rs`: only the `tower_governor` re-export is gated;
+  `RateLimitConfig` is pure configuration and stays available.
+- `Makefile` / `.github/workflows/build.yaml`:
+  `make check-no-default-features` now also builds
+  `examples/use_shared_types.rs` as a library-only consumer.
+
+### Why
+Completes phases 2-4 of `.github/community/02-feature-gate-http-server.md`. A
+consumer importing bindcar purely for its data types was inheriting the entire
+HTTP server stack.
+
+**Measured: 178 → 98 crates, 80 shed (45%)**, against the 82 the roadmap
+predicted. Unlike the `tls` feature's 8-crate saving, this one is large: the
+whole axum/tower/utoipa stack leaves the graph.
+
+### Impact
+- [ ] Breaking change
+- [x] API change (additive: new `server` feature; default behaviour unchanged)
+- [ ] Config change only
+- [ ] Documentation only
+
+No change for any existing user. The default build has exactly the same
+capabilities, and every public path is unchanged — verified by compiling a probe
+that imports all 18 library-facing types under **both** feature configurations
+and asserts they are the same types.
+
+Verified: `cargo fmt --check`; clippy `-D warnings` under `--all-features` and
+`--no-default-features`; `cargo test` 357 passing with defaults and 202 in the
+library-only build; `examples/use_shared_types.rs` builds with
+`--no-default-features`; `make tls-transport-test` 23/23.
+
+### Remaining on roadmap 02
+Phases 5-6: cut a release, and have bindy set `default-features = false` to
+actually collect the saving. Neither can be done from this repo alone.
+
 ## [2026-09-19 00:00] - Put TLS behind an optional `tls` cargo feature
 
 **Author:** Erick Bourgeois
