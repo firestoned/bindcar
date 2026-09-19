@@ -9,9 +9,17 @@
 >   `bindcar::ZoneConfig`, `bindcar::zones::ZoneConfig` and
 >   `bindcar::zones_types::ZoneConfig` and asserting they are the same type.
 >   The `ApiError`-returning validators stayed behind, as designed.
-> - **Phases 2–6 — ⛔.** No `server` feature yet; `Cargo.toml` `[features]` still
->   carries only `default = []` and `k8s-token-review`, so a library-only consumer
->   still inherits the full server stack.
+> - **Phase 2, partial — 🔶 (2026-09-19).** A `tls` feature now exists
+>   (`default = ["tls"]`) gating `rustls`, `tokio-rustls`, `rustls-pki-types`,
+>   `hyper` and `hyper-util`. `--no-default-features` sheds **8 crates**:
+>   `rustls`, `tokio-rustls`, `rustls-webpki`, `rustls-pki-types`, `ring`,
+>   `untrusted`, `zeroize`, `getrandom 0.2`. This establishes the feature-gating
+>   pattern and the CI guard (`make check-no-default-features`) that the wider
+>   `server` feature will reuse.
+> - **Phases 2 (rest)–6 — ⛔.** There is still no `server` feature: `axum`,
+>   `tower-http`, `utoipa`, `utoipa-swagger-ui` and `tower_governor` remain
+>   unconditional, so a library-only consumer still inherits the HTTP stack.
+>   That is where the bulk of the measured 82-crate win lives.
 >
 > *Migrated 2026-09-12 from the external roadmap set into `.github/community/`.
 > Verified against `did-code` @ `998bc5a`, bindcar 0.7.3.*

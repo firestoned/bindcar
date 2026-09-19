@@ -1,5 +1,69 @@
 # Changelog
 
+## [2026-09-19 00:00] - Put TLS behind an optional `tls` cargo feature
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `Cargo.toml`: `rustls`, `tokio-rustls`, `rustls-pki-types`, `hyper` and
+  `hyper-util` are now `optional = true` behind a new `tls` feature, with
+  `default = ["tls"]`.
+- `src/tls.rs`: split by dependency rather than by file. `TlsSettings`,
+  `resolve_tls_settings()`, `scheme_for()`, `TlsError` and
+  `DEFAULT_RELOAD_INTERVAL_SECS` are always compiled — none of them touch
+  rustls. `build_server_config()`, `build_client_verifier()`, `fingerprint()`
+  and `TlsReloader` are gated. `TlsError`'s read variants now carry a rendered
+  `reason: String` instead of a `rustls_pki_types::pem::Error`, which is what
+  lets the error type exist in a build without rustls.
+- `src/main.rs`: the TLS serve path, `serve_tls()` and
+  `spawn_tls_reload_task()` are gated; the plaintext path is unchanged.
+- `Makefile`: `check-no-default-features` target (build + clippy + test).
+- `.github/workflows/build.yaml`: runs it in the Clippy job.
+
+### Added
+- `src/main.rs`: `TLS_SUPPORTED` and `check_tls_support()` — a binary built
+  without the feature **refuses to start** when TLS options are supplied,
+  instead of ignoring them. The CLI flags are always accepted by the parser so
+  the result is an actionable error rather than "unknown argument".
+- `src/main_test.rs`: 3 tests (TDD, RED confirmed) covering the refusal, the
+  three permitted combinations, and that `TLS_SUPPORTED` tracks `cfg!`.
+
+### Why
+TLS is not required for every deployment, and roadmap 05 put `rustls` and
+`tokio-rustls` into the **default** dependency graph for the first time — they
+previously arrived only through `kube`, which is itself optional. A consumer
+using bindcar purely as a types library was paying for a crypto stack it never
+calls.
+
+`--no-default-features` now sheds 8 crates: `rustls`, `tokio-rustls`,
+`rustls-webpki`, `rustls-pki-types`, `ring`, `untrusted`, `zeroize` and
+`getrandom 0.2` (178 → 170). Fewer than the ~30 first estimated — that figure
+was the `tokio-rustls` *subtree*, which overlaps almost entirely with crates
+already present. The 8 are the whole crypto/TLS stack, so the supply-chain
+reduction is more meaningful than the count suggests.
+
+`default = ["tls"]` rather than `default = []` is deliberate: shipping release
+artifacts without a feature operators need has burned this project before —
+v0.7.1 images were built without `k8s-token-review`, leaving bindy unable to run
+its configured auth mode on the stock image at all (see bindy guide 54 §12). CI
+passes `--features k8s-token-review`, which does not disable defaults, so
+release binaries keep TLS.
+
+### Impact
+- [ ] Breaking change
+- [x] API change (additive: new `tls` feature; default behaviour unchanged)
+- [ ] Config change only
+- [ ] Documentation only
+
+No behaviour change for any existing deployment — the default build is
+byte-for-byte equivalent in capability.
+
+Verified: `cargo fmt --check`; clippy `-D warnings` under both `--all-features`
+and `--no-default-features`; `cargo test` 357 passing with the feature on and
+337 with it off; `make tls-transport-test` 23/23; `make docs`. Also confirmed by
+hand that a `--no-default-features` binary refuses `BIND_TLS_CERT` with the
+actionable error and still serves plaintext normally.
+
 ## [2026-09-18 04:00] - TLS certificate hot-reload (roadmap 06); new roadmaps 06 and 07
 
 **Author:** Erick Bourgeois

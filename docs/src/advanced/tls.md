@@ -19,6 +19,33 @@ deletion.
     RNDC/TSIG key *material* never transits this API — only the key **name**
     does. The exposure is the API credential, not your DNS signing keys.
 
+## Build-time feature
+
+TLS lives behind the `tls` cargo feature, which is **on by default** — the
+published binary and container image can always terminate TLS, and
+`cargo install bindcar` gets it.
+
+A library consumer that only wants bindcar's data types can drop it:
+
+```toml
+bindcar = { version = "0.8", default-features = false }
+```
+
+That removes the entire crypto stack from the dependency graph — `rustls`,
+`tokio-rustls`, `rustls-webpki`, `rustls-pki-types`, `ring`, `untrusted`,
+`zeroize` and `getrandom 0.2`.
+
+A binary built without the feature serves plaintext only, and **refuses to start
+if TLS options are supplied** rather than ignoring them:
+
+```console
+$ bindcar run --tls-cert /etc/bindcar/tls/tls.crt --tls-key /etc/bindcar/tls/tls.key
+Error: TLS options were supplied but this bindcar binary was built without the
+`tls` feature, so it can only serve plaintext. Rebuild with `--features tls`
+(it is enabled by default), or remove the TLS options to serve plaintext
+deliberately.
+```
+
 ## Quick start
 
 ```bash

@@ -108,6 +108,12 @@ jobs:
       - name: Run clippy
         run: make clippy
 
+      # The `tls` feature is on by default, so a regression that makes the crate
+      # depend on rustls unconditionally would otherwise go unnoticed until a
+      # library consumer tried `default-features = false`.
+      - name: Verify the crate still builds without the tls feature
+        run: make check-no-default-features
+
   # ── Version metadata (always) ──────────────────────────────────────────────
   extract-version:
     name: Extract Version Information
