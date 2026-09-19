@@ -136,12 +136,15 @@
 //! - No need to maintain duplicate type definitions
 
 // Re-export public modules
+#[cfg(feature = "server")]
 pub mod auth;
 pub mod cli;
 pub mod metrics;
+#[cfg(feature = "server")]
 pub mod middleware;
 pub mod nsupdate;
 pub mod rate_limit;
+#[cfg(feature = "server")]
 pub mod records;
 pub mod records_types;
 pub mod rndc;
@@ -150,7 +153,9 @@ pub mod rndc_conf_types;
 pub mod rndc_parser;
 pub mod rndc_types;
 pub mod tls;
+#[cfg(feature = "server")]
 pub mod types;
+#[cfg(feature = "server")]
 pub mod zones;
 pub mod zones_types;
 
@@ -162,20 +167,25 @@ pub use rndc::RndcExecutor;
 // nsupdate executor
 pub use nsupdate::NsupdateExecutor;
 
-// Error types
+// Error types — axum-bound, so server-only
+#[cfg(feature = "server")]
 pub use types::{ApiError, AppState, ErrorResponse};
 
-// Zone configuration types
-pub use zones::{DnsRecord, SoaRecord, ZoneConfig};
+// Zone configuration types. Re-exported from `zones_types` rather than `zones`
+// so these paths keep resolving in a `default-features = false` build, which is
+// the whole point of the type split (roadmap 02 phase 1).
+pub use zones_types::{DnsRecord, SoaRecord, ZoneConfig};
 
 // Request/Response types for API operations
-pub use zones::{
+pub use zones_types::{
     CreateZoneRequest, ServerStatusResponse, ZoneInfo, ZoneListResponse, ZoneResponse,
     ZONE_TYPE_PRIMARY, ZONE_TYPE_SECONDARY,
 };
 
 // Record management types
-pub use records::{AddRecordRequest, RecordResponse, RemoveRecordRequest, UpdateRecordRequest};
+pub use records_types::{
+    AddRecordRequest, RecordResponse, RemoveRecordRequest, UpdateRecordRequest,
+};
 
 // RNDC configuration
 pub use rndc::{parse_rndc_conf, RndcConfig};
@@ -187,19 +197,19 @@ pub use rndc_conf_parser::{parse_rndc_conf_file, parse_rndc_conf_str};
 pub use rndc_conf_types::{KeyBlock, OptionsBlock, RndcConfFile, ServerAddress, ServerBlock};
 
 // Test modules
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod auth_test;
 #[cfg(test)]
 mod cli_test;
 #[cfg(test)]
 mod metrics_test;
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod middleware_test;
 #[cfg(test)]
 mod nsupdate_test;
 #[cfg(test)]
 mod rate_limit_test;
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod records_test;
 #[cfg(test)]
 mod rndc_parser_tests;
@@ -209,7 +219,7 @@ mod rndc_test;
 mod rndc_types_tests;
 #[cfg(all(test, feature = "tls"))]
 mod tls_test;
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod types_test;
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod zones_test;

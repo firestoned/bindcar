@@ -23,17 +23,20 @@ deletion.
 
 TLS lives behind the `tls` cargo feature, which is **on by default** — the
 published binary and container image can always terminate TLS, and
-`cargo install bindcar` gets it.
+`cargo install bindcar` gets it. `tls` implies `server`, since TLS is the
+transport *for* the HTTP server.
 
-A library consumer that only wants bindcar's data types can drop it:
+A library consumer that only wants bindcar's data types can drop both:
 
 ```toml
 bindcar = { version = "0.8", default-features = false }
 ```
 
-That removes the entire crypto stack from the dependency graph — `rustls`,
-`tokio-rustls`, `rustls-webpki`, `rustls-pki-types`, `ring`, `untrusted`,
-`zeroize` and `getrandom 0.2`.
+That takes the dependency graph from **178 crates to 98** — the whole HTTP
+stack (axum, tower-http, utoipa, utoipa-swagger-ui, tower_governor) and the
+whole crypto stack (rustls, tokio-rustls, rustls-webpki, ring, zeroize) go with
+it. What remains is the data types, the RNDC and nsupdate executors, and the
+configuration parsers.
 
 A binary built without the feature serves plaintext only, and **refuses to start
 if TLS options are supplied** rather than ignoring them:

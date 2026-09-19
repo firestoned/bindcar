@@ -1,6 +1,6 @@
 [package]
 name = "bindcar"
-version = "0.7.3"
+version = "0.8.0"
 edition = "2021"
 rust-version = "1.88"
 authors = ["Erick Bourgeois <firestoned@firestoned.io>"]
@@ -20,12 +20,16 @@ path = "src/lib.rs"
 [[bin]]
 name = "bindcar"
 path = "src/main.rs"
+# The binary IS the HTTP server, so it cannot be built without the stack.
+# `cargo build --no-default-features` builds the library alone, which is the
+# library-only consumer's configuration.
+required-features = ["server"]
 
 [dependencies]
 # HTTP server framework
-axum = "0.8"
-tower = "0.5"
-tower-http = { version = "0.7", features = ["trace"] }
+axum = { version = "0.8", optional = true }
+tower = { version = "0.5", optional = true }
+tower-http = { version = "0.7", features = ["trace"], optional = true }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -46,15 +50,15 @@ anyhow = "1.0"
 thiserror = "2.0"
 
 # OpenAPI / Swagger
-utoipa = { version = "5", features = ["axum_extras"] }
-utoipa-swagger-ui = { version = "9", features = ["axum"] }
+utoipa = { version = "5", features = ["axum_extras"], optional = true }
+utoipa-swagger-ui = { version = "9", features = ["axum"], optional = true }
 
 # Metrics
 prometheus = "0.14"
 lazy_static = "1.5"
 
 # Rate limiting
-tower_governor = "0.8"
+tower_governor = { version = "0.8", optional = true }
 
 # RNDC client
 rndc = "0.1.5"
@@ -101,16 +105,38 @@ hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "t
 #
 # Library consumers that only want the data types can opt out:
 #     bindcar = { version = "0.8", default-features = false }
-default = ["tls"]
+default = ["server", "tls"]
 
-# HTTPS/mTLS listener, certificate hot-reload. Without it bindcar serves
-# plaintext only and refuses to start if TLS options are supplied.
-tls = ["dep:rustls", "dep:tokio-rustls", "dep:rustls-pki-types", "dep:hyper", "dep:hyper-util"]
+# The HTTP server: routes, middleware, rate limiter, OpenAPI/Swagger. This is
+# what the `bindcar` binary is, so the binary carries `required-features`.
+# Turning it off leaves the data types, the RNDC/nsupdate executors and the
+# config parsers — everything a library consumer actually imports.
+server = [
+    "dep:axum",
+    "dep:tower",
+    "dep:tower-http",
+    "dep:utoipa",
+    "dep:utoipa-swagger-ui",
+    "dep:tower_governor",
+]
+
+# HTTPS/mTLS listener, certificate hot-reload. Implies `server`: TLS is the
+# transport *for* the HTTP server, so it is meaningless without it. Without
+# this feature bindcar serves plaintext only and refuses to start if TLS
+# options are supplied.
+tls = [
+    "server",
+    "dep:rustls",
+    "dep:tokio-rustls",
+    "dep:rustls-pki-types",
+    "dep:hyper",
+    "dep:hyper-util",
+]
 # Pin the k8s-openapi API version via the feature so a release binary build
 # (`cargo build --release --features k8s-token-review`) needs no
 # K8S_OPENAPI_ENABLED_VERSION env var — the version travels with the feature,
 # on host cargo and in the aarch64 cross container alike.
-k8s-token-review = ["kube", "k8s-openapi", "k8s-openapi/v1_32"]
+k8s-token-review = ["server", "kube", "k8s-openapi", "k8s-openapi/v1_32"]
 
 [dev-dependencies]
 # Testing

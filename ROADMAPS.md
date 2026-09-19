@@ -35,7 +35,7 @@ Statuses were verified against `main` @ `82d4dc5` (bindcar 0.7.3) on 2026-09-18.
 
 | # | Roadmap | Status | Notes |
 |---|---|---|---|
-| [02](.github/community/02-feature-gate-http-server.md) | Feature-gate the HTTP server | 🔶 | **Phase 1 done; Phase 2 partial** — a `tls` feature (default on) now sheds 8 crypto crates under `--no-default-features`, guarded by `make check-no-default-features` in CI. The `server` feature itself (axum/utoipa/tower stack) is still unstarted, which is where most of the win is. Originally: **Phase 1 of 6 done** — pure types split into `zones_types.rs`/`records_types.rs`, public paths unchanged. No `server` feature yet. Driver re-measured: **82 of 178 crates (46%) shed** by `--no-default-features`; the original sha2-duplicate justification is gone (fixed upstream) |
+| [02](.github/community/02-feature-gate-http-server.md) | Feature-gate the HTTP server | 🔶 | **Phases 1–4 done.** `default = ["server", "tls"]`; `--no-default-features` yields a library-only build. **Measured: 178 → 98 crates, 80 shed (45%)**, against the 82 predicted. Guarded by `make check-no-default-features` in CI. Phases 5–6 (release, and bindy adopting `default-features = false`) remain |
 
 ### Features
 
