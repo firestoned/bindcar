@@ -32,7 +32,9 @@
 //!   accepting the flag and ignoring it.
 //! - Unreadable or unparseable PEM → an error before the listener binds.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+
+use tracing::{debug, info, warn};
 
 use rustls::server::WebPkiClientVerifier;
 use rustls::{RootCertStore, ServerConfig};
@@ -294,4 +296,181 @@ pub fn build_server_config(settings: &TlsSettings) -> Result<ServerConfig, TlsEr
     config.alpn_protocols = ALPN_PROTOCOLS.iter().map(|p| p.to_vec()).collect();
 
     Ok(config)
+}
+
+// ---------------------------------------------------------------------------
+// Hot-reload (roadmap 06)
+// ---------------------------------------------------------------------------
+
+/// How often the certificate files are re-examined, in seconds.
+///
+/// Three file reads and three hashes a minute is negligible next to the cost of
+/// a rotation that silently never takes effect.
+pub const DEFAULT_RELOAD_INTERVAL_SECS: u64 = 60;
+
+/// Fingerprint the TLS material currently on disk.
+///
+/// Kubernetes `Secret` and projected volumes do not rewrite files in place —
+/// they swap a `..data` symlink — so mtime and inode are both unreliable across
+/// a renewal. Hashing the bytes is what actually detects the change.
+///
+/// The client CA is included so mTLS trust is part of the reloadable surface,
+/// not just the server certificate.
+///
+/// # Arguments
+/// * `settings` - the resolved TLS settings naming the files to hash
+///
+/// # Returns
+/// A SHA-256 digest over the certificate, key and (when configured) client CA.
+///
+/// # Errors
+/// Returns [`TlsError::CertRead`], [`TlsError::KeyRead`] or
+/// [`TlsError::ClientCaRead`] if a file cannot be read. Callers polling for
+/// changes should treat an error as "no change" and retry: a file is routinely
+/// unreadable for a moment during a renewal.
+pub fn fingerprint(settings: &TlsSettings) -> Result<[u8; 32], TlsError> {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+
+    let cert = std::fs::read(&settings.cert_path).map_err(|e| TlsError::CertRead {
+        path: settings.cert_path.clone(),
+        source: rustls_pki_types::pem::Error::Io(e.kind().into()),
+    })?;
+    hasher.update(&cert);
+
+    let key = std::fs::read(&settings.key_path).map_err(|e| TlsError::KeyRead {
+        path: settings.key_path.clone(),
+        source: rustls_pki_types::pem::Error::Io(e.kind().into()),
+    })?;
+    hasher.update(&key);
+
+    if let Some(ca_path) = &settings.client_ca_path {
+        let ca = std::fs::read(ca_path).map_err(|e| TlsError::ClientCaRead {
+            path: ca_path.clone(),
+            source: rustls_pki_types::pem::Error::Io(e.kind().into()),
+        })?;
+        hasher.update(&ca);
+    }
+
+    Ok(hasher.finalize().into())
+}
+
+/// Holds the live [`rustls::ServerConfig`] and swaps it when the files change.
+///
+/// The accept loop reads [`TlsReloader::current`] once per connection, so a swap
+/// affects new connections only — established ones finish under the certificate
+/// they started with, which is what makes rotation non-disruptive.
+///
+/// # Failure behaviour
+///
+/// A reload that cannot be built is a **non-event**: the error is logged and the
+/// existing configuration keeps serving. This is deliberate and differs from
+/// startup, where bad TLS material is fatal. At startup, continuing would mean
+/// silently serving plaintext; here there is already a working configuration in
+/// memory, so retaining it is strictly safer than either failing or downgrading.
+///
+/// It also makes non-atomic renewals safe. A poll can easily observe a new
+/// certificate alongside a not-yet-replaced key; that pair does not build, the
+/// swap is skipped, and the next poll picks up the completed write.
+#[derive(Debug)]
+pub struct TlsReloader {
+    settings: TlsSettings,
+    config: RwLock<Arc<ServerConfig>>,
+    last_fingerprint: RwLock<[u8; 32]>,
+}
+
+impl TlsReloader {
+    /// Build the initial configuration and capture its fingerprint.
+    ///
+    /// # Arguments
+    /// * `settings` - resolved TLS settings
+    ///
+    /// # Errors
+    /// Propagates any [`TlsError`] from [`build_server_config`]. Unlike a later
+    /// reload, a failure here **is** fatal: there is no known-good config to
+    /// fall back to.
+    pub fn new(settings: TlsSettings) -> Result<Self, TlsError> {
+        let config = Arc::new(build_server_config(&settings)?);
+        // A fingerprint failure at startup cannot happen in practice — the files
+        // were just read successfully — but treat it as "unknown" rather than
+        // failing the server, so the first poll simply reloads.
+        let fp = fingerprint(&settings).unwrap_or([0u8; 32]);
+
+        Ok(Self {
+            settings,
+            config: RwLock::new(config),
+            last_fingerprint: RwLock::new(fp),
+        })
+    }
+
+    /// The configuration new connections should use.
+    ///
+    /// Cheap: clones an `Arc` while holding the read lock only for that clone,
+    /// never across an `await`.
+    #[must_use]
+    pub fn current(&self) -> Arc<ServerConfig> {
+        self.config
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// Whether a reload interval enables reloading at all.
+    ///
+    /// Zero restores the startup-only behaviour of earlier releases.
+    #[must_use]
+    pub fn reloading_enabled(interval_secs: u64) -> bool {
+        interval_secs > 0
+    }
+
+    /// Re-read the files and swap the live config if they changed and still build.
+    ///
+    /// # Returns
+    /// `true` only when a new configuration was actually installed. An unchanged
+    /// fingerprint, an unreadable file and a material that fails to build all
+    /// return `false` and leave the current configuration serving.
+    pub fn reload_if_changed(&self) -> bool {
+        let current_fp = match fingerprint(&self.settings) {
+            Ok(fp) => fp,
+            Err(e) => {
+                // Routine during a renewal; the next poll retries.
+                debug!("TLS material not readable while polling for changes: {}", e);
+                return false;
+            }
+        };
+
+        {
+            let last = self
+                .last_fingerprint
+                .read()
+                .unwrap_or_else(|p| p.into_inner());
+            if *last == current_fp {
+                return false;
+            }
+        }
+
+        let rebuilt = match build_server_config(&self.settings) {
+            Ok(config) => config,
+            Err(e) => {
+                warn!(
+                    "TLS material changed but the new configuration is not usable, \
+continuing with the previous certificate: {}",
+                    e
+                );
+                // Deliberately do NOT record the fingerprint: the write may still
+                // be in progress, and the next poll must try again.
+                return false;
+            }
+        };
+
+        *self.config.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(rebuilt);
+        *self
+            .last_fingerprint
+            .write()
+            .unwrap_or_else(|p| p.into_inner()) = current_fp;
+
+        info!("reloaded TLS certificate material; new connections will use it");
+        true
+    }
 }

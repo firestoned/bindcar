@@ -29,7 +29,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 // Import from the library
 use axum::extract::ConnectInfo;
-use bindcar::tls::{build_server_config, scheme_for, TlsSettings};
+use bindcar::tls::{scheme_for, TlsReloader, TlsSettings, DEFAULT_RELOAD_INTERVAL_SECS};
 use bindcar::{
     auth::authenticate,
     cli::{Cli, Commands},
@@ -263,7 +263,17 @@ async fn main() -> anyhow::Result<()> {
     )
     .context("invalid TLS configuration")?;
 
-    start_server(cli.resolved_command(), insecure_override, tls_settings).await
+    let reload_interval = cli
+        .tls_reload_interval
+        .unwrap_or(DEFAULT_RELOAD_INTERVAL_SECS);
+
+    start_server(
+        cli.resolved_command(),
+        insecure_override,
+        tls_settings,
+        reload_interval,
+    )
+    .await
 }
 
 fn init_tracing(debug: bool) {
@@ -284,6 +294,7 @@ async fn start_server(
     command: &Commands,
     insecure_override: bool,
     tls_settings: Option<TlsSettings>,
+    tls_reload_interval: u64,
 ) -> anyhow::Result<()> {
     match command {
         Commands::Run => info!("starting bindcar v{} [sidecar mode]", VERSION),
@@ -652,8 +663,76 @@ async fn start_server(
         );
     }
 
-    let tls_config = build_server_config(&tls_settings).context("failed to build TLS config")?;
-    serve_tls(listener, app, StdArc::new(tls_config)).await
+    // A failure here is fatal: there is no known-good configuration to fall back
+    // to, and serving plaintext instead would be a silent downgrade.
+    let reloader =
+        StdArc::new(TlsReloader::new(tls_settings).context("failed to build TLS config")?);
+
+    if TlsReloader::reloading_enabled(tls_reload_interval) {
+        info!(
+            "watching TLS certificate material for renewals every {}s (BIND_TLS_RELOAD_INTERVAL=0 to disable)",
+            tls_reload_interval
+        );
+        spawn_tls_reload_task(StdArc::clone(&reloader), tls_reload_interval);
+    } else {
+        info!("TLS certificate reloading is disabled; a renewal requires a restart");
+    }
+
+    serve_tls(listener, app, reloader).await
+}
+
+/// Poll the TLS material for renewals, and reload on `SIGHUP`.
+///
+/// Polling rather than watching is deliberate: Kubernetes swaps a `..data`
+/// symlink instead of rewriting files in place, which defeats inode-based
+/// watchers. `SIGHUP` is offered alongside it so an operator can make rotation
+/// deterministic instead of waiting out the interval.
+///
+/// # Arguments
+/// * `reloader` - the shared reloader holding the live configuration
+/// * `interval_secs` - seconds between polls; the caller has already checked it is non-zero
+fn spawn_tls_reload_task(reloader: StdArc<TlsReloader>, interval_secs: u64) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+        // The first tick fires immediately; skip it so startup does not
+        // pointlessly rebuild the config it just built.
+        ticker.tick().await;
+
+        #[cfg(unix)]
+        let mut sighup = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+        {
+            Ok(s) => Some(s),
+            Err(e) => {
+                warn!("could not install SIGHUP handler for TLS reload: {}", e);
+                None
+            }
+        };
+
+        loop {
+            #[cfg(unix)]
+            {
+                match sighup.as_mut() {
+                    Some(hup) => {
+                        tokio::select! {
+                            _ = ticker.tick() => {}
+                            _ = hup.recv() => {
+                                info!("SIGHUP received; checking TLS material now");
+                            }
+                        }
+                    }
+                    None => {
+                        ticker.tick().await;
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                ticker.tick().await;
+            }
+
+            reloader.reload_if_changed();
+        }
+    });
 }
 
 /// Warn when a credential-bearing API is about to be served in the clear.
@@ -681,10 +760,14 @@ cross the network in the clear. Set --tls-cert/--tls-key (BIND_TLS_CERT/BIND_TLS
 /// `PeerIpKeyExtractor` reads it and would otherwise reject every request once
 /// the listener stopped being an `axum::serve` one.
 ///
+/// The configuration is read from `reloader` on every accept rather than being
+/// captured once, so a certificate renewal reaches new connections without a
+/// restart (roadmap 06).
+///
 /// # Arguments
 /// * `listener` - the bound TCP listener
 /// * `app` - the fully-built axum router
-/// * `tls_config` - the rustls server configuration
+/// * `reloader` - holds the live rustls configuration
 ///
 /// # Errors
 /// Returns an error only if the listener itself fails. Per-connection failures
@@ -693,13 +776,16 @@ cross the network in the clear. Set --tls-cert/--tls-key (BIND_TLS_CERT/BIND_TLS
 async fn serve_tls(
     listener: tokio::net::TcpListener,
     app: Router,
-    tls_config: StdArc<rustls::ServerConfig>,
+    reloader: StdArc<TlsReloader>,
 ) -> anyhow::Result<()> {
-    let acceptor = tokio_rustls::TlsAcceptor::from(tls_config);
-
     loop {
         let (stream, peer) = listener.accept().await.context("accept failed")?;
-        let acceptor = acceptor.clone();
+        // Read the live config per connection so a reload reaches new
+        // connections immediately. `TlsAcceptor::from` wraps the `Arc`, so this
+        // costs one atomic increment. Established connections keep the
+        // certificate they started with, which is what makes rotation
+        // non-disruptive.
+        let acceptor = tokio_rustls::TlsAcceptor::from(reloader.current());
         let app = app.clone();
 
         tokio::spawn(async move {

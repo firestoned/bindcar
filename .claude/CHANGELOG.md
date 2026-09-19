@@ -1,5 +1,71 @@
 # Changelog
 
+## [2026-09-18 04:00] - TLS certificate hot-reload (roadmap 06); new roadmaps 06 and 07
+
+**Author:** Erick Bourgeois
+
+### Added
+- `src/tls.rs`: `TlsReloader` holds the live `rustls::ServerConfig` behind an
+  `RwLock<Arc<..>>`; `fingerprint()` digests the certificate, key and client CA
+  **contents** with SHA-256; `reload_if_changed()` rebuilds and swaps only when
+  the digest moved and the new material builds. `DEFAULT_RELOAD_INTERVAL_SECS`
+  is 60.
+- `src/main.rs`: `serve_tls()` now reads the config per accepted connection
+  instead of capturing one `TlsAcceptor`, so a swap reaches new connections
+  while established ones finish under the certificate they started with.
+  `spawn_tls_reload_task()` polls on the interval and also reloads on `SIGHUP`
+  (Unix).
+- `src/cli.rs`: `--tls-reload-interval` / `BIND_TLS_RELOAD_INTERVAL`.
+- `src/tls_test.rs`: 7 new tests (TDD, RED confirmed) — digest stability, digest
+  sensitivity to each of the three files, a valid renewal swapping, a corrupt
+  renewal *not* swapping and recovering on the next poll, a mismatched
+  cert/key pair being rejected, and interval `0` disabling.
+- `integration-test/tls-transport.sh`: new section 7/7, 8 assertions — asserts
+  the **served certificate subject** actually changes, that an incomplete
+  renewal neither swaps nor interrupts service, that the failure is logged, that
+  the pid is unchanged across rotation, and that `=0` keeps the startup cert.
+- `.github/community/06-tls-certificate-reload.md`, `07-dnssec-lifecycle.md`:
+  NEW roadmaps, both indexed in `README.md` and `ROADMAPS.md`. 06 is now closed
+  ✅ by this change; 07 is ⛔ and explicitly gated on an ADR first.
+
+### Changed
+- `docs/src/advanced/tls.md`: the "Certificate rotation needs a restart" note is
+  replaced by a Certificate rotation section covering the interval, `SIGHUP`,
+  why established connections are unaffected, why a failed reload is deliberately
+  a non-event, and why detection is by content rather than mtime.
+- `docs/src/operations/env-vars.md`: `BIND_TLS_RELOAD_INTERVAL`.
+
+### Why
+Roadmap 05 shipped TLS with a documented limitation: certificates loaded once at
+startup, so a cert-manager renewal needed a pod rollout — and because bindcar is
+a sidecar, that rollout restarts the BIND9 operand with it. Rotating a
+certificate should not cost DNS availability. Documenting the gap was not the
+same as tracking it, hence roadmap 06.
+
+The design decision worth recording: **a failed reload keeps the previous
+certificate serving**, which is the opposite of the startup rule where bad TLS
+material is fatal. At startup, continuing would mean silently serving plaintext;
+during a reload there is already a working configuration in memory, so retaining
+it is strictly safer than failing or downgrading. This is what makes non-atomic
+renewals safe — a poll that catches a new certificate beside a stale key sees
+`KeyMismatch`, declines the swap, and succeeds on the next pass.
+
+### Impact
+- [ ] Breaking change
+- [x] API change (additive: new flag/env var; default 60s changes runtime
+      behaviour from "never reload" to "reload on renewal")
+- [ ] Config change only
+- [ ] Documentation only
+
+`BIND_TLS_RELOAD_INTERVAL=0` restores the previous startup-only behaviour
+exactly.
+
+Verified: `cargo fmt --check`, `cargo clippy --all-targets --all-features -D
+warnings`, `cargo test` (354 passing), `make tls-transport-test` (23/23),
+`make docs`. Also confirmed manually against a live listener: served subject
+went `CN=cert-ONE` → (mismatched pair written, still `CN=cert-ONE`, `KeyMismatch`
+logged) → `CN=cert-TWO`, with no restart.
+
 ## [2026-09-18 03:00] - Fix two CI failures on PR #124 (TLS e2e certs, docs OpenAPI race)
 
 **Author:** Erick Bourgeois

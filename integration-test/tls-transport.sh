@@ -98,8 +98,8 @@ log "workspace: $TEST_ROOT"
 mkdir -p "${TEST_ROOT}/zones"
 RNDC_SECRET="$(openssl rand -base64 32)"
 
-# --- [1/6] Fixtures ---------------------------------------------------------
-log "[1/6] generating certificate fixtures"
+# --- [1/7] Fixtures ---------------------------------------------------------
+log "[1/7] generating certificate fixtures"
 
 # Extensions are stated EXPLICITLY rather than inherited from the platform's
 # openssl.cnf. The defaults differ between distributions and OpenSSL versions:
@@ -166,6 +166,16 @@ openssl x509 -req -sha256 -in "${TEST_ROOT}/rogue.csr" \
     -extfile "${TEST_ROOT}/client.ext" \
     -out "${TEST_ROOT}/rogue.pem" -days 1 2>/dev/null
 
+# A second server key pair, used by the hot-reload section to prove the served
+# certificate actually changes.
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 \
+    -keyout "${TEST_ROOT}/renewed-key.pem" -out "${TEST_ROOT}/renewed.pem" \
+    -days 1 -subj "/CN=localhost-renewed" \
+    -addext "basicConstraints=critical,CA:FALSE" \
+    -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+    -addext "extendedKeyUsage=serverAuth" \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null
+
 # Fail fast and loudly if the platform's openssl produced something unusable,
 # rather than surfacing it later as a confusing "valid cert rejected".
 if ! openssl x509 -in "${TEST_ROOT}/ca.pem" -noout -text | grep -q "CA:TRUE"; then
@@ -185,8 +195,8 @@ if [[ ! -x "$BINDCAR_BIN" ]]; then
     (cd "$REPO_ROOT" && cargo build) || { fail "cargo build failed"; exit 1; }
 fi
 
-# --- [2/6] Plaintext still works (backward compatibility) -------------------
-log "[2/6] plaintext listener (no TLS configured)"
+# --- [2/7] Plaintext still works (backward compatibility) -------------------
+log "[2/7] plaintext listener (no TLS configured)"
 PORT=$((PORT_BASE))
 start_bindcar "$PORT" "${TEST_ROOT}/plain.log"
 
@@ -203,8 +213,8 @@ else
 fi
 stop_bindcar
 
-# --- [3/6] TLS listener -----------------------------------------------------
-log "[3/6] TLS listener"
+# --- [3/7] TLS listener -----------------------------------------------------
+log "[3/7] TLS listener"
 PORT=$((PORT_BASE + 1))
 start_bindcar "$PORT" "${TEST_ROOT}/tls.log" \
     BIND_TLS_CERT="${TEST_ROOT}/server.pem" \
@@ -243,8 +253,8 @@ else
 fi
 stop_bindcar
 
-# --- [4/6] Mutual TLS -------------------------------------------------------
-log "[4/6] mutual TLS"
+# --- [4/7] Mutual TLS -------------------------------------------------------
+log "[4/7] mutual TLS"
 PORT=$((PORT_BASE + 2))
 start_bindcar "$PORT" "${TEST_ROOT}/mtls.log" \
     BIND_TLS_CERT="${TEST_ROOT}/server.pem" \
@@ -290,8 +300,8 @@ else
 fi
 stop_bindcar
 
-# --- [5/6] Fail-closed on half-configured TLS -------------------------------
-log "[5/6] fail-closed misconfiguration"
+# --- [5/7] Fail-closed on half-configured TLS -------------------------------
+log "[5/7] fail-closed misconfiguration"
 
 # Certificate without key: must exit non-zero rather than serve plaintext.
 set +e
@@ -333,8 +343,8 @@ else
     fail "client CA without a key pair was silently ignored"
 fi
 
-# --- [6/6] Unreadable material ----------------------------------------------
-log "[6/6] unreadable TLS material"
+# --- [6/7] Unreadable material ----------------------------------------------
+log "[6/7] unreadable TLS material"
 set +e
 env BIND_ZONE_DIR="${TEST_ROOT}/zones" API_PORT=$((PORT_BASE + 5)) \
     DISABLE_AUTH=true BINDCAR_ALLOW_INSECURE_AUTH=true \
@@ -351,6 +361,106 @@ if [[ $MISSING_RC -ne 0 ]]; then
 else
     fail "missing certificate file did not prevent startup"
 fi
+
+# --- [7/7] Certificate hot-reload (roadmap 06) ------------------------------
+log "[7/7] certificate hot-reload"
+
+RELOAD_INTERVAL=2
+# Work on copies so the originals stay available for later comparison.
+cp "${TEST_ROOT}/server.pem"     "${TEST_ROOT}/live.pem"
+cp "${TEST_ROOT}/server-key.pem" "${TEST_ROOT}/live-key.pem"
+
+PORT=$((PORT_BASE + 6))
+start_bindcar "$PORT" "${TEST_ROOT}/reload.log" \
+    BIND_TLS_CERT="${TEST_ROOT}/live.pem" \
+    BIND_TLS_KEY="${TEST_ROOT}/live-key.pem" \
+    BIND_TLS_RELOAD_INTERVAL="$RELOAD_INTERVAL"
+
+# Subject of the certificate the listener is actually presenting right now.
+served_subject() {
+    echo | openssl s_client -connect "127.0.0.1:${PORT}" 2>/dev/null \
+        | openssl x509 -noout -subject 2>/dev/null
+}
+
+if wait_for_api https "$PORT"; then
+    pass "reload-enabled listener is up"
+else
+    fail "reload-enabled listener did not come up"
+fi
+
+BEFORE="$(served_subject)"
+if grep -q "CN=localhost$" <<<"$BEFORE" || grep -q "CN = localhost$" <<<"$BEFORE"; then
+    pass "original certificate is being served (${BEFORE})"
+else
+    fail "unexpected initial certificate: ${BEFORE}"
+fi
+
+# Writing only the certificate leaves it mismatched with the on-disk key. This
+# is the ordinary non-atomic-write case, and it must NOT disturb the listener.
+cp "${TEST_ROOT}/renewed.pem" "${TEST_ROOT}/live.pem"
+sleep $((RELOAD_INTERVAL + 2))
+
+MID="$(served_subject)"
+if [[ "$MID" == "$BEFORE" ]]; then
+    pass "mismatched cert/key pair did not disturb the live certificate"
+else
+    fail "listener swapped to a mismatched pair: ${MID}"
+fi
+
+if curl -sk --max-time 5 "https://127.0.0.1:${PORT}/api/v1/health" >/dev/null 2>&1; then
+    pass "listener still serving during the incomplete renewal"
+else
+    fail "listener stopped serving while the renewal was incomplete"
+fi
+
+if grep -q "continuing with the previous certificate" "${TEST_ROOT}/reload.log"; then
+    pass "failed reload is logged and non-fatal"
+else
+    fail "expected a 'continuing with the previous certificate' warning"
+fi
+
+# Completing the renewal must be picked up without a restart.
+cp "${TEST_ROOT}/renewed-key.pem" "${TEST_ROOT}/live-key.pem"
+sleep $((RELOAD_INTERVAL + 2))
+
+AFTER="$(served_subject)"
+if grep -q "localhost-renewed" <<<"$AFTER"; then
+    pass "renewed certificate is served without a restart (${AFTER})"
+else
+    fail "certificate did not reload; still serving: ${AFTER}"
+    echo "--- reload log ---"; tail -20 "${TEST_ROOT}/reload.log" | sed 's/^/    /'
+fi
+
+if kill -0 "$BINDCAR_PID" 2>/dev/null; then
+    pass "process never restarted (same pid ${BINDCAR_PID})"
+else
+    fail "bindcar process died during reload"
+fi
+stop_bindcar
+
+# Interval 0 must restore startup-only behaviour.
+PORT=$((PORT_BASE + 7))
+cp "${TEST_ROOT}/server.pem"     "${TEST_ROOT}/static.pem"
+cp "${TEST_ROOT}/server-key.pem" "${TEST_ROOT}/static-key.pem"
+start_bindcar "$PORT" "${TEST_ROOT}/noreload.log" \
+    BIND_TLS_CERT="${TEST_ROOT}/static.pem" \
+    BIND_TLS_KEY="${TEST_ROOT}/static-key.pem" \
+    BIND_TLS_RELOAD_INTERVAL=0
+
+if wait_for_api https "$PORT"; then
+    cp "${TEST_ROOT}/renewed.pem"     "${TEST_ROOT}/static.pem"
+    cp "${TEST_ROOT}/renewed-key.pem" "${TEST_ROOT}/static-key.pem"
+    sleep 3
+    STATIC="$(echo | openssl s_client -connect "127.0.0.1:${PORT}" 2>/dev/null | openssl x509 -noout -subject 2>/dev/null)"
+    if grep -q "localhost-renewed" <<<"$STATIC"; then
+        fail "BIND_TLS_RELOAD_INTERVAL=0 still reloaded"
+    else
+        pass "BIND_TLS_RELOAD_INTERVAL=0 keeps the startup certificate"
+    fi
+else
+    fail "listener with reloading disabled did not come up"
+fi
+stop_bindcar
 
 # --- Summary ----------------------------------------------------------------
 echo
