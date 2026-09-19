@@ -23,7 +23,7 @@ roadmap entry describes *what* and *why*, it does not skip the ADR for
 
 ## Index
 
-Statuses were verified against `main` @ `82d4dc5` (bindcar 0.7.3) on 2026-09-18.
+Statuses were verified against `v0.8.0` on 2026-09-19.
 
 ### Reference and analysis
 
@@ -35,7 +35,7 @@ Statuses were verified against `main` @ `82d4dc5` (bindcar 0.7.3) on 2026-09-18.
 
 | # | Roadmap | Status | Notes |
 |---|---|---|---|
-| [02](.github/community/02-feature-gate-http-server.md) | Feature-gate the HTTP server | 🔶 | **Phases 1–4 done.** `default = ["server", "tls"]`; `--no-default-features` yields a library-only build. **Measured: 178 → 98 crates, 80 shed (45%)**, against the 82 predicted. Guarded by `make check-no-default-features` in CI. Phases 5–6 (release, and bindy adopting `default-features = false`) remain |
+| [02](.github/community/02-feature-gate-http-server.md) | Feature-gate the HTTP server | ✅ | **All 6 phases done.** `default = ["server", "tls"]`; bindcar sheds 80 of 178 crates under `--no-default-features`, and bindy — now on 0.8.0 with `default-features = false` — shed 31 (290 → 260). Guarded by `make check-no-default-features` in CI |
 
 ### Features
 

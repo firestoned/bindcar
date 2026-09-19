@@ -16,9 +16,17 @@
 > - **Phase 4 (CI) — ✅.** `make check-no-default-features` runs in the Clippy
 >   job and also builds `examples/use_shared_types.rs` as a library-only
 >   consumer.
-> - **Phase 5 (release) — ⛔.** Needs a version bump and a published release.
-> - **Phase 6 (adopt in bindy) — ⛔.** bindy must set
->   `default-features = false` to actually collect the saving.
+> - **Phase 5 (release) — ✅ 2026-09-19.** bindcar **0.8.0** is on crates.io with
+>   the feature set published intact (`default = ["server", "tls"]`), and the
+>   tag/`Cargo.toml` divergence carried since v0.7.2 is fixed — `0.8.0` reports
+>   `0.8.0` everywhere.
+> - **Phase 6 (adopt in bindy) — ✅ 2026-09-19.** bindy is on
+>   `bindcar = { version = "0.8", default-features = false }`. **31 crates left
+>   bindy's graph (290 → 260)**: utoipa, utoipa-swagger-ui, utoipa-gen,
+>   rust-embed, tower-http, tower_governor, governor, dashmap, quanta, tonic,
+>   h2, walkdir, mime_guess and others. Its 1,461 tests pass unchanged.
+>
+> **Roadmap complete.**
 >
 > **Measured result: 178 → 98 crates, 80 shed (45%)** — against the 82 the
 > analysis below predicted. `--no-default-features` leaves the data types, the
