@@ -20,6 +20,7 @@ use axum::{
 use clap::Parser;
 use serde::Serialize;
 use std::net::SocketAddr;
+use std::sync::Arc as StdArc;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
@@ -27,6 +28,8 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 // Import from the library
+use axum::extract::ConnectInfo;
+use bindcar::tls::{build_server_config, scheme_for, TlsSettings};
 use bindcar::{
     auth::authenticate,
     cli::{Cli, Commands},
@@ -36,6 +39,7 @@ use bindcar::{
     types::{AppState, ErrorResponse},
     zones,
 };
+use tower::Service as _;
 use tower_governor::{
     governor::GovernorConfigBuilder, key_extractor::PeerIpKeyExtractor, GovernorLayer,
 };
@@ -250,7 +254,16 @@ async fn main() -> anyhow::Result<()> {
             .and_then(|v| v.parse::<bool>().ok())
             .unwrap_or(false);
 
-    start_server(cli.resolved_command(), insecure_override).await
+    // Resolve the TLS transport config before anything binds. A half-configured
+    // listener is fatal here rather than a silent downgrade to plaintext.
+    let tls_settings = bindcar::tls::resolve_tls_settings(
+        cli.tls_cert.clone(),
+        cli.tls_key.clone(),
+        cli.tls_client_ca.clone(),
+    )
+    .context("invalid TLS configuration")?;
+
+    start_server(cli.resolved_command(), insecure_override, tls_settings).await
 }
 
 fn init_tracing(debug: bool) {
@@ -267,7 +280,11 @@ fn init_tracing(debug: bool) {
         .init();
 }
 
-async fn start_server(command: &Commands, insecure_override: bool) -> anyhow::Result<()> {
+async fn start_server(
+    command: &Commands,
+    insecure_override: bool,
+    tls_settings: Option<TlsSettings>,
+) -> anyhow::Result<()> {
     match command {
         Commands::Run => info!("starting bindcar v{} [sidecar mode]", VERSION),
         Commands::Drone => info!(
@@ -600,20 +617,121 @@ async fn start_server(command: &Commands, insecure_override: bool) -> anyhow::Re
 
     // start server
     let addr = format!("{}:{}", bind_host, api_port);
+    let scheme = scheme_for(tls_settings.as_ref());
 
-    info!("bind9 rndc api server listening on {}", addr);
-    info!("swagger ui available at http://{}/api/v1/docs", addr);
+    info!(
+        "bind9 rndc api server listening on {} ({})",
+        addr,
+        if tls_settings.is_some() {
+            "TLS"
+        } else {
+            "plaintext"
+        }
+    );
+    if enable_docs {
+        info!("swagger ui available at {}://{}/api/v1/docs", scheme, addr);
+    }
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .await
-    .context("server error")?;
+    let Some(tls_settings) = tls_settings else {
+        // Plaintext path — unchanged from previous releases.
+        warn_plaintext_transport(&bind_host);
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .context("server error")?;
+        return Ok(());
+    };
 
-    Ok(())
+    if tls_settings.requires_client_auth() {
+        info!(
+            "mutual TLS enabled; clients must present a certificate trusted by the configured CA"
+        );
+    }
+
+    let tls_config = build_server_config(&tls_settings).context("failed to build TLS config")?;
+    serve_tls(listener, app, StdArc::new(tls_config)).await
+}
+
+/// Warn when a credential-bearing API is about to be served in the clear.
+///
+/// bindcar's callers authenticate with a Kubernetes ServiceAccount token or the
+/// shared `BIND_API_TOKEN`. Over plaintext that credential is readable by
+/// anything observing the link, so the operator should see this at every start.
+/// Loopback binds are exempt — the traffic never leaves the host.
+fn warn_plaintext_transport(bind_host: &str) {
+    if bind_host.starts_with("127.") || bind_host == "localhost" || bind_host == "::1" {
+        return;
+    }
+
+    warn!(
+        "serving the API over plaintext HTTP on a non-loopback address; API credentials \
+cross the network in the clear. Set --tls-cert/--tls-key (BIND_TLS_CERT/BIND_TLS_KEY) to enable TLS."
+    );
+}
+
+/// Serve the router over TLS.
+///
+/// Runs a manual accept loop so each connection is wrapped by
+/// [`tokio_rustls::TlsAcceptor`] before hyper sees it. Peer address is injected
+/// as [`ConnectInfo`] on every request, because the rate limiter's
+/// `PeerIpKeyExtractor` reads it and would otherwise reject every request once
+/// the listener stopped being an `axum::serve` one.
+///
+/// # Arguments
+/// * `listener` - the bound TCP listener
+/// * `app` - the fully-built axum router
+/// * `tls_config` - the rustls server configuration
+///
+/// # Errors
+/// Returns an error only if the listener itself fails. Per-connection failures
+/// (handshake errors, client disconnects) are logged and skipped so one bad
+/// client cannot take the server down.
+async fn serve_tls(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    tls_config: StdArc<rustls::ServerConfig>,
+) -> anyhow::Result<()> {
+    let acceptor = tokio_rustls::TlsAcceptor::from(tls_config);
+
+    loop {
+        let (stream, peer) = listener.accept().await.context("accept failed")?;
+        let acceptor = acceptor.clone();
+        let app = app.clone();
+
+        tokio::spawn(async move {
+            let tls_stream = match acceptor.accept(stream).await {
+                Ok(s) => s,
+                Err(e) => {
+                    // Handshake failures are routine (probes, wrong SNI, a client
+                    // with no cert under mTLS) and must not be fatal.
+                    debug!("TLS handshake with {} failed: {}", peer, e);
+                    return;
+                }
+            };
+
+            let service = hyper::service::service_fn(
+                move |mut req: hyper::Request<hyper::body::Incoming>| {
+                    req.extensions_mut().insert(ConnectInfo(peer));
+                    app.clone().call(req)
+                },
+            );
+
+            if let Err(e) =
+                hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                    .serve_connection_with_upgrades(
+                        hyper_util::rt::TokioIo::new(tls_stream),
+                        service,
+                    )
+                    .await
+            {
+                debug!("connection from {} ended: {}", peer, e);
+            }
+        });
+    }
 }
 
 #[cfg(test)]

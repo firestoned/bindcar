@@ -1,5 +1,191 @@
 # Changelog
 
+## [2026-09-18 03:00] - Fix two CI failures on PR #124 (TLS e2e certs, docs OpenAPI race)
+
+**Author:** Erick Bourgeois
+
+### Fixed
+- `integration-test/tls-transport.sh`: the mTLS assertion failed on the Ubuntu CI
+  runner while passing on macOS. The test certificates were generated without
+  explicit X.509 extensions, inheriting whatever the platform's `openssl.cnf`
+  supplies — locally that gave the CA `basicConstraints critical CA:TRUE`, on the
+  runner it did not, so rustls' `WebPkiClientVerifier` could not build a path and
+  rejected an otherwise valid client certificate. Server-only TLS passed on both
+  because it performs no chain validation.
+
+  Every extension is now stated explicitly: the CA gets
+  `basicConstraints=critical,CA:TRUE` and `keyUsage=critical,keyCertSign,cRLSign`;
+  client leaves get `CA:FALSE`, `keyUsage` and `extendedKeyUsage=clientAuth` via
+  `-extfile`; the server leaf gets `serverAuth` plus its SAN. Three guards now run
+  straight after generation (`CA:TRUE` present, `clientAuth` present,
+  `openssl verify` succeeds) so a bad fixture fails at the point of creation, and
+  the mTLS assertion dumps curl `-v`, the certificate extensions and the server
+  log on failure instead of just timing out silently.
+
+- `Makefile` (`docs-openapi`): the target ran `cargo run & sleep 3` then curled the
+  spec. On a cold CI checkout those 3 seconds were spent **compiling**, so curl hit
+  a port with nothing behind it. It now runs `cargo build --quiet` first, launches
+  `./target/debug/bindcar` directly, and polls the endpoint for up to 30s, aborting
+  early with the server log if the process exits.
+
+### Why
+Both surfaced on PR #124. The docs one is a latent race that existed before this
+branch but was masked: the previous `|| echo "Failed to fetch..."` swallowed the
+error, so `make docs` reported success while publishing a stale
+`docs/site/openapi.json`. Making the step exit non-zero (the previous changelog
+entry) is what turned it into a visible failure — the right outcome, but it needed
+the race fixed too.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [ ] Config change only
+- [ ] Documentation only
+
+Test and build tooling only — no `src/` change, and **no defect in the TLS
+implementation itself**: the mTLS failure was in the test's certificate fixtures,
+not in bindcar's verifier.
+
+Verified: `cargo fmt --check`, `cargo clippy --all-targets --all-features -D
+warnings`, `cargo test` (347 passing), `./integration-test/tls-transport.sh`
+(15/15), and `make docs` — the last re-run after deleting `target/debug/bindcar`
+to reproduce CI's cold-build path.
+
+## [2026-09-18 02:00] - Roadmap 02 phase 1: split pure data types out of the HTTP handlers
+
+**Author:** Erick Bourgeois
+
+### Added
+- `src/zones_types.rs`: NEW (303 lines) — `SoaRecord`, `DnsRecord`, `ZoneConfig`
+  (with `to_zone_file()`), `CreateZoneRequest`, `ModifyZoneRequest`,
+  `ZoneResponse`, `ServerStatusResponse`, `ZoneInfo`, `ZoneListResponse` and the
+  `ZONE_TYPE_*` constants. Imports only `serde` and `utoipa::ToSchema`.
+- `src/records_types.rs`: NEW (94 lines) — `AddRecordRequest`,
+  `RemoveRecordRequest`, `UpdateRecordRequest`, `RecordResponse` and the
+  `default_ttl()` serde default they reference.
+
+### Changed
+- `src/zones.rs` (1639 → 1361) and `src/records.rs` (547 → 474): the pure types
+  moved out and are re-exported with `pub use`, so `bindcar::ZoneConfig`,
+  `bindcar::zones::ZoneConfig` and `bindcar::records::AddRecordRequest` all
+  resolve exactly as before.
+- `src/lib.rs`: registered `pub mod zones_types;` and `pub mod records_types;`.
+
+### Why
+Phase 1 of `.github/community/02-feature-gate-http-server.md` — a pure,
+independently mergeable refactor that moves the module boundary so the HTTP
+stack can later go behind a `server` cargo feature. A consumer importing only
+bindcar's data types currently inherits all 178 crates in the graph.
+
+The roadmap's driver was **re-measured** and corrected in the same pass: its
+headline justification (a duplicate `sha2 0.10.x` via `utoipa-swagger-ui` →
+`rust-embed`) no longer exists — `rust-embed-utils v8.12.0` now ships
+`sha2 0.11`, resolving that item upstream. The real, measured win is larger:
+**82 of 178 crates (46%) are reachable only through the server stack** and would
+be shed by `--no-default-features`.
+
+### Impact
+- [ ] Breaking change
+- [ ] API change
+- [ ] Config change only
+- [ ] Documentation only
+
+Pure refactor — no behaviour change and no public path change. Verified by
+compiling a probe that imports every type through its old crate-root path, its
+old module path and its new module path, asserting they are the same type.
+`cargo fmt --check`, `cargo clippy --all-targets --all-features -D warnings`,
+`cargo test` (347 passing) and `cargo build --examples` all clean.
+
+Note: `ModifyZoneRequest` is **not** re-exported at the crate root, while its
+siblings are. That predates this change (identical at `82d4dc5`) and was left
+alone rather than silently widening the public API.
+
+## [2026-09-18 00:00] - TLS transport for the HTTP API (roadmap 05) + roadmap status corrections
+
+**Author:** Erick Bourgeois
+
+### Added
+- `src/tls.rs`: NEW module. `resolve_tls_settings()` resolves the transport
+  configuration fail-closed; `build_server_config()` loads the PEM material and
+  builds the `rustls::ServerConfig`, with an optional `WebPkiClientVerifier` for
+  mutual TLS; `scheme_for()` reports the active scheme. `TlsError` carries a
+  distinct variant per failure so startup errors are actionable.
+- `src/tls_test.rs`: NEW, 13 unit tests written first (TDD) — plaintext default,
+  cert+key, mTLS, half-configured rejection, empty-string-as-unset, and the PEM
+  read/parse failure paths.
+- `src/cli.rs`: `--tls-cert`, `--tls-key`, `--tls-client-ca`, each with a
+  `BIND_TLS_*` environment equivalent (clap `env` feature enabled).
+- `src/main.rs`: TLS resolved before anything binds; `serve_tls()` runs a manual
+  accept loop wrapping each connection with `tokio_rustls::TlsAcceptor` and
+  injecting `ConnectInfo` so the rate limiter's `PeerIpKeyExtractor` keeps
+  working; `warn_plaintext_transport()` warns when serving plaintext on a
+  non-loopback address.
+- `integration-test/tls-transport.sh`: NEW e2e — 15 assertions covering a real
+  TLS handshake, plaintext refused on a TLS port, mTLS rejecting both a missing
+  and an untrusted client certificate, and every misconfiguration exiting
+  non-zero. Needs no BIND9 or cluster.
+- `Makefile`: `tls-transport-test` / `tls-transport-test-ci` targets; the e2e is
+  now the first stage of `ci-e2e`.
+- `docs/src/advanced/tls.md`: NEW user guide — configuration, mTLS,
+  fail-closed matrix, cert-manager provisioning, probe configuration under TLS
+  and mTLS, service-mesh interaction, protocol details.
+- `docs/src/operations/env-vars.md`: `BIND_TLS_CERT`, `BIND_TLS_KEY`,
+  `BIND_TLS_CLIENT_CA`.
+- `docs/src/advanced/security.md` + `docs/mkdocs.yml`: transport-security
+  section and nav entry.
+
+### Changed
+- `Cargo.toml`: added `rustls`, `tokio-rustls`, `rustls-pki-types`, `hyper`,
+  `hyper-util` as direct dependencies. All five were already in `Cargo.lock`
+  transitively (hyper/hyper-util via axum, rustls/tokio-rustls via kube), so the
+  dependency graph does not widen. `ring` is pinned as the crypto provider to
+  match kube's `rustls-tls`, since two providers panic at runtime. `clap` gained
+  the `env` feature.
+- `src/main.rs`: the Swagger URL in the startup banner now follows the active
+  scheme instead of hardcoding `http://`, and is only logged when the docs are
+  actually mounted.
+
+### Fixed
+- `Makefile` (`docs-openapi`): the target started bindcar without
+  `BIND_ENABLE_DOCS=true` (so `/api/v1/openapi.json` was never mounted) and bound
+  `0.0.0.0` (which the startup auth-posture guard refuses), then swallowed the
+  failure — `docs/site/openapi.json` had been silently stale. Now binds loopback,
+  enables docs, supplies placeholder RNDC credentials, and fails the build
+  instead of continuing.
+
+### Roadmaps
+- `.github/community/05-api-transport-tls.md`: migrated in from the external set
+  now that the fix has shipped, and closed ✅. It was deliberately held outside a
+  public repository while it described an unremediated weakness in shipped code.
+- `.github/community/04-standalone-out-of-cluster.md`: **corrected** ✅ → 🔶. Only
+  Phase 1 of 5 shipped; Phases 2–5 have no implementation (`zone_transport.rs`,
+  `instance.rs`, `packaging/` and the five docs pages do not exist). The previous
+  ✅ read the `drone` subcommand as the whole roadmap.
+- `.github/community/03-bind9-full-zone-config.md`: **corrected** 🔶 → ✅. The
+  `raw_options` catch-all round-trips every unmodelled option, which is what the
+  doc's success criteria require; the earlier hedge measured it against a goal
+  the design deliberately does not pursue.
+- `ROADMAPS.md` and `.github/community/README.md`: security section added, both
+  corrections reflected, reserved-number block retired.
+
+### Why
+bindcar's REST API carried a privileged bearer credential — a ServiceAccount
+token or `BIND_API_TOKEN` — over plaintext on every zone operation, readable by
+anything observing the pod network. Authentication proves identity; it does
+nothing for confidentiality, and the credential exposed is the one authorizing
+zone create/reload/delete. Derived from bindy audit finding P2-4.
+
+### Impact
+- [ ] Breaking change
+- [x] API change (additive: TLS is opt-in; plaintext remains the default)
+- [ ] Config change only
+- [ ] Documentation only
+
+Verified: `cargo fmt --check`, `cargo clippy --all-targets --all-features -D
+warnings`, `cargo test` (347 passing), `make tls-transport-test` (15/15),
+`make docs`. Manually confirmed a TLS 1.3 handshake, mTLS accepting a trusted
+client certificate and rejecting both an absent and an untrusted one.
+
 ## [2026-09-08 00:00] - Fix CodeQL alert #7: early-return guard for the readiness zone_dir probe
 
 **Author:** Erick Bourgeois

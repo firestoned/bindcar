@@ -1,12 +1,23 @@
 # Standalone bindcar: Out-of-Cluster BIND9 Management
 
-> **Status:** ✅ Shipped. The `drone` subcommand in `src/cli.rs:44` runs bindcar as an
-> independent process against a remote BIND9; `src/auth.rs:458` builds a custom
-> kubeconfig (`Config::from_custom_kubeconfig`) so out-of-cluster TokenReview works
-> as the doc describes. Covered by `integration-test/drone-external-bind9.sh`.
+> **Status:** 🔶 Phase 1 of 5 shipped.
+>
+> - **Phase 1 (out-of-cluster K8s auth) — ✅ done.** `build_kube_client` at
+>   `src/auth.rs:490` resolves `KUBE_API_SERVER`/`KUBE_TOKEN_PATH`/`KUBE_CA_CERT_PATH`,
+>   and the `drone` subcommand (`src/cli.rs:44`) runs bindcar standalone against a
+>   remote BIND9. Covered by `integration-test/drone-external-bind9.sh`.
+> - **Phase 2 (`ZoneFileTransport` + SSH/SFTP) — ⛔.** No `src/zone_transport.rs`;
+>   no `ZONE_TRANSPORT` or `ssh-zone-transport` anywhere in `src/` or `Cargo.toml`.
+> - **Phase 3 (multi-instance registry) — ⛔.** No `src/instance.rs`, no
+>   `BINDCAR_INSTANCES_CONFIG`, no `multi-instance` feature.
+> - **Phase 4 (systemd / standalone Docker) — ⛔.** No `packaging/` directory.
+> - **Phase 5 (docs) — ⛔.** None of the five new pages exist.
+>
+> *Corrected 2026-09-18: this was previously marked ✅ on the strength of the `drone`
+> subcommand alone, which is Phase 1 only.*
 >
 > *Migrated 2026-09-12 from the external roadmap set into `.github/community/`.
-> Verified against `did-code` @ `998bc5a`, bindcar 0.7.3.*
+> Phase status re-verified against `main` @ `82d4dc5` on 2026-09-18.*
 
 ---
 

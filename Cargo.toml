@@ -60,7 +60,7 @@ tower_governor = "0.8"
 rndc = "0.1.5"
 
 # CLI argument parsing
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # Parsing
 nom = "8"
@@ -75,6 +75,16 @@ tempfile = "3"
 kube = { version = "4.0", features = ["client", "rustls-tls"], optional = true }
 k8s-openapi = { version = "0.28", default-features = false, optional = true }
 sha2 = "0.11"
+
+# TLS transport for the HTTP API (optional at runtime; see src/tls.rs).
+# `ring` is pinned as the crypto provider to match the provider kube's
+# `rustls-tls` feature already installs, so enabling `k8s-token-review` cannot
+# produce two providers and the "no process-level CryptoProvider" panic.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "tokio", "service"] }
 
 [features]
 default = []

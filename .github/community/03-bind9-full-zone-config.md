@@ -1,12 +1,20 @@
 # BIND9 Full Zone Configuration Support
 
-> **Status:** 🔶 Substantially landed. `rndc_types::ZoneConfig` now models ~40 zone
-> statement options (transfer limits, `update_policy`, `check_*`, `masterfile_format`,
-> refresh/retry bounds, the DNSSEC family, forwarding) against the two the doc
-> recorded as supported. Not audited option-by-option against the doc's full list.
+> **Status:** ✅ Complete. All five phases landed. `rndc_types::ZoneConfig` models ~40
+> zone statement options directly, and the `raw_options` catch-all
+> (`src/rndc_types.rs:342`, populated at `:392`, serialized at `:638`) round-trips
+> every option the parser does not model structurally — which is what the doc's
+> success criteria actually require.
+>
+> The remaining items in "Optional Future Enhancements" (structured parsers per
+> option, PATCH exposure, named-ACL resolution) are explicitly labelled optional by
+> the document and are **not** blockers.
+>
+> *Corrected 2026-09-18: previously marked 🔶 "not audited option-by-option", which
+> measured this against a goal the catch-all design deliberately does not pursue.*
 >
 > *Migrated 2026-09-12 from the external roadmap set into `.github/community/`.
-> Verified against `did-code` @ `998bc5a`, bindcar 0.7.3.*
+> Status re-verified against `main` @ `82d4dc5` on 2026-09-18.*
 
 ---
 
