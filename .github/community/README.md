@@ -37,12 +37,14 @@ carries no meaning for the numbering.
 |---|---|---|
 | 03 | [`03-bind9-full-zone-config.md`](03-bind9-full-zone-config.md) | Parse and serialize the full BIND9 9.18+ zone statement option set |
 | 04 | [`04-standalone-out-of-cluster.md`](04-standalone-out-of-cluster.md) | Run bindcar outside Kubernetes against pre-existing BIND9, still on SA-token identity |
+| 07 | [`07-dnssec-lifecycle.md`](07-dnssec-lifecycle.md) | Enable, observe and delegate DNSSEC on a live zone without recreating it |
 
 ### Security and compliance
 
 | # | File | What |
 |---|---|---|
 | 05 | [`05-api-transport-tls.md`](05-api-transport-tls.md) | TLS and mutual TLS for the REST API transport |
+| 06 | [`06-tls-certificate-reload.md`](06-tls-certificate-reload.md) | Pick up a renewed certificate without restarting the process (shipped) |
 
 ## Previously reserved numbers
 
@@ -85,7 +87,7 @@ have drifted. Trust the status block; re-verify the body.
 
 ## Adding a roadmap
 
-1. Take the next free number (`06` today).
+1. Take the next free number (`08` today).
 2. Filename: `NN-lowercase-hyphenated-title.md`.
 3. Open with a `> **Status:**` block so a reader knows where the work stands
    before reading the analysis.

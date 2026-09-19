@@ -45,6 +45,15 @@ pub struct Cli {
     #[arg(long, env = "BIND_TLS_KEY", global = true)]
     pub tls_key: Option<String>,
 
+    /// How often to re-check the TLS certificate files for a renewal, in seconds.
+    ///
+    /// Defaults to 60. Set to `0` to disable reloading entirely, restoring the
+    /// startup-only behaviour of earlier releases. A renewal that fails to load
+    /// never interrupts service: the previous certificate keeps serving and the
+    /// next poll retries.
+    #[arg(long, env = "BIND_TLS_RELOAD_INTERVAL", global = true)]
+    pub tls_reload_interval: Option<u64>,
+
     /// PEM CA bundle used to verify client certificates.
     ///
     /// Setting this turns on mutual TLS: a client presenting no certificate, or

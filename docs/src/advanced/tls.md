@@ -170,11 +170,54 @@ spec:
         defaultMode: 0400
 ```
 
-!!! note "Certificate rotation needs a restart"
-    bindcar reads the certificate and key once, at startup. When cert-manager
-    renews the `Secret` the running process keeps the old certificate until it
-    restarts. Until hot-reload lands, pair renewal with a rollout — a long
-    `duration` with a generous `renewBefore` keeps that infrequent.
+## Certificate rotation
+
+bindcar re-reads the certificate, key and client CA on an interval and swaps
+them in without restarting. A cert-manager renewal is picked up on its own.
+
+| CLI flag | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `--tls-reload-interval` | `BIND_TLS_RELOAD_INTERVAL` | `60` | Seconds between checks. `0` disables reloading. |
+
+```
+watching TLS certificate material for renewals every 60s (BIND_TLS_RELOAD_INTERVAL=0 to disable)
+reloaded TLS certificate material; new connections will use it
+```
+
+Send `SIGHUP` to check immediately instead of waiting out the interval:
+
+```bash
+kill -HUP "$(pidof bindcar)"
+```
+
+**Established connections are unaffected.** The configuration is read once per
+accepted connection, so a connection in flight finishes under the certificate it
+started with and only new connections pick up the renewal. Nothing is dropped.
+
+**A failed reload is a non-event.** Certificate files are not replaced
+atomically — a check can easily observe a new certificate alongside a
+not-yet-replaced key. When the new material does not load, bindcar logs a warning
+and *keeps serving the certificate it already has*, then retries on the next
+interval:
+
+```
+TLS material changed but the new configuration is not usable, continuing with
+the previous certificate: TLS private key from /etc/bindcar/tls/tls.key was
+rejected: keys may not be consistent: KeyMismatch
+```
+
+This is deliberately different from startup, where unreadable TLS material is
+fatal. At startup, continuing would mean silently serving plaintext; during a
+reload there is already a working configuration in memory, so keeping it is
+safer than either failing or downgrading.
+
+!!! note "Detection is by content, not timestamp"
+    Kubernetes does not rewrite mounted `Secret` files in place — it swaps a
+    `..data` symlink. bindcar hashes the file contents rather than checking
+    mtime, which is what makes renewal detection work on a projected volume.
+
+Set `BIND_TLS_RELOAD_INTERVAL=0` to restore the startup-only behaviour of
+bindcar 0.7.x, where a renewal requires a pod rollout.
 
 ## Health and readiness probes
 

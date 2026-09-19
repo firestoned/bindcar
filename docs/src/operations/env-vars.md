@@ -273,6 +273,22 @@ BIND_TLS_KEY=/etc/bindcar/tls/tls.key
 **startup error** (exit 1), not a silent fallback to plaintext. Set both to
 enable TLS, or neither to serve plaintext.
 
+### BIND_TLS_RELOAD_INTERVAL
+
+- **Type**: Integer (seconds)
+- **Default**: `60`
+- **Required**: No
+- **CLI equivalent**: `--tls-reload-interval`
+- **Description**: How often bindcar re-checks the TLS certificate, key and
+  client CA for a renewal, swapping them in without a restart. `0` disables
+  reloading entirely. A renewal that fails to load never interrupts service —
+  the previous certificate keeps serving and the next check retries. `SIGHUP`
+  forces an immediate check.
+
+```bash
+BIND_TLS_RELOAD_INTERVAL=60
+```
+
 ### BIND_TLS_CLIENT_CA
 
 - **Type**: String (file path)

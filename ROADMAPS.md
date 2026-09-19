@@ -43,12 +43,14 @@ Statuses were verified against `main` @ `82d4dc5` (bindcar 0.7.3) on 2026-09-18.
 |---|---|---|---|
 | [03](.github/community/03-bind9-full-zone-config.md) | BIND9 full zone configuration support | ✅ | All 5 phases landed. ~40 options modelled directly plus the `raw_options` catch-all (`src/rndc_types.rs:342`) round-tripping the rest. Remaining items are marked optional in the doc |
 | [04](.github/community/04-standalone-out-of-cluster.md) | Standalone / out-of-cluster bindcar | 🔶 | **Phase 1 of 5.** K8s auth done (`build_kube_client`, `src/auth.rs:490`; `drone` subcommand). Phases 2–5 unstarted: no `zone_transport.rs`, no `instance.rs`, no `packaging/`, no new docs pages |
+| [07](.github/community/07-dnssec-lifecycle.md) | DNSSEC lifecycle on live zones | ⛔ | `ModifyZoneRequest` carries no DNSSEC fields, so signing an existing zone still means delete-and-recreate. No DS retrieval, no signing state in zone status. **Needs an ADR first** |
 
 ### Security and compliance
 
 | # | Roadmap | Status | Notes |
 |---|---|---|---|
 | [05](.github/community/05-api-transport-tls.md) | TLS for the HTTP API transport | ✅ | Shipped 2026-09-18. `--tls-cert`/`--tls-key` (rustls, TLS 1.2+1.3) and `--tls-client-ca` for mTLS; plaintext remains the default and warns on non-loopback. Misconfiguration exits 1 rather than downgrading. 13 unit tests + `make tls-transport-test` |
+| [06](.github/community/06-tls-certificate-reload.md) | TLS certificate hot-reload | ✅ | Shipped 2026-09-18. `TlsReloader` swaps the live config on a content-hash change; `BIND_TLS_RELOAD_INTERVAL` (default 60s, `0` disables) plus `SIGHUP`. A failed reload keeps the previous certificate serving. 7 unit tests + 8 e2e assertions |
 
 ## Consumer upgrade guides
 
