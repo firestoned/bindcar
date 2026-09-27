@@ -1,5 +1,31 @@
 # Changelog
 
+## [2026-09-27 16:05] - Roadmap 07: record the key-state/rollover-timing gap and its bindy consumer
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/community/07-dnssec-lifecycle.md`: gap 3 (zone status) made
+  concrete — BIND9 key `.state` files / `rndc dnssec -status` hold the key
+  timing metadata nothing exposes; new post-ADR task for per-key role, state
+  and next/last rollover timestamps in the zone-status DNSSEC block; noted
+  bindy ADR-0006 as the downstream consumer whose
+  `DNSZone.status.dnssec.nextKeyRollover`/`lastKeyRollover` stay null until
+  this ships.
+- `ROADMAPS.md`: row 07 note updated with the bindy dependency.
+
+### Why
+bindy roadmap 07 (DS record status reporting, ADR-0006) shipped 2026-09-27
+deriving everything it can from the DNS plane; key rollover timing cannot be
+derived that way and was deferred to bindcar. Filed here so the dependency is
+tracked where the work has to happen.
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [ ] Config change only
+- [x] Documentation only
+
 ## [2026-09-19 01:00] - Feature-gate the HTTP server (roadmap 02 phases 2-4)
 
 **Author:** Erick Bourgeois

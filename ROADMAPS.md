@@ -43,7 +43,7 @@ Statuses were verified against `v0.8.0` on 2026-09-19.
 |---|---|---|---|
 | [03](.github/community/03-bind9-full-zone-config.md) | BIND9 full zone configuration support | ✅ | All 5 phases landed. ~40 options modelled directly plus the `raw_options` catch-all (`src/rndc_types.rs:342`) round-tripping the rest. Remaining items are marked optional in the doc |
 | [04](.github/community/04-standalone-out-of-cluster.md) | Standalone / out-of-cluster bindcar | 🔶 | **Phase 1 of 5.** K8s auth done (`build_kube_client`, `src/auth.rs:490`; `drone` subcommand). Phases 2–5 unstarted: no `zone_transport.rs`, no `instance.rs`, no `packaging/`, no new docs pages |
-| [07](.github/community/07-dnssec-lifecycle.md) | DNSSEC lifecycle on live zones | ⛔ | `ModifyZoneRequest` carries no DNSSEC fields, so signing an existing zone still means delete-and-recreate. No DS retrieval, no signing state in zone status. **Needs an ADR first** |
+| [07](.github/community/07-dnssec-lifecycle.md) | DNSSEC lifecycle on live zones | ⛔ | `ModifyZoneRequest` carries no DNSSEC fields, so signing an existing zone still means delete-and-recreate. No DS retrieval, no signing state or key timing in zone status — bindy ADR-0006 (2026-09-27) blocks on the key-state surface for `status.dnssec` rollover timestamps. **Needs an ADR first** |
 
 ### Security and compliance
 
