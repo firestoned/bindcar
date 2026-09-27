@@ -81,6 +81,21 @@ the current RRSIG set expire?" — all of which are the questions asked during a
 rollout and during an incident.
 
 Key rollover monitoring is the same gap seen over a longer time horizon.
+BIND9 already knows the answers: each key's `K<zone>.+<alg>+<tag>.state` file
+in the key directory carries the timing metadata (`Published`, `Active`,
+`Retired`, `Removed`, plus goal/successor state), and
+`rndc dnssec -status <zone>` reports the next scheduled key event. Neither is
+reachable through the API today, so nothing downstream can answer "when does
+this zone's KSK roll?".
+
+**Downstream consumer (bindy, filed 2026-09-27):** bindy's
+[ADR-0006](https://github.com/firestoned/bindy/blob/main/docs/adr/0006-dnssec-ds-record-status-reporting.md)
+(bindy roadmap 07, DS record status reporting) publishes
+`DNSZone.status.dnssec` with `signed`, `dsRecords`, `keyTag` and `algorithm` —
+derived from DNSKEY queries over DNS, deliberately without bindcar changes.
+Its `nextKeyRollover`/`lastKeyRollover` fields were left null precisely
+because key timing is not derivable from the DNS plane; they stay null until
+this roadmap ships the key-state surface.
 
 ## Approach
 
@@ -116,6 +131,11 @@ Only once those are settled should the task list below be executed.
 - [ ] DS retrieval endpoint (shape per ADR).
 - [ ] DNSSEC block on the zone-status response: signed yes/no, active key tags,
       current signature validity window.
+- [ ] Key timing in that DNSSEC block (source per ADR — `rndc dnssec -status`
+      vs. parsing key `.state` files): per key, its role (KSK/ZSK), state, and
+      next/last rollover event timestamps. Unblocks bindy's
+      `DNSZone.status.dnssec.nextKeyRollover`/`lastKeyRollover`
+      (bindy ADR-0006).
 - [ ] `src/zones_test.rs`: each permitted transition, and each refused one.
 - [ ] Integration test against a real BIND9 with a `dnssec-policy` defined:
       create unsigned → enable → assert DNSKEY/RRSIG appear → read DS → disable.
