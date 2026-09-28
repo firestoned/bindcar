@@ -28,7 +28,7 @@
 # symlink (COPYing a real `/lib` dir onto it fails). The digest
 # is pinned for reproducibility (A11); resolve with
 #   docker buildx imagetools inspect debian:13-slim --raw | sha256sum
-FROM debian:13-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS nsupdate
+FROM debian:13-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS nsupdate
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends bind9-dnsutils \
  && mkdir -p /staging/usr/bin \
