@@ -135,13 +135,50 @@ tls-transport-test-ci: ## Run TLS transport e2e in CI (uses pre-built binary via
 #
 # CI end-to-end gate
 #
+# The CI shape (e2e.yaml) is one job per suite, sharing one build: `e2e-image`
+# packages the Dockerfile.chef image AND its musl-static binary into dist/
+# once, and each `e2e-<suite>` target consumes them. Mirrors bindy/banlieue.
+# `ci-e2e` remains the serial local variant of the same gate.
 
 # Dedicated cluster name so the CI e2e never collides with a developer's
 # long-lived bindy-test cluster when run locally.
 CI_E2E_KIND_CLUSTER ?= bindcar-e2e
 
+# Image tag and hand-off directory shared by the e2e-* targets.
+E2E_IMAGE ?= bindcar:ci-e2e
+E2E_DIST ?= dist
+
+.PHONY: e2e-image
+e2e-image: ## Build the e2e image (Dockerfile.chef) once; package image tarball + musl binary into dist/ for the suite jobs
+	mkdir -p $(E2E_DIST)
+	docker build -f docker/Dockerfile.chef -t $(E2E_IMAGE) .
+	docker save $(E2E_IMAGE) -o $(E2E_DIST)/bindcar-e2e-image.tar
+	docker rm -f bindcar-e2e-extract 2>/dev/null || true
+	docker create --name bindcar-e2e-extract $(E2E_IMAGE)
+	docker cp bindcar-e2e-extract:/usr/local/bin/bindcar $(E2E_DIST)/bindcar
+	docker rm bindcar-e2e-extract
+	chmod +x $(E2E_DIST)/bindcar
+
+.PHONY: e2e-image-load
+e2e-image-load: ## Load dist/bindcar-e2e-image.tar (produced by e2e-image) into the local docker daemon
+	docker load -i $(E2E_DIST)/bindcar-e2e-image.tar
+
+.PHONY: e2e-tls
+e2e-tls: ## TLS transport suite against the prebuilt dist/ binary (requires openssl, curl; no docker/kind/BIND9)
+	chmod +x $(E2E_DIST)/bindcar
+	BINDCAR_BIN=$(abspath $(E2E_DIST)/bindcar) ./integration-test/tls-transport.sh
+
+.PHONY: e2e-drone
+e2e-drone: ## Drone suite: prebuilt dist/ binary against a dockerized external BIND9 (requires docker, curl, dig)
+	chmod +x $(E2E_DIST)/bindcar
+	BINDCAR_BIN=$(abspath $(E2E_DIST)/bindcar) ./integration-test/drone-external-bind9.sh
+
+.PHONY: e2e-kind
+e2e-kind: e2e-image-load ## kind suite (incl. DNSSEC lifecycle stage) with the prebuilt e2e image (requires docker, kind, kubectl, curl, dig, jq)
+	$(MAKE) kind-e2e BINDCAR_IMAGE=$(E2E_IMAGE) SKIP_IMAGE_BUILD=true KIND_CLUSTER=$(CI_E2E_KIND_CLUSTER)
+
 .PHONY: ci-e2e
-ci-e2e: ## Self-contained full e2e for CI: TLS transport + drone integration test + kind e2e (builds its own image; requires docker, kind, kubectl, curl, dig). Used by .github/workflows/e2e.yaml.
+ci-e2e: ## Serial local variant of the full e2e gate: TLS transport + drone integration + kind e2e (builds its own image; requires docker, kind, kubectl, curl, dig, jq). CI runs the same suites as a matrix via e2e.yaml.
 	@echo "==> TLS transport e2e (no cluster or BIND9 required)"
 	cargo build
 	./integration-test/tls-transport.sh

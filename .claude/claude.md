@@ -854,23 +854,39 @@ pub async fn reconcile(zone: Arc<BindZone>, ctx: Arc<Context>) -> Result<Action,
 
 ### Architecture Decision Records (ADRs)
 
-For significant design decisions, create `/docs/adr/NNNN-title.md`:
+For significant design decisions, create `/docs/adr/NNNN-title.md`, using the
+**same layout and format as `~/dev/banlieue/docs/adr/`**:
 
 ```markdown
-# ADR-NNNN: Title
+<!--
+Copyright (c) YYYY Erick Bourgeois, firestoned
+SPDX-License-Identifier: MIT
+-->
+# NNNN — Title
 
-## Status
-Proposed | Accepted | Deprecated | Superseded by ADR-XXXX
+- **Status:** Proposed | Accepted | Deprecated | Superseded by ADR-XXXX
+- **Date:** YYYY-MM-DD
+- **Deciders:** Erick Bourgeois
+- **Related:** links to roadmaps, other ADRs, downstream consumers (optional)
 
 ## Context
-What is the issue we're facing?
+
+What is the issue we're facing? Include verified evidence, not assumptions.
 
 ## Decision
-What have we decided to do?
+
+1. **First decision, bold, one sentence.**
+
+   Supporting detail and sub-points as nested bullets.
 
 ## Consequences
-What are the trade-offs?
+
+- Bulleted trade-offs and follow-on effects.
 ```
+
+Title line is `# NNNN — Title` (em dash, no "ADR-" prefix); metadata is a
+bullet list, not a `## Status` section. Reference ADRs in prose as
+"ADR-NNNN".
 
 ---
 

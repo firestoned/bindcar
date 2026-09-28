@@ -272,6 +272,88 @@ pub struct ModifyZoneRequest {
     /// Example: ["10.244.2.101", "10.244.2.102"]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_update: Option<Vec<String>>,
+
+    /// DNSSEC policy transition (ADR-0001). Merge semantics: omitting the
+    /// field means "leave signing as it is", never "remove".
+    ///
+    /// * a policy name — enable signing with, or switch to, that
+    ///   `dnssec-policy` (must be defined in named.conf)
+    /// * `"insecure"` — BIND's built-in policy: gracefully unsign the zone
+    ///   (the only way to start turning DNSSEC off on a signed zone)
+    /// * `"none"` — remove the `dnssec-policy` directive entirely; refused
+    ///   while the zone still serves DNSKEY records
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dnssec_policy: Option<String>,
+
+    /// Enable or disable BIND9 inline-signing (ADR-0001). Usually omitted:
+    /// when a policy is set on a zone without dynamic updates,
+    /// inline-signing is enabled implicitly (BIND requires one or the
+    /// other).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inline_signing: Option<bool>,
+}
+
+/// Zone status response: the classic text `details` plus a typed DNSSEC
+/// block parsed from `rndc dnssec -status` (ADR-0001).
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ZoneStatusResponse {
+    /// Whether the status lookup succeeded.
+    pub success: bool,
+    /// Human-readable summary.
+    pub message: String,
+    /// Raw `rndc zonestatus` output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
+    /// DNSSEC signing state; omitted when it could not be determined.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dnssec: Option<crate::dnssec::DnssecStatus>,
+}
+
+/// One DS record of a zone, ready to publish at the parent (ADR-0001).
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct DsRecordView {
+    /// Key tag of the DNSKEY this DS refers to.
+    pub key_tag: u16,
+    /// DNSSEC algorithm number.
+    pub algorithm: u8,
+    /// DS digest type (2 = SHA-256).
+    pub digest_type: u8,
+    /// Uppercase hex digest.
+    pub digest: String,
+    /// Full record in presentation format, e.g.
+    /// `example.com. IN DS 60485 5 2 <digest>`.
+    pub rr: String,
+}
+
+/// Response of `GET /api/v1/zones/{name}/ds` (ADR-0001).
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct DsSetResponse {
+    /// Whether DS computation succeeded.
+    pub success: bool,
+    /// The zone the DS records belong to.
+    pub zone: String,
+    /// One entry per key-signing key.
+    pub ds_records: Vec<DsRecordView>,
+}
+
+/// Request body of `POST /api/v1/zones/{name}/dnssec/checkds` (ADR-0001):
+/// tells named that the DS for a key was published at, or withdrawn from,
+/// the parent zone — required to complete rollovers and the graceful
+/// `insecure` transition when no parental agents are configured.
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "server", derive(ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct CheckdsRequest {
+    /// Key tag of the DNSKEY whose DS changed at the parent.
+    pub key_tag: u16,
+    /// The new DS state at the parent.
+    pub ds: crate::dnssec::CheckdsState,
 }
 
 /// Response from zone operations

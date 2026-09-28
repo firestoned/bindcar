@@ -31,6 +31,7 @@ fn offline_app_state() -> AppState {
         rndc: Arc::new(rndc),
         nsupdate: Arc::new(nsupdate),
         zone_dir: "/tmp".to_string(),
+        key_dir: None,
     }
 }
 
@@ -887,6 +888,8 @@ fn test_modify_zone_request_serialization() {
         also_notify: Some(vec!["10.244.2.101".to_string()]),
         allow_transfer: Some(vec!["10.244.2.102".to_string()]),
         allow_update: Some(vec!["10.244.2.103".to_string()]),
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     let json = serde_json::to_string(&request).unwrap();
@@ -904,6 +907,8 @@ fn test_modify_zone_request_serialization_skip_none() {
         also_notify: Some(vec!["10.244.2.101".to_string()]),
         allow_transfer: None,
         allow_update: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
 
     let json = serde_json::to_string(&request).unwrap();
@@ -1493,6 +1498,8 @@ async fn test_modify_zone_rejects_invalid_zone_name() {
         also_notify: Some(vec!["192.0.2.1".to_string()]),
         allow_transfer: None,
         allow_update: None,
+        dnssec_policy: None,
+        inline_signing: None,
     };
     let result = modify_zone(
         State(state),
@@ -1546,4 +1553,185 @@ fn test_resolve_zone_dir_output_is_normalized() {
     let resolved =
         resolve_zone_dir(dir.path().to_str().unwrap()).expect("existing directory should resolve");
     assert!(is_normalized_zone_dir(&resolved));
+}
+
+// ---------------------------------------------------------------------------
+// DNSSEC lifecycle transitions on PATCH (ADR-0001, roadmap 07)
+// ---------------------------------------------------------------------------
+
+mod dnssec_transitions {
+    use crate::rndc_types::{ZoneConfig as RndcZoneConfig, ZoneType};
+    use crate::zones::apply_dnssec_request;
+    use crate::zones_types::ModifyZoneRequest;
+
+    fn unsigned_zone() -> RndcZoneConfig {
+        RndcZoneConfig::new("example.com".to_string(), ZoneType::Primary)
+    }
+
+    fn signed_zone() -> RndcZoneConfig {
+        let mut config = unsigned_zone();
+        config.dnssec_policy = Some("prod-policy".to_string());
+        config.inline_signing = Some(true);
+        config
+    }
+
+    #[test]
+    fn test_modify_request_deserializes_dnssec_fields() {
+        let json = r#"{"dnssecPolicy": "prod-policy", "inlineSigning": true}"#;
+        let request: ModifyZoneRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.dnssec_policy.as_deref(), Some("prod-policy"));
+        assert_eq!(request.inline_signing, Some(true));
+
+        // Omission means "no change", never "remove" (merge semantics).
+        let empty: ModifyZoneRequest = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty.dnssec_policy, None);
+        assert_eq!(empty.inline_signing, None);
+    }
+
+    #[test]
+    fn test_no_dnssec_fields_is_no_change() {
+        let mut config = signed_zone();
+        let changed = apply_dnssec_request(&mut config, None, None, true).unwrap();
+        assert!(!changed);
+        // The existing policy is untouched.
+        assert_eq!(config.dnssec_policy.as_deref(), Some("prod-policy"));
+    }
+
+    #[test]
+    fn test_enable_sets_policy_and_implicit_inline_signing() {
+        let mut config = unsigned_zone();
+        let changed = apply_dnssec_request(&mut config, Some("prod-policy"), None, false).unwrap();
+        assert!(changed);
+        assert_eq!(config.dnssec_policy.as_deref(), Some("prod-policy"));
+        // No allow-update/update-policy on the zone: inline-signing is
+        // required by BIND and must be set implicitly (ADR-0001).
+        assert_eq!(config.inline_signing, Some(true));
+    }
+
+    #[test]
+    fn test_enable_on_dynamic_zone_does_not_force_inline_signing() {
+        let mut config = unsigned_zone();
+        config.allow_update = Some(vec!["10.0.0.1".parse().unwrap()]);
+        let changed = apply_dnssec_request(&mut config, Some("prod-policy"), None, false).unwrap();
+        assert!(changed);
+        // Dynamic DNS satisfies the dnssec-policy prerequisite on its own.
+        assert_eq!(config.inline_signing, None);
+    }
+
+    #[test]
+    fn test_explicit_inline_signing_wins() {
+        let mut config = unsigned_zone();
+        let changed =
+            apply_dnssec_request(&mut config, Some("prod-policy"), Some(true), false).unwrap();
+        assert!(changed);
+        assert_eq!(config.inline_signing, Some(true));
+    }
+
+    #[test]
+    fn test_switch_policy_on_signed_zone_allowed() {
+        let mut config = signed_zone();
+        let changed = apply_dnssec_request(&mut config, Some("new-policy"), None, true).unwrap();
+        assert!(changed);
+        assert_eq!(config.dnssec_policy.as_deref(), Some("new-policy"));
+    }
+
+    #[test]
+    fn test_insecure_transition_on_signed_zone_allowed() {
+        let mut config = signed_zone();
+        let changed = apply_dnssec_request(&mut config, Some("insecure"), None, true).unwrap();
+        assert!(changed);
+        assert_eq!(config.dnssec_policy.as_deref(), Some("insecure"));
+        // inline-signing must survive the transition: the insecure policy
+        // still maintains the zone while unsigning gracefully.
+        assert_eq!(config.inline_signing, Some(true));
+    }
+
+    #[test]
+    fn test_removal_refused_while_zone_still_signed() {
+        let mut config = signed_zone();
+        let err = apply_dnssec_request(&mut config, Some("none"), None, true).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("insecure"),
+            "refusal must point at the insecure policy path, got: {message}"
+        );
+        // The config must be left untouched on refusal.
+        assert_eq!(config.dnssec_policy.as_deref(), Some("prod-policy"));
+    }
+
+    #[test]
+    fn test_removal_allowed_once_zone_no_longer_signed() {
+        let mut config = signed_zone();
+        config.dnssec_policy = Some("insecure".to_string());
+        let changed = apply_dnssec_request(&mut config, Some("none"), None, false).unwrap();
+        assert!(changed);
+        assert_eq!(config.dnssec_policy, None);
+    }
+
+    #[test]
+    fn test_removal_on_never_signed_zone_is_allowed() {
+        let mut config = unsigned_zone();
+        let changed = apply_dnssec_request(&mut config, Some("none"), None, false).unwrap();
+        assert!(changed);
+        assert_eq!(config.dnssec_policy, None);
+    }
+
+    #[test]
+    fn test_inline_signing_alone_is_a_change() {
+        let mut config = signed_zone();
+        let changed = apply_dnssec_request(&mut config, None, Some(false), true).unwrap();
+        assert!(changed);
+        assert_eq!(config.inline_signing, Some(false));
+        // Policy untouched: named itself rejects an invalid combination at
+        // reconfig, and that error is surfaced verbatim.
+        assert_eq!(config.dnssec_policy.as_deref(), Some("prod-policy"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DNSSEC response types (ADR-0001)
+// ---------------------------------------------------------------------------
+
+mod dnssec_responses {
+    use crate::zones_types::{CheckdsRequest, DsRecordView, DsSetResponse, ZoneStatusResponse};
+
+    #[test]
+    fn test_checkds_request_deserializes() {
+        let json = r#"{"keyTag": 33306, "ds": "withdrawn"}"#;
+        let request: CheckdsRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.key_tag, 33306);
+        assert_eq!(request.ds, crate::dnssec::CheckdsState::Withdrawn);
+    }
+
+    #[test]
+    fn test_ds_set_response_serializes_camel_case() {
+        let response = DsSetResponse {
+            success: true,
+            zone: "example.com".to_string(),
+            ds_records: vec![DsRecordView {
+                key_tag: 60485,
+                algorithm: 5,
+                digest_type: 2,
+                digest: "D4B7".to_string(),
+                rr: "example.com. IN DS 60485 5 2 D4B7".to_string(),
+            }],
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"dsRecords\""));
+        assert!(json.contains("\"keyTag\":60485"));
+        assert!(json.contains("\"digestType\":2"));
+    }
+
+    #[test]
+    fn test_zone_status_response_dnssec_block_optional() {
+        let response = ZoneStatusResponse {
+            success: true,
+            message: "ok".to_string(),
+            details: None,
+            dnssec: None,
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        // Absent block is omitted entirely, keeping the pre-ADR-0001 shape.
+        assert!(!json.contains("dnssec"));
+    }
 }

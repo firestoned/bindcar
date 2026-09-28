@@ -320,25 +320,105 @@ Use online DNSSEC validators:
 
 ## DS Record Publication
 
-For DNSSEC to work properly, you must publish DS (Delegation Signer) records at your parent zone:
+For DNSSEC to work properly, you must publish DS (Delegation Signer) records at your parent zone.
 
-### Extract DS Records
+### Retrieve DS Records via the API
+
+bindcar computes the DS records (SHA-256, digest type 2) in-process from the
+zone's key-signing keys:
 
 ```bash
-# Get DS records for your zone
-dig @localhost DNSKEY example.com | dnssec-dsfromkey -f - example.com
-
-# Or directly from key files
-dnssec-dsfromkey /var/cache/bind/Kexample.com.+013+54321.key
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  http://localhost:8080/api/v1/zones/example.com/ds
 ```
+
+```json
+{
+  "success": true,
+  "zone": "example.com",
+  "dsRecords": [
+    {
+      "keyTag": 54321,
+      "algorithm": 13,
+      "digestType": 2,
+      "digest": "ABC123...",
+      "rr": "example.com. IN DS 54321 13 2 ABC123..."
+    }
+  ]
+}
+```
+
+This endpoint requires bindcar to see the BIND9 key directory: mount it
+**read-only** into the bindcar container and set `BIND_KEY_DIR` to its path.
+Without it the endpoint returns `501 Not Implemented`; a zone without a
+`dnssec-policy` returns `404`. Only the public `K*.key` files are read —
+never `.private` or `.state`.
+
+Manual alternatives (`dnssec-dsfromkey` on the BIND host) still work but are
+not needed.
 
 ### Publish to Parent
 
-Provide the DS records to your domain registrar or parent zone operator. The format will be:
+Provide the DS records to your domain registrar or parent zone operator.
 
+### Tell named about the DS state at the parent
+
+Unless parental agents are configured in BIND9, named does not know when the
+DS was published or withdrawn at the parent — and it will not complete key
+rollovers (or the graceful unsigning described below) until told:
+
+```bash
+# After publishing the DS at the parent:
+curl -X POST http://localhost:8080/api/v1/zones/example.com/dnssec/checkds \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{"keyTag": 54321, "ds": "published"}'
+
+# After removing it:
+curl -X POST http://localhost:8080/api/v1/zones/example.com/dnssec/checkds \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{"keyTag": 54321, "ds": "withdrawn"}'
 ```
-example.com. IN DS 54321 13 2 ABC123...
+
+## Observing Signing State
+
+`GET /api/v1/zones/{name}/status` includes a typed `dnssec` block parsed from
+`rndc dnssec -status` — the policy in effect, whether the zone is signed, and
+per key: tag, algorithm, role (KSK/ZSK/CSK), lifecycle states, `since`
+timestamps and the next scheduled rollover:
+
+```json
+{
+  "success": true,
+  "message": "Zone example.com status retrieved",
+  "details": "...",
+  "dnssec": {
+    "policy": "default",
+    "signed": true,
+    "keys": [
+      {
+        "tag": 54321,
+        "algorithm": "ECDSAP256SHA256",
+        "role": "CSK",
+        "published": true,
+        "publishedSince": "2026-09-27T22:07:06",
+        "keySigning": true,
+        "zoneSigning": true,
+        "removed": false,
+        "goal": "omnipresent",
+        "dnskeyState": "rumoured",
+        "dsState": "hidden",
+        "zoneRrsigState": "rumoured",
+        "keyRrsigState": "rumoured"
+      }
+    ]
+  }
+}
 ```
+
+Timestamps are the BIND server's local clock (naive ISO 8601). The block is
+omitted when the signing state cannot be determined.
 
 ## Best Practices
 
@@ -453,34 +533,69 @@ logging {
 
 ### Enabling DNSSEC on Existing Zones
 
-To enable DNSSEC on an existing zone:
+To enable DNSSEC on a **live** zone — no deletion, no recreation, no downtime:
 
-1. **Verify BIND9 version** (`named -v`)
-2. **Define DNSSEC policy** in BIND9 configuration
-3. **Use PATCH endpoint** to update zone configuration:
+1. **Verify BIND9 version** (`named -v`; 9.16+ required)
+2. **Define the DNSSEC policy** in BIND9 configuration (`rndc reconfig` after)
+3. **Use the PATCH endpoint**:
 
 ```bash
 curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_TOKEN" \
-  -d '{
-    "dnssecPolicy": "default",
-    "inlineSigning": true
-  }'
+  -d '{"dnssecPolicy": "default"}'
 ```
 
-> **Note**: The PATCH endpoint currently supports `alsoNotify`, `allowTransfer`, and `allowUpdate`. DNSSEC field updates will be available in a future release. For now, delete and recreate the zone to enable DNSSEC.
+`inlineSigning` may usually be omitted: when the zone has no dynamic-update
+configuration, bindcar enables it implicitly (BIND requires dynamic DNS or
+inline signing with `dnssec-policy`). bindcar applies the change with
+`rndc modzone` **and** `rndc reconfig` — modzone alone stores the policy
+without applying it (verified on BIND 9.18; see ADR-0001).
+
+Omitting `dnssecPolicy` in a PATCH always means "leave signing unchanged" —
+DNSSEC can never be turned off by accident.
+
+4. **Watch it sign**: poll `GET /api/v1/zones/example.com/status` until
+   `dnssec.signed` is `true`, then retrieve the DS
+   (`GET /api/v1/zones/example.com/ds`) and publish it at the parent, then
+   confirm publication with `POST .../dnssec/checkds` (`"ds": "published"`).
+
+Switching a signed zone to a *different* policy is the same PATCH; BIND
+manages the key/algorithm rollover.
 
 ### Disabling DNSSEC
 
-To disable DNSSEC on a zone:
+Going secure → insecure is **not** symmetric with enabling: if signing stops
+while the parent still publishes a DS, the zone goes bogus for every
+validating resolver. bindcar therefore refuses
+`{"dnssecPolicy": "none"}` with `409 Conflict` while the zone still serves
+DNSKEY records. The safe sequence, per the official BIND procedure:
 
-1. **Remove DS records** from parent zone first (important!)
-2. **Wait for TTL expiration** (typically 24-48 hours)
-3. **Recreate zone** without DNSSEC fields
-4. **Clean up key files**:
+1. **Transition to the built-in `insecure` policy** (keeps the zone
+   DNSSEC-maintained while unsigning gracefully):
    ```bash
-   rm /var/cache/bind/K<zonename>.*
+   curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_TOKEN" \
+     -d '{"dnssecPolicy": "insecure"}'
+   ```
+2. **Remove the DS records** from the parent zone (registrar or RFC 8078
+   CDS/CDNSKEY DELETE automation).
+3. **Tell named the DS is gone** (unless parental agents are configured):
+   ```bash
+   curl -X POST http://localhost:8080/api/v1/zones/example.com/dnssec/checkds \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_TOKEN" \
+     -d '{"keyTag": 54321, "ds": "withdrawn"}'
+   ```
+4. **Wait for the zone to revert**: poll `GET .../status` until
+   `dnssec.signed` is `false` (named honours the relevant TTLs).
+5. **Remove the policy** — now permitted:
+   ```bash
+   curl -X PATCH http://localhost:8080/api/v1/zones/example.com \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer YOUR_TOKEN" \
+     -d '{"dnssecPolicy": "none"}'
    ```
 
 ## Security Considerations

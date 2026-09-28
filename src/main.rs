@@ -90,6 +90,8 @@ fn check_tls_support(tls_requested: bool, tls_supported: bool) -> anyhow::Result
         zones::modify_zone,
         zones::reload_zone,
         zones::zone_status,
+        zones::get_zone_ds,
+        zones::checkds_zone,
         zones::freeze_zone,
         zones::thaw_zone,
         zones::notify_zone,
@@ -106,6 +108,13 @@ fn check_tls_support(tls_requested: bool, tls_supported: bool) -> anyhow::Result
             zones::CreateZoneRequest,
             zones::ModifyZoneRequest,
             zones::ZoneResponse,
+            zones::ZoneStatusResponse,
+            zones::DsSetResponse,
+            zones::DsRecordView,
+            zones::CheckdsRequest,
+            bindcar::dnssec::DnssecStatus,
+            bindcar::dnssec::DnssecKeyStatus,
+            bindcar::dnssec::CheckdsState,
             zones::ServerStatusResponse,
             zones::ZoneInfo,
             zones::ZoneListResponse,
@@ -523,6 +532,23 @@ async fn start_server(
         .map_err(|e| anyhow::anyhow!("zone directory not usable: {}", e))?;
     info!("resolved zone directory: {}", zone_dir);
 
+    // Optional DNSSEC key directory (ADR-0001): required only by the DS
+    // endpoint. Same canonicalize-at-startup treatment as the zone
+    // directory; a configured-but-unusable path is a hard startup error
+    // rather than a silent downgrade.
+    let key_dir = match std::env::var("BIND_KEY_DIR") {
+        Ok(raw) => {
+            let resolved = zones::resolve_zone_dir(&raw)
+                .map_err(|e| anyhow::anyhow!("key directory not usable: {}", e))?;
+            info!("resolved DNSSEC key directory: {}", resolved);
+            Some(resolved)
+        }
+        Err(_) => {
+            info!("BIND_KEY_DIR not set; the DS endpoint will return 501");
+            None
+        }
+    };
+
     // create rndc executor
     let rndc = Arc::new(
         RndcExecutor::new(
@@ -577,6 +603,7 @@ async fn start_server(
         rndc,
         nsupdate,
         zone_dir: zone_dir.clone(),
+        key_dir,
     };
 
     // build api routes
@@ -590,6 +617,8 @@ async fn start_server(
         )
         .route("/zones/{name}/reload", post(zones::reload_zone))
         .route("/zones/{name}/status", get(zones::zone_status))
+        .route("/zones/{name}/ds", get(zones::get_zone_ds))
+        .route("/zones/{name}/dnssec/checkds", post(zones::checkds_zone))
         .route("/zones/{name}/freeze", post(zones::freeze_zone))
         .route("/zones/{name}/thaw", post(zones::thaw_zone))
         .route("/zones/{name}/notify", post(zones::notify_zone))

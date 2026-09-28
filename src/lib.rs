@@ -139,6 +139,7 @@
 #[cfg(feature = "server")]
 pub mod auth;
 pub mod cli;
+pub mod dnssec;
 pub mod metrics;
 #[cfg(feature = "server")]
 pub mod middleware;
@@ -163,6 +164,9 @@ pub mod zones_types;
 
 // RNDC executor
 pub use rndc::RndcExecutor;
+
+// DNSSEC status and DS types (ADR-0001)
+pub use dnssec::{DnskeyRecord, DnssecKeyStatus, DnssecStatus, DsRecord};
 
 // nsupdate executor
 pub use nsupdate::NsupdateExecutor;
@@ -201,6 +205,8 @@ pub use rndc_conf_types::{KeyBlock, OptionsBlock, RndcConfFile, ServerAddress, S
 mod auth_test;
 #[cfg(test)]
 mod cli_test;
+#[cfg(test)]
+mod dnssec_test;
 #[cfg(test)]
 mod metrics_test;
 #[cfg(all(test, feature = "server"))]

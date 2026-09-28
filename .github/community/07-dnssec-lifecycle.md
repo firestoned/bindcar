@@ -8,11 +8,22 @@
 > signed and delegated using only the API, and can tell from the API whether
 > signing has actually completed.
 
-> **Status:** ⛔ Not started. Verified against `main` @ `5233c0b`:
-> `ModifyZoneRequest` (`src/zones_types.rs`) carries only `also_notify`,
-> `allow_transfer` and `allow_update` — no `dnssecPolicy`, no `inlineSigning`.
-> `rg -li 'nsec3' src/` and `rg -li 'ds_record|delegation_signer' src/` both
-> return nothing.
+> **Status:** ✅ Shipped 2026-09-27, pending merge.
+> [ADR-0001](../../docs/adr/0001-dnssec-lifecycle-transitions.md) (Accepted)
+> settled the design against the official BIND 9.18 documentation **and** a
+> live BIND 9.18.50 instance; the implementation landed the same day and the
+> full lifecycle was validated end-to-end against a real BIND 9.18.50
+> (enable via PATCH → signed; `GET /ds` digest byte-identical to
+> `dnssec-dsfromkey -2`; `dnssecPolicy: "none"` refused with 409 while
+> signed; `insecure` + checkds → unsigned; removal then accepted — zone
+> answering queries throughout).
+>
+> Surface: `dnssecPolicy`/`inlineSigning` on PATCH (merge semantics,
+> `modzone` + `reconfig`), `GET /api/v1/zones/{name}/ds`,
+> `POST /api/v1/zones/{name}/dnssec/checkds`, and a typed `dnssec` block
+> (per-key states, since-timestamps, next rollover — parsed from
+> `rndc dnssec -status`) on the zone-status response, which unblocks bindy
+> ADR-0006's `nextKeyRollover`/`lastKeyRollover`.
 
 ---
 
@@ -123,26 +134,45 @@ Only once those are settled should the task list below be executed.
 
 ## Tasks (post-ADR)
 
-- [ ] ADR: DNSSEC lifecycle transitions on live zones.
-- [ ] `src/zones_types.rs`: `dnssec_policy` / `inline_signing` on
-      `ModifyZoneRequest`, with the transition rules the ADR settles.
-- [ ] `src/zones.rs`: apply them in `modify_zone`, rejecting unsafe transitions
-      with a specific `ApiError` rather than a generic 400.
-- [ ] DS retrieval endpoint (shape per ADR).
-- [ ] DNSSEC block on the zone-status response: signed yes/no, active key tags,
-      current signature validity window.
-- [ ] Key timing in that DNSSEC block (source per ADR — `rndc dnssec -status`
-      vs. parsing key `.state` files): per key, its role (KSK/ZSK), state, and
-      next/last rollover event timestamps. Unblocks bindy's
+- [x] ADR: DNSSEC lifecycle transitions on live zones —
+      [ADR-0001](../../docs/adr/0001-dnssec-lifecycle-transitions.md)
+      (Accepted 2026-09-27).
+- [x] `src/zones_types.rs`: `dnssec_policy` / `inline_signing` on
+      `ModifyZoneRequest` (merge semantics; `"insecure"` and `"none"`
+      transitions per ADR).
+- [x] `src/zones.rs`: `apply_dnssec_request` in `modify_zone` +
+      `rndc reconfig` activation; unsafe removal rejected with
+      `ApiError::UnsafeDnssecTransition` (409).
+- [x] DS retrieval endpoint: `GET /api/v1/zones/{name}/ds`, computed
+      in-process (RFC 4034/4509) from public `K*.key` files under
+      `BIND_KEY_DIR` (read-only mount; 501 when unset). Digest verified
+      byte-identical to `dnssec-dsfromkey -2`.
+- [x] DNSSEC block on the zone-status response (`src/dnssec.rs`,
+      `ZoneStatusResponse.dnssec`): policy, signed yes/no, per-key states.
+- [x] Key timing in that DNSSEC block, parsed from `rndc dnssec -status`
+      (source settled by ADR-0001): per key, role (KSK/ZSK/CSK), states,
+      since-timestamps and next rollover. Unblocks bindy's
       `DNSZone.status.dnssec.nextKeyRollover`/`lastKeyRollover`
       (bindy ADR-0006).
-- [ ] `src/zones_test.rs`: each permitted transition, and each refused one.
-- [ ] Integration test against a real BIND9 with a `dnssec-policy` defined:
-      create unsigned → enable → assert DNSKEY/RRSIG appear → read DS → disable.
-- [ ] `docs/src/advanced/dnssec.md`: replace the delete-and-recreate procedure.
-- [ ] Update [`01-dnssec-feature-summary.md`](01-dnssec-feature-summary.md)'s
-      "Future Work" list to point here.
-- [ ] `.claude/CHANGELOG.md`.
+- [x] Tests: `src/dnssec_test.rs` (parser + RFC 4509 DS vector),
+      `src/zones_test.rs` (each permitted transition, each refused one),
+      `src/rndc_test.rs` (new commands).
+- [x] Integration test against a real BIND9 with a `dnssec-policy` defined:
+      kind e2e stage 9 (`integration-test/kind-e2e.sh`): create unsigned →
+      enable → DNSKEY/RRSIG appear → read DS → refused removal → insecure →
+      unsigned → removal. Same flow validated live against BIND 9.18.50
+      outside kind on 2026-09-27.
+- [x] `docs/src/advanced/dnssec.md`: delete-and-recreate procedure replaced
+      with the PATCH lifecycle + DS/checkds/status API documentation.
+- [x] [`01-dnssec-feature-summary.md`](01-dnssec-feature-summary.md)'s
+      "Future Work" list updated to point here.
+- [x] `.claude/CHANGELOG.md`.
+
+Also new: `POST /api/v1/zones/{name}/dnssec/checkds` (report DS
+published/withdrawn at the parent — required to complete rollovers and the
+insecure transition when no parental agents are configured), and a
+`BIND_KEY_DIR` deployment knob (canonicalized at startup like
+`BIND_ZONE_DIR`).
 
 ## Out of scope
 

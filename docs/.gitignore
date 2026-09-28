@@ -4,9 +4,9 @@ site/
 # Rust documentation
 rustdoc/
 
-# Poetry virtual environment and lock file
+# Poetry virtual environment (the lock file IS committed — reproducible CI
+# docs builds; bindy and banlieue commit theirs too)
 .venv/
-poetry.lock
 
 # Python cache
 __pycache__/

@@ -342,12 +342,20 @@ curl -X PATCH /api/v1/zones/example.com \
 5. [ ] Consider blog post on DNSSEC usage
 
 ### Future Work
-1. [ ] Add PATCH support for DNSSEC fields
-2. [ ] Add DS record extraction API endpoint
-3. [ ] Add DNSSEC status to zone status endpoint
-4. [ ] Add key rollover monitoring
-5. [ ] Add NSEC3 configuration support
-6. [ ] Add automated testing with BIND9 container
+
+Items 1–4 and 6 shipped 2026-09-27 via
+[roadmap 07](07-dnssec-lifecycle.md) / ADR-0001
+(`docs/adr/0001-dnssec-lifecycle-transitions.md`):
+
+1. [x] Add PATCH support for DNSSEC fields (`dnssecPolicy`/`inlineSigning`
+       with merge semantics and guarded transitions)
+2. [x] Add DS record extraction API endpoint (`GET /api/v1/zones/{name}/ds`)
+3. [x] Add DNSSEC status to zone status endpoint (typed `dnssec` block)
+4. [x] Add key rollover monitoring (per-key states, since-timestamps and
+       next-rollover in the status block, parsed from `rndc dnssec -status`)
+5. [ ] Add NSEC3 configuration support (out of scope in roadmap 07; belongs
+       with the zone-config surface)
+6. [x] Add automated testing with BIND9 container (kind e2e stage 9)
 
 ## Related Documentation
 

@@ -33,3 +33,6 @@ lcov.info
 cobertura.xml
 .tarpaulin/
 target/llvm-cov/
+
+# e2e build hand-off (make e2e-image)
+dist/

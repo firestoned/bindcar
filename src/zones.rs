@@ -17,7 +17,7 @@ use axum::{
     Json,
 };
 use std::path::PathBuf;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     metrics,
@@ -28,8 +28,9 @@ use crate::{
 // take them without the HTTP stack (roadmap 02, phase 1). They are re-exported
 // here unchanged, so `bindcar::zones::ZoneConfig` and friends keep resolving.
 pub use crate::zones_types::{
-    CreateZoneRequest, DnsRecord, ModifyZoneRequest, ServerStatusResponse, SoaRecord, ZoneConfig,
-    ZoneInfo, ZoneListResponse, ZoneResponse, ZONE_TYPE_PRIMARY, ZONE_TYPE_SECONDARY,
+    CheckdsRequest, CreateZoneRequest, DnsRecord, DsRecordView, DsSetResponse, ModifyZoneRequest,
+    ServerStatusResponse, SoaRecord, ZoneConfig, ZoneInfo, ZoneListResponse, ZoneResponse,
+    ZoneStatusResponse, ZONE_TYPE_PRIMARY, ZONE_TYPE_SECONDARY,
 };
 
 /// Maximum length of a DNS zone name (RFC 1035 total name length).
@@ -802,6 +803,12 @@ pub async fn reload_zone(
 }
 
 /// Get zone status
+///
+/// Returns the raw `rndc zonestatus` text plus a typed `dnssec` block parsed
+/// from `rndc dnssec -status` (ADR-0001): policy, signed flag, and per-key
+/// role, states and rollover timing. The block is omitted (never an error)
+/// when the signing state cannot be determined, so the endpoint stays cheap
+/// and robust to poll.
 #[utoipa::path(
     get,
     path = "/api/v1/zones/{name}/status",
@@ -809,7 +816,7 @@ pub async fn reload_zone(
         ("name" = String, Path, description = "Zone name")
     ),
     responses(
-        (status = 200, description = "Zone status retrieved", body = ZoneResponse),
+        (status = 200, description = "Zone status retrieved", body = ZoneStatusResponse),
         (status = 404, description = "Zone not found"),
         (status = 500, description = "RNDC command failed")
     ),
@@ -818,7 +825,7 @@ pub async fn reload_zone(
 pub async fn zone_status(
     State(state): State<AppState>,
     Path(zone_name): Path<String>,
-) -> Result<Json<ZoneResponse>, ApiError> {
+) -> Result<Json<ZoneStatusResponse>, ApiError> {
     info!("Getting status for zone: {}", zone_name);
 
     // Validate the caller-supplied zone name before it reaches rndc (defense
@@ -834,9 +841,216 @@ pub async fn zone_status(
         }
     })?;
 
-    Ok(Json(ZoneResponse {
+    // Best-effort DNSSEC block: a zone without a policy answers with the
+    // literal "Zone does not have dnssec-policy" (parsed to signed: false),
+    // and an rndc failure only drops the block.
+    let dnssec = match state.rndc.dnssec_status(&zone_name).await {
+        Ok(status_output) => Some(crate::dnssec::parse_dnssec_status(&status_output)),
+        Err(e) => {
+            warn!("RNDC dnssec -status failed for {}: {}", zone_name, e);
+            None
+        }
+    };
+
+    Ok(Json(ZoneStatusResponse {
         success: true,
         message: format!("Zone {} status retrieved", zone_name),
+        details: Some(output),
+        dnssec,
+    }))
+}
+
+/// Get the DS records of a signed zone (ADR-0001)
+///
+/// Computes DS records (RFC 4509, SHA-256) in-process from the public
+/// `K<zone>.+<alg>+<tag>.key` files in the configured key directory,
+/// restricted to keys that `rndc dnssec -status` reports in a key-signing
+/// role. Delegation material for the parent zone / registrar.
+#[utoipa::path(
+    get,
+    path = "/api/v1/zones/{name}/ds",
+    params(
+        ("name" = String, Path, description = "Zone name")
+    ),
+    responses(
+        (status = 200, description = "DS records computed", body = DsSetResponse),
+        (status = 404, description = "Zone not found or not signed"),
+        (status = 501, description = "Key directory not configured"),
+        (status = 500, description = "RNDC command failed")
+    ),
+    tag = "zones"
+)]
+pub async fn get_zone_ds(
+    State(state): State<AppState>,
+    Path(zone_name): Path<String>,
+) -> Result<Json<DsSetResponse>, ApiError> {
+    info!("Computing DS records for zone: {}", zone_name);
+
+    validate_zone_name(&zone_name)?;
+
+    let Some(key_dir) = state.key_dir.as_deref() else {
+        return Err(ApiError::NotConfigured(
+            "DS retrieval requires the DNSSEC key directory to be mounted read-only \
+             and configured via BIND_KEY_DIR"
+                .to_string(),
+        ));
+    };
+
+    // Defense-in-depth (mirrors the zone_dir sinks, bug-076): the directory
+    // was canonicalized at startup, so re-check the invariant at the sink.
+    if !is_normalized_zone_dir(key_dir) || key_dir.contains("..") {
+        error!("key directory {:?} failed the normalization guard", key_dir);
+        return Err(ApiError::InternalError(
+            "key directory misconfigured".to_string(),
+        ));
+    }
+
+    let status_output = state.rndc.dnssec_status(&zone_name).await.map_err(|e| {
+        error!("RNDC dnssec -status failed for {}: {}", zone_name, e);
+        if e.to_string().contains("not found") {
+            ApiError::ZoneNotFound(zone_name.clone())
+        } else {
+            ApiError::RndcError(e.to_string())
+        }
+    })?;
+    let status = crate::dnssec::parse_dnssec_status(&status_output);
+
+    if status.policy.is_none() {
+        return Err(ApiError::DsNotAvailable(format!(
+            "zone {} has no dnssec-policy; there is nothing to delegate",
+            zone_name
+        )));
+    }
+
+    let ksk_tags = status.ksk_tags();
+    if ksk_tags.is_empty() {
+        return Err(ApiError::DsNotAvailable(format!(
+            "zone {} reports no key-signing keys",
+            zone_name
+        )));
+    }
+
+    // Public key files only: `K<zone>.+<alg>+<tag>.key`. Filenames come from
+    // the directory listing, never from the request; `.private`/`.state`
+    // files are never read (ADR-0001).
+    let file_prefix = format!("K{}.+", zone_name);
+    let mut ds_records: Vec<DsRecordView> = Vec::new();
+    let mut entries = tokio::fs::read_dir(key_dir).await.map_err(|e| {
+        error!("failed to read key directory {:?}: {}", key_dir, e);
+        ApiError::InternalError("key directory unreadable".to_string())
+    })?;
+    while let Some(entry) = entries.next_entry().await.map_err(|e| {
+        error!("failed to iterate key directory {:?}: {}", key_dir, e);
+        ApiError::InternalError("key directory unreadable".to_string())
+    })? {
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if !name.starts_with(&file_prefix) || !name.ends_with(".key") {
+            continue;
+        }
+        let contents = match tokio::fs::read_to_string(entry.path()).await {
+            Ok(contents) => contents,
+            Err(e) => {
+                warn!("skipping unreadable key file {:?}: {}", name, e);
+                continue;
+            }
+        };
+        let dnskey = match crate::dnssec::parse_key_file(&contents) {
+            Ok(dnskey) => dnskey,
+            Err(e) => {
+                warn!("skipping unparseable key file {:?}: {}", name, e);
+                continue;
+            }
+        };
+        if !ksk_tags.contains(&dnskey.key_tag()) {
+            continue;
+        }
+        let ds = dnskey.ds_record().map_err(|e| {
+            error!("DS computation failed for key file {:?}: {}", name, e);
+            ApiError::InternalError("DS computation failed".to_string())
+        })?;
+        let rr = format!("{} IN DS {}", dnskey.owner, ds.rdata());
+        ds_records.push(DsRecordView {
+            key_tag: ds.key_tag,
+            algorithm: ds.algorithm,
+            digest_type: ds.digest_type,
+            digest: ds.digest,
+            rr,
+        });
+    }
+
+    if ds_records.is_empty() {
+        return Err(ApiError::DsNotAvailable(format!(
+            "no public key files for the key-signing keys of zone {} were found; \
+             is the key directory mounted?",
+            zone_name
+        )));
+    }
+    ds_records.sort_by_key(|r| r.key_tag);
+
+    Ok(Json(DsSetResponse {
+        success: true,
+        zone: zone_name,
+        ds_records,
+    }))
+}
+
+/// Report a DS change at the parent zone (ADR-0001)
+///
+/// Forwards `rndc dnssec -checkds` so key rollovers and the graceful
+/// `insecure` transition can complete without host access when no parental
+/// agents are configured.
+#[utoipa::path(
+    post,
+    path = "/api/v1/zones/{name}/dnssec/checkds",
+    request_body = CheckdsRequest,
+    params(
+        ("name" = String, Path, description = "Zone name")
+    ),
+    responses(
+        (status = 200, description = "DS state recorded", body = ZoneResponse),
+        (status = 404, description = "Zone not found"),
+        (status = 500, description = "RNDC command failed")
+    ),
+    tag = "zones"
+)]
+pub async fn checkds_zone(
+    State(state): State<AppState>,
+    Path(zone_name): Path<String>,
+    Json(request): Json<CheckdsRequest>,
+) -> Result<Json<ZoneResponse>, ApiError> {
+    info!(
+        "Recording DS {} for zone {} key tag {}",
+        request.ds.as_str(),
+        zone_name,
+        request.key_tag
+    );
+
+    validate_zone_name(&zone_name)?;
+
+    let output = state
+        .rndc
+        .dnssec_checkds(&zone_name, request.key_tag, request.ds)
+        .await
+        .map_err(|e| {
+            error!("RNDC dnssec -checkds failed for {}: {}", zone_name, e);
+            if e.to_string().contains("not found") {
+                ApiError::ZoneNotFound(zone_name.clone())
+            } else {
+                ApiError::RndcError(e.to_string())
+            }
+        })?;
+
+    Ok(Json(ZoneResponse {
+        success: true,
+        message: format!(
+            "DS {} recorded for zone {} key tag {}",
+            request.ds.as_str(),
+            zone_name,
+            request.key_tag
+        ),
         details: Some(output),
     }))
 }
@@ -1164,11 +1378,93 @@ pub async fn get_zone(
     }))
 }
 
+/// The built-in BIND9 policy that gracefully unsigns a zone (ADR-0001).
+pub const DNSSEC_POLICY_INSECURE: &str = "insecure";
+
+/// Sentinel policy name requesting removal of the `dnssec-policy` directive.
+pub const DNSSEC_POLICY_NONE: &str = "none";
+
+/// Applies the DNSSEC fields of a [`ModifyZoneRequest`] to a parsed zone
+/// configuration, enforcing the ADR-0001 transition rules.
+///
+/// Merge semantics: a `None` request field means "leave as is", never
+/// "remove" — verified on BIND 9.18.50, re-issuing a zone config without its
+/// `dnssec-policy` abruptly unsigns the zone at the next reconfig.
+///
+/// * a policy name enables signing or switches policies (BIND manages the
+///   rollover); `inline-signing yes` is set implicitly when the zone has no
+///   dynamic-update configuration, since BIND requires one or the other
+/// * [`DNSSEC_POLICY_INSECURE`] is the only path from signed to unsigned
+/// * [`DNSSEC_POLICY_NONE`] removes the directive, and is refused while the
+///   zone still serves DNSKEY records
+///
+/// # Arguments
+/// * `zone_config` - Parsed `showzone` configuration to mutate
+/// * `requested_policy` - `dnssecPolicy` field of the PATCH body
+/// * `requested_inline_signing` - `inlineSigning` field of the PATCH body
+/// * `zone_serves_dnskey` - Whether `rndc dnssec -status` reports a key whose
+///   DNSKEY state is still `rumoured` or `omnipresent`
+///
+/// # Returns
+/// `true` when the request changed DNSSEC configuration (the caller must run
+/// `rndc reconfig` after `rndc modzone` to activate it, per ADR-0001).
+///
+/// # Errors
+/// Returns [`ApiError::UnsafeDnssecTransition`] when the request would
+/// remove the policy from a zone that still serves DNSKEY records.
+pub fn apply_dnssec_request(
+    zone_config: &mut crate::rndc_types::ZoneConfig,
+    requested_policy: Option<&str>,
+    requested_inline_signing: Option<bool>,
+    zone_serves_dnskey: bool,
+) -> Result<bool, ApiError> {
+    let mut changed = false;
+
+    if let Some(policy) = requested_policy {
+        if policy.eq_ignore_ascii_case(DNSSEC_POLICY_NONE) {
+            if zone_serves_dnskey {
+                return Err(ApiError::UnsafeDnssecTransition(format!(
+                    "zone still serves DNSKEY records; removing dnssec-policy now would \
+                     take the zone dark for validating resolvers. Transition to the \
+                     built-in \"{}\" policy first, confirm DS withdrawal at the parent \
+                     (POST .../dnssec/checkds), and remove the policy once the zone no \
+                     longer serves DNSKEY/RRSIG records",
+                    DNSSEC_POLICY_INSECURE
+                )));
+            }
+            zone_config.dnssec_policy = None;
+        } else {
+            let zone_is_dynamic = zone_config.allow_update.is_some()
+                || zone_config.allow_update_raw.is_some()
+                || zone_config.update_policy.is_some();
+            zone_config.dnssec_policy = Some(policy.to_string());
+            // BIND requires dynamic DNS or inline-signing with dnssec-policy.
+            if requested_inline_signing.is_none()
+                && zone_config.inline_signing.is_none()
+                && !zone_is_dynamic
+            {
+                zone_config.inline_signing = Some(true);
+            }
+        }
+        changed = true;
+    }
+
+    if let Some(inline_signing) = requested_inline_signing {
+        zone_config.inline_signing = Some(inline_signing);
+        changed = true;
+    }
+
+    Ok(changed)
+}
+
 /// Modify a zone configuration
 ///
 /// This endpoint allows updating zone configuration parameters such as
 /// also-notify and allow-transfer IP addresses without recreating the zone.
-/// It uses the `rndc modzone` command to dynamically update the zone configuration.
+/// It uses the `rndc modzone` command to dynamically update the zone
+/// configuration. DNSSEC lifecycle transitions (ADR-0001) additionally run
+/// `rndc reconfig`, because modzone alone stores a `dnssec-policy` without
+/// applying it to the running zone.
 #[utoipa::path(
     patch,
     path = "/api/v1/zones/{name}",
@@ -1211,12 +1507,24 @@ pub async fn modify_zone(
     if request.also_notify.is_none()
         && request.allow_transfer.is_none()
         && request.allow_update.is_none()
+        && request.dnssec_policy.is_none()
+        && request.inline_signing.is_none()
     {
         metrics::record_zone_operation("modify", false);
         return Err(ApiError::InvalidRequest(
-            "At least one field (alsoNotify, allowTransfer, or allowUpdate) must be provided"
+            "At least one field (alsoNotify, allowTransfer, allowUpdate, dnssecPolicy, \
+             or inlineSigning) must be provided"
                 .to_string(),
         ));
+    }
+
+    // Validate the policy name before it is rendered into an rndc config
+    // literal (same guard as the create path).
+    if let Some(dnssec_policy) = &request.dnssec_policy {
+        if let Err(e) = validate_rndc_identifier("dnssecPolicy", dnssec_policy) {
+            metrics::record_zone_operation("modify", false);
+            return Err(e);
+        }
     }
 
     // Check if zone exists by checking for zone file or querying status
@@ -1331,6 +1639,34 @@ pub async fn modify_zone(
         }
     }
 
+    // DNSSEC transitions (ADR-0001). Removing the policy is only permitted
+    // once the zone no longer serves DNSKEY records, so fetch the running
+    // signing state for exactly that request.
+    let removal_requested = request
+        .dnssec_policy
+        .as_deref()
+        .is_some_and(|p| p.eq_ignore_ascii_case(DNSSEC_POLICY_NONE));
+    let zone_serves_dnskey = if removal_requested {
+        let status_output = state.rndc.dnssec_status(&zone_name).await.map_err(|e| {
+            error!("RNDC dnssec -status failed for {}: {}", zone_name, e);
+            metrics::record_zone_operation("modify", false);
+            ApiError::RndcError(e.to_string())
+        })?;
+        crate::dnssec::parse_dnssec_status(&status_output).signed
+    } else {
+        false
+    };
+
+    let dnssec_changed = apply_dnssec_request(
+        &mut zone_config,
+        request.dnssec_policy.as_deref(),
+        request.inline_signing,
+        zone_serves_dnskey,
+    )
+    .inspect_err(|_| {
+        metrics::record_zone_operation("modify", false);
+    })?;
+
     // Serialize the updated configuration back to RNDC format
     let rndc_config_block = zone_config.to_rndc_block();
 
@@ -1349,6 +1685,34 @@ pub async fn modify_zone(
             metrics::record_zone_operation("modify", false);
             ApiError::RndcError(e.to_string())
         })?;
+
+    // A stored dnssec-policy is not applied by modzone alone (verified on
+    // BIND 9.18.50, ADR-0001): reconfig activates it. If reconfig fails the
+    // config IS persisted — named applies it on its next reconfig/restart —
+    // so report that state honestly instead of a clean failure.
+    if dnssec_changed {
+        if let Err(e) = state.rndc.reconfig().await {
+            error!(
+                "RNDC reconfig failed after modzone for {}: {}",
+                zone_name, e
+            );
+            metrics::record_zone_operation("modify", true);
+            return Ok(Json(ZoneResponse {
+                success: true,
+                message: format!(
+                    "Zone {} configuration stored, but reconfig failed: the DNSSEC \
+                     change is persisted and will activate on the next successful \
+                     reconfig or server restart",
+                    zone_name
+                ),
+                details: Some(output),
+            }));
+        }
+        info!(
+            "Zone {} DNSSEC configuration activated via reconfig",
+            zone_name
+        );
+    }
 
     info!("Zone {} modified successfully", zone_name);
     metrics::record_zone_operation("modify", true);
