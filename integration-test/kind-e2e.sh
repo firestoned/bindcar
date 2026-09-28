@@ -13,7 +13,9 @@
 #   3. dig  foo.bar SOA                          — present
 #   4. POST /api/v1/zones/foo.bar/records        — add A test.foo.bar -> 1.2.3.4
 #   5. dig  test.foo.bar A                        — present
-#   6. DELETE record + zone, dig                  — absent
+#   6. DNSSEC lifecycle (ADR-0001): PATCH dnssecPolicy → signed; GET /ds;
+#      refuse naive removal (409); insecure → unsigned; remove policy
+#   7. DELETE record + zone, dig                  — absent
 # Also applies deploy/rbac.yaml + deploy/networkpolicy.yaml so the shipped
 # manifests are validated by a real API server (server-side admission).
 #
@@ -84,7 +86,7 @@ trap cleanup EXIT INT TERM
 
 check_deps() {
   local missing=()
-  for c in docker kind kubectl curl dig openssl; do
+  for c in docker kind kubectl curl dig openssl jq; do
     command -v "$c" >/dev/null 2>&1 || missing+=("$c")
   done
   [[ ${#missing[@]} -eq 0 ]] || fail "missing required tools: ${missing[*]}"
@@ -124,19 +126,19 @@ echo ""
 
 check_deps
 
-# --- [1/9] Obtain the bindcar image -----------------------------------------
+# --- [1/10] Obtain the bindcar image -----------------------------------------
 # Local dev builds Dockerfile.local; CI passes SKIP_IMAGE_BUILD=true + a
 # BINDCAR_IMAGE that an earlier pipeline stage already built and pushed, so the
 # e2e reuses the exact artifact under test instead of rebuilding.
 if [[ "${SKIP_IMAGE_BUILD:-false}" != "true" ]]; then
-  log "[1/9] building bindcar Linux image ($BINDCAR_IMAGE) via Dockerfile.chef"
+  log "[1/10] building bindcar Linux image ($BINDCAR_IMAGE) via Dockerfile.chef"
   # Compile inside the builder image so the binary is a Linux ELF for the build
   # platform. Dockerfile.local just COPYs the HOST binary, which on macOS is a
   # Darwin Mach-O executable -> 'exec format error' in the Linux kind node.
   # Dockerfile.chef builds a statically-linked musl binary for the node arch.
   docker build -f docker/Dockerfile.chef -t "$BINDCAR_IMAGE" .
 else
-  log "[1/9] SKIP_IMAGE_BUILD=true — reusing pre-built image $BINDCAR_IMAGE"
+  log "[1/10] SKIP_IMAGE_BUILD=true — reusing pre-built image $BINDCAR_IMAGE"
 fi
 # Ensure the image is in the local docker daemon (pull a registry image built by
 # a prior CI stage) so `kind load docker-image` can find it.
@@ -145,11 +147,11 @@ if ! docker image inspect "$BINDCAR_IMAGE" >/dev/null 2>&1; then
   docker pull "$BINDCAR_IMAGE"
 fi
 
-# --- [2/9] Create kind cluster ----------------------------------------------
+# --- [2/10] Create kind cluster ----------------------------------------------
 if kind get clusters 2>/dev/null | grep -qx "$KIND_CLUSTER"; then
-  log "[2/9] reusing existing kind cluster $KIND_CLUSTER"
+  log "[2/10] reusing existing kind cluster $KIND_CLUSTER"
 else
-  log "[2/9] creating kind cluster $KIND_CLUSTER"
+  log "[2/10] creating kind cluster $KIND_CLUSTER"
   kind create cluster --name "$KIND_CLUSTER" --wait 300s
 fi
 kubectl cluster-info --context "kind-${KIND_CLUSTER}" >/dev/null || fail "kind cluster not reachable"
@@ -162,8 +164,8 @@ kubectl wait --for=condition=Ready nodes --all --timeout=300s || fail "kind node
 log "loading image into kind"
 kind load docker-image "$BINDCAR_IMAGE" --name "$KIND_CLUSTER"
 
-# --- [3/9] Namespace + secrets ----------------------------------------------
-log "[3/9] creating namespace and credentials"
+# --- [3/10] Namespace + secrets ----------------------------------------------
+log "[3/10] creating namespace and credentials"
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f -
 
 # Use an explicit ServiceAccount rather than the namespace's 'default' SA. The
@@ -184,6 +186,7 @@ kubectl -n "$NS" create secret generic bind9-config \
   --from-literal=rndc.key="key \"${RNDC_KEY_NAME}\" { algorithm ${RNDC_ALGORITHM}; secret \"${RNDC_SECRET}\"; };" \
   --from-literal=named.conf="include \"/etc/bind/rndc.key\";
 controls { inet 127.0.0.1 port 953 allow { 127.0.0.1; } keys { \"${RNDC_KEY_NAME}\"; }; };
+dnssec-policy \"e2e-policy\" { keys { csk lifetime unlimited algorithm ecdsap256sha256; }; };
 include \"/etc/bind/named.conf.options\";
 include \"/etc/bind/named.conf.local\";" \
   --from-literal=named.conf.options="options {
@@ -196,6 +199,7 @@ include \"/etc/bind/named.conf.local\";" \
     allow-new-zones yes;
     recursion no;
     dnssec-validation no;
+    key-directory \"/var/cache/bind/keys\";
 };" \
   --from-literal=named.conf.local="// zones managed dynamically by bindcar" \
   | kubectl apply -f -
@@ -203,8 +207,8 @@ include \"/etc/bind/named.conf.local\";" \
 kubectl -n "$NS" create secret generic bindcar-api-token \
   --dry-run=client -o yaml --from-literal=token="$API_TOKEN" | kubectl apply -f -
 
-# --- [4/9] Deploy the bind9 + bindcar pod -----------------------------------
-log "[4/9] deploying bind9 + bindcar pod"
+# --- [4/10] Deploy the bind9 + bindcar pod -----------------------------------
+log "[4/10] deploying bind9 + bindcar pod"
 # On a reused cluster the pod would be "unchanged" and keep running the OLD
 # image (same tag) and the OLD secret values injected at its creation. Delete it
 # first so BOTH containers are recreated with the freshly-loaded image and the
@@ -233,7 +237,7 @@ spec:
   initContainers:
     - name: chmod-zone-dir
       image: busybox:1.36
-      command: ["sh", "-c", "chmod 0777 /var/cache/bind"]
+      command: ["sh", "-c", "mkdir -p /var/cache/bind/keys && chmod 0777 /var/cache/bind /var/cache/bind/keys"]
       volumeMounts:
         - { name: zone-dir, mountPath: /var/cache/bind }
   containers:
@@ -272,6 +276,7 @@ spec:
         - name: NSUPDATE_SECRET
           valueFrom: { secretKeyRef: { name: bind9-config, key: secret } }
         - { name: BIND_ZONE_DIR,     value: "/var/cache/bind" }
+        - { name: BIND_KEY_DIR,      value: "/var/cache/bind/keys" }
         - { name: API_PORT,          value: "${API_PORT}" }
         # Real shared-secret auth: bindcar binds 0.0.0.0, so the non-loopback
         # startup guard requires this (Mode A). The test sends it as Bearer.
@@ -286,8 +291,8 @@ spec:
         periodSeconds: 2
 YAML
 
-# --- [5/9] Wait for readiness -----------------------------------------------
-log "[5/9] waiting for pod Ready (fail-fast on container error)"
+# --- [5/10] Wait for readiness -----------------------------------------------
+log "[5/10] waiting for pod Ready (fail-fast on container error)"
 deadline=$((SECONDS + 240))
 while :; do
   ready=$(kubectl -n "$NS" get pod "$POD" \
@@ -313,8 +318,8 @@ while :; do
 done
 pass "pod is Ready"
 
-# --- [6/9] Validate shipped manifests server-side ---------------------------
-log "[6/9] server-side validation of deploy/ manifests"
+# --- [6/10] Validate shipped manifests server-side ---------------------------
+log "[6/10] server-side validation of deploy/ manifests"
 # rbac.yaml / networkpolicy.yaml are namespaced to bindy-system; create it so the
 # server-side dry-run can resolve those namespaced references.
 kubectl create namespace bindy-system --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -325,8 +330,8 @@ kubectl apply --dry-run=server -f deploy/networkpolicy.yaml >/dev/null \
   || fail "deploy/networkpolicy.yaml failed server-side validation"
 pass "deploy/networkpolicy.yaml admits (server dry-run)"
 
-# --- [7/9] Port-forward ------------------------------------------------------
-log "[7/9] port-forwarding API :${API_PORT} and DNS :${DNS_PORT}"
+# --- [7/10] Port-forward ------------------------------------------------------
+log "[7/10] port-forwarding API :${API_PORT} and DNS :${DNS_PORT}"
 kubectl -n "$NS" port-forward "pod/${POD}" "${API_PORT}:${API_PORT}" >/dev/null 2>&1 &
 PF_API_PID=$!
 kubectl -n "$NS" port-forward "pod/${POD}" "${DNS_PORT}:${DNS_PORT}" >/dev/null 2>&1 &
@@ -344,8 +349,8 @@ noauth=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${API_PORT}/ap
 [[ "$noauth" == "401" ]] || fail "unauthenticated GET /api/v1/zones: expected 401, got ${noauth}"
 pass "unauthenticated request rejected: HTTP 401"
 
-# --- [8/9] Zone + record lifecycle ------------------------------------------
-log "[8/9] zone + record lifecycle"
+# --- [8/10] Zone + record lifecycle ------------------------------------------
+log "[8/10] zone + record lifecycle"
 curl_assert "POST /api/v1/zones (foo.bar)" "201" \
   -X POST "http://127.0.0.1:${API_PORT}/api/v1/zones" \
   -H "Content-Type: application/json" \
@@ -376,8 +381,83 @@ curl_assert "POST /records (CAA foo.bar)" "201" \
 sleep 1
 dig_assert "foo.bar CAA present" "foo.bar" "CAA" '0 issue "letsencrypt.org"'
 
-# --- [9/9] Teardown of the zone ---------------------------------------------
-log "[9/9] delete record + zone, verify removal"
+# --- [9/10] DNSSEC lifecycle (ADR-0001) ---------------------------------------
+# Enable signing on the LIVE zone through the API alone, observe it through the
+# API, read the DS, refuse the unsafe transition, then gracefully unsign.
+log "[9/10] DNSSEC lifecycle on the live zone"
+
+api_get() { curl -s -H "Authorization: Bearer ${API_TOKEN}" "http://127.0.0.1:${API_PORT}$1"; }
+
+curl_assert "PATCH /zones/foo.bar (enable dnssec)" "200" \
+  -X PATCH "http://127.0.0.1:${API_PORT}/api/v1/zones/foo.bar" \
+  -H "Content-Type: application/json" \
+  -d '{"dnssecPolicy":"e2e-policy"}'
+
+# The PATCH runs modzone + reconfig (modzone alone stores but does not apply
+# the policy — BIND 9.18, ADR-0001). Key generation is asynchronous: poll.
+signed=""
+for _ in $(seq 1 30); do
+  signed=$(api_get "/api/v1/zones/foo.bar/status" | jq -r '.dnssec.signed // false')
+  [[ "$signed" == "true" ]] && break
+  sleep 2
+done
+[[ "$signed" == "true" ]] || fail "zone did not report dnssec.signed=true within 60s"
+pass "GET /status reports dnssec.signed=true"
+
+dig_assert "foo.bar DNSKEY present" "foo.bar" "DNSKEY" "*"
+rrsig=$(dig @127.0.0.1 -p "$DNS_PORT" +tcp +dnssec foo.bar SOA 2>/dev/null | grep -c RRSIG || true)
+[[ "$rrsig" -ge 1 ]] || fail "foo.bar SOA: expected RRSIG records after signing"
+pass "foo.bar answers are signed (RRSIG present)"
+
+ds_json=$(api_get "/api/v1/zones/foo.bar/ds")
+ds_count=$(echo "$ds_json" | jq -r '.dsRecords | length')
+[[ "$ds_count" -ge 1 ]] || fail "GET /ds: expected >=1 DS record, got: ${ds_json}"
+key_tag=$(echo "$ds_json" | jq -r '.dsRecords[0].keyTag')
+echo "$ds_json" | jq -e '.dsRecords[0].digestType == 2 and (.dsRecords[0].digest | length) == 64' >/dev/null \
+  || fail "GET /ds: DS record shape unexpected: ${ds_json}"
+pass "GET /ds returns SHA-256 DS for key tag ${key_tag}"
+
+# The naive unsigning request must be REFUSED while DNSKEY is still served.
+curl_assert "PATCH dnssecPolicy=none refused while signed" "409" \
+  -X PATCH "http://127.0.0.1:${API_PORT}/api/v1/zones/foo.bar" \
+  -H "Content-Type: application/json" \
+  -d '{"dnssecPolicy":"none"}'
+
+# Graceful unsigning: the built-in insecure policy. The DS was never published
+# at a parent (state hidden), so named unsigns without waiting on withdrawal.
+curl_assert "PATCH dnssecPolicy=insecure" "200" \
+  -X PATCH "http://127.0.0.1:${API_PORT}/api/v1/zones/foo.bar" \
+  -H "Content-Type: application/json" \
+  -d '{"dnssecPolicy":"insecure"}'
+
+# checkds is accepted even mid-transition (tells named the DS state at the
+# parent; harmless here since no DS was ever published).
+curl_assert "POST /dnssec/checkds (withdrawn)" "200" \
+  -X POST "http://127.0.0.1:${API_PORT}/api/v1/zones/foo.bar/dnssec/checkds" \
+  -H "Content-Type: application/json" \
+  -d "{\"keyTag\":${key_tag},\"ds\":\"withdrawn\"}"
+
+signed="true"
+for _ in $(seq 1 30); do
+  signed=$(api_get "/api/v1/zones/foo.bar/status" | jq -r '.dnssec.signed // false')
+  [[ "$signed" == "false" ]] && break
+  sleep 2
+done
+[[ "$signed" == "false" ]] || fail "zone did not unsign within 60s of the insecure transition"
+pass "GET /status reports dnssec.signed=false after insecure transition"
+dig_assert "foo.bar DNSKEY absent" "foo.bar" "DNSKEY" ""
+
+# Only now is removing the policy permitted.
+curl_assert "PATCH dnssecPolicy=none accepted once unsigned" "200" \
+  -X PATCH "http://127.0.0.1:${API_PORT}/api/v1/zones/foo.bar" \
+  -H "Content-Type: application/json" \
+  -d '{"dnssecPolicy":"none"}'
+status_policy=$(api_get "/api/v1/zones/foo.bar/status" | jq -r '.dnssec.policy // "none"')
+[[ "$status_policy" == "none" ]] || fail "expected no dnssec-policy after removal, got '${status_policy}'"
+pass "dnssec-policy removed from the zone"
+
+# --- [10/10] Teardown of the zone ---------------------------------------------
+log "[10/10] delete record + zone, verify removal"
 curl_assert "DELETE /records (A)" "200" \
   -X DELETE "http://127.0.0.1:${API_PORT}/api/v1/zones/foo.bar/records" \
   -H "Content-Type: application/json" \

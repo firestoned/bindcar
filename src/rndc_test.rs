@@ -357,3 +357,52 @@ fn test_parse_rndc_conf_file_not_found() {
 // Note: Integration tests that actually execute rndc commands require
 // a running BIND9 instance with rndc configured. These should be in
 // integration tests, not unit tests.
+
+// ---------------------------------------------------------------------------
+// DNSSEC lifecycle commands (ADR-0001, roadmap 07)
+// ---------------------------------------------------------------------------
+
+fn test_executor() -> RndcExecutor {
+    RndcExecutor::new(
+        "127.0.0.1:953".to_string(),
+        "sha256".to_string(),
+        "dGVzdC1zZWNyZXQ=".to_string(),
+    )
+    .expect("test executor must construct")
+}
+
+#[tokio::test]
+async fn test_dnssec_status_rejects_invalid_zone_name() {
+    // The A9 sink-side guard must fire before any network I/O.
+    let executor = test_executor();
+    for bad in ["zone;reload", "zone name", "../etc"] {
+        assert!(
+            executor.dnssec_status(bad).await.is_err(),
+            "expected {bad:?} to be rejected"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_dnssec_checkds_rejects_invalid_zone_name() {
+    let executor = test_executor();
+    let result = executor
+        .dnssec_checkds("zone;reload", 12345, crate::dnssec::CheckdsState::Withdrawn)
+        .await;
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_checkds_state_as_str() {
+    assert_eq!(crate::dnssec::CheckdsState::Published.as_str(), "published");
+    assert_eq!(crate::dnssec::CheckdsState::Withdrawn.as_str(), "withdrawn");
+}
+
+#[test]
+fn test_checkds_state_deserializes_lowercase() {
+    let published: crate::dnssec::CheckdsState = serde_json::from_str("\"published\"").unwrap();
+    assert_eq!(published, crate::dnssec::CheckdsState::Published);
+    let withdrawn: crate::dnssec::CheckdsState = serde_json::from_str("\"withdrawn\"").unwrap();
+    assert_eq!(withdrawn, crate::dnssec::CheckdsState::Withdrawn);
+    assert!(serde_json::from_str::<crate::dnssec::CheckdsState>("\"delete\"").is_err());
+}

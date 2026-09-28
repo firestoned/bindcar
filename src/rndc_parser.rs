@@ -469,10 +469,23 @@ fn parse_zone_config_internal(input: &str) -> IResult<&str, ZoneConfig> {
             ZoneStatement::RequestIxfr(v) => config.request_ixfr = Some(v),
             ZoneStatement::RequestExpire(v) => config.request_expire = Some(v),
 
-            // Catch-all
-            ZoneStatement::Unknown(key, value) => {
-                config.raw_options.insert(key, value);
-            }
+            // Catch-all — with promotions for directives that must be typed.
+            // `dnssec-policy` and `inline-signing` are first-class fields
+            // (ADR-0001): leaving them in raw_options would emit the
+            // directive twice whenever the modify path also sets the typed
+            // field, and the policy must survive round-trips structurally,
+            // not by catch-all luck.
+            ZoneStatement::Unknown(key, value) => match key.as_str() {
+                "dnssec-policy" => {
+                    config.dnssec_policy = Some(value.trim().trim_matches('"').to_string());
+                }
+                "inline-signing" => {
+                    config.inline_signing = Some(value.trim() == "yes");
+                }
+                _ => {
+                    config.raw_options.insert(key, value);
+                }
+            },
         }
     }
 

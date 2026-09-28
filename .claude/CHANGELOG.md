@@ -1,5 +1,193 @@
 # Changelog
 
+## [2026-09-28 12:00] - Docs CI: commit the lockfile, drop unused plugins carrying the ProperDocs mkdocs hijack
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `docs/.gitignore`: stopped ignoring `poetry.lock` — it was never committed,
+  so every CI docs build fresh-resolved against PyPI ("Resolving
+  dependencies… Writing lock file" in green runs): non-reproducible, and the
+  cause of the "Package mkdocs-macros-plugin (1.5.0) not found" failures on
+  PR #132 (a transient index inconsistency any unlocked run could hit).
+  bindy and banlieue both commit theirs.
+- `docs/pyproject.toml`: removed `mkdocs-minify-plugin`, `mkdocs-redirects`
+  and `mkdocs-macros-plugin` — none are enabled in `mkdocs.yml`. Security
+  driver: `mkdocs-redirects` 1.2.3 (2026-03) was released by the
+  "ProperDocs" mkdocs fork after taking over the PyPI project; it
+  hard-depends on `properdocs`, which hijacks ALL `mkdocs.*` imports via a
+  `sys.meta_path` hook and overwrites `sys.modules['mkdocs']`. Unlocked CI
+  builds have been installing it since ~March 2026. The visible code is
+  fork-advocacy (import aliasing + a nag banner), not credential theft, but
+  it is unvetted third-party code running in the pages-deploy job. A comment
+  in pyproject forbids reintroducing redirects at `^1.2.1`.
+- `docs/poetry.lock` (new, committed): resolved with Poetry 2.5.1 under
+  Python 3.14; 33 packages, verified free of properdocs/redirects/macros/
+  minify; `make docs` green from a pristine env.
+- `.github/workflows/docs.yaml`: Poetry pinned to 2.5.1 (installer default
+  was "latest"), Python 3.11 → 3.14.
+
+### Why
+The Documentation workflow failed deterministically on PR #132; the
+investigation found both the reproducibility gap and the supply-chain
+exposure. **Follow-up for banlieue: its committed docs lock DOES pin
+mkdocs-redirects 1.2.3 + properdocs 1.6.7 and needs the same treatment;
+bindy is clean (1.2.2).**
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [x] Config change only (docs build + CI; site output unchanged)
+- [ ] Documentation only
+
+## [2026-09-28 10:30] - Split the e2e workflow into per-suite matrix jobs (bindy/banlieue shape)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/workflows/e2e.yaml`: restructured from one serial `make ci-e2e`
+  job into the bindy/banlieue pipeline shape — a `build` job packages the
+  Dockerfile.chef image and its musl-static binary once (`make e2e-image`,
+  two artifacts), a `fail-fast: false` matrix runs one job per suite
+  (`e2e-tls`, `e2e-drone`, `e2e-kind` — the TLS suite is now a first-class
+  CI job rather than a step inside the monolith), and an `e2e` aggregator
+  job is the single required-status check. Per-suite failure diagnostics
+  (docker logs for drone, cluster dump for kind) and kind-cluster cleanup.
+  PR paths-filter extended to `src/tls.rs`, `src/dnssec.rs`,
+  `src/nsupdate.rs` and the applied `deploy/` manifests.
+- `Makefile`: new `e2e-image`, `e2e-image-load`, `e2e-tls`, `e2e-drone`,
+  `e2e-kind` targets (suites consume the prebuilt `dist/` artifacts via
+  `BINDCAR_BIN`/`BINDCAR_IMAGE`); `ci-e2e` kept as the serial local variant.
+- `.github/workflows/dependabot-auto-merge.yaml`: comment text now names all
+  three suites (semantics unchanged — it consumes the called workflow's
+  overall result).
+- `.gitignore`: `dist/` (the e2e build hand-off directory).
+- `docs/src/advanced/tls.md`: notes the TLS script's new standalone CI job.
+
+### Why
+bindcar's e2e gate was the pre-split single-job shape bindy explicitly moved
+away from: one red X with no indication of which suite broke, serial
+wall-clock, and a Rust build repeated on every run. The split also upgrades
+the TLS and drone suites to test the release musl binary extracted from the
+shipped image instead of a host debug build.
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [x] Config change only (CI workflows + Makefile; actionlint clean)
+- [ ] Documentation only
+
+## [2026-09-27 20:30] - DNSSEC lifecycle on live zones (roadmap 07, ADR-0001 implementation)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `src/dnssec.rs` (new) + `src/dnssec_test.rs` (new): `rndc dnssec -status`
+  parser (`DnssecStatus`/`DnssecKeyStatus`: policy, signed, per-key role,
+  facet states, since-timestamps, next rollover — BIND ctime timestamps
+  normalized to naive ISO 8601) and in-process DNSKEY→DS computation
+  (RFC 4034 appendix B key tag, RFC 4509 SHA-256 digest; local strict
+  base64; pinned by the RFC 4509 test vector, 60485). `CheckdsState` enum.
+- `src/rndc.rs`: new `reconfig()`, `dnssec_status()`, `dnssec_checkds()`
+  executor methods.
+- `src/rndc_types.rs` + `src/rndc_parser.rs`: `dnssec_policy` promoted to a
+  typed, round-trip-safe `ZoneConfig` field (with `inline-signing`) instead
+  of riding in `raw_options`.
+- `src/zones_types.rs`: `dnssecPolicy`/`inlineSigning` on
+  `ModifyZoneRequest` (merge semantics); new `ZoneStatusResponse`
+  (adds typed `dnssec` block), `DsSetResponse`/`DsRecordView`,
+  `CheckdsRequest`.
+- `src/zones.rs`: `apply_dnssec_request` transition rules (ADR-0001):
+  enable/switch passes through with implicit `inline-signing yes` on
+  non-dynamic zones; `"insecure"` is the only signed→unsigned path;
+  `"none"` refused (409 `UnsafeDnssecTransition`) while DNSKEY is served.
+  `modify_zone` runs `rndc reconfig` after `modzone` for DNSSEC changes
+  (modzone alone stores but does not apply — BIND 9.18.50, ADR-0001) and
+  reports a failed reconfig as stored-but-not-active. New handlers
+  `get_zone_ds` (`GET /api/v1/zones/{name}/ds`) and `checkds_zone`
+  (`POST /api/v1/zones/{name}/dnssec/checkds`).
+- `src/types.rs`: `AppState.key_dir` (`BIND_KEY_DIR`, canonicalized at
+  startup like the zone dir); `ApiError::UnsafeDnssecTransition` (409),
+  `DsNotAvailable` (404), `NotConfigured` (501).
+- `src/main.rs`: `BIND_KEY_DIR` resolution (hard startup error when set but
+  unusable), new routes, OpenAPI registration.
+- `integration-test/kind-e2e.sh`: new stage 9 — full DNSSEC lifecycle on the
+  live e2e zone (enable → signed → DS shape → 409 refusal → insecure →
+  checkds → unsigned → removal); named.conf gains an `e2e-policy` and
+  key-directory; requires `jq`.
+- `docs/src/advanced/dnssec.md`: delete-and-recreate procedure replaced by
+  the PATCH lifecycle; DS/checkds/status API documented.
+- `.github/community/07-dnssec-lifecycle.md`, `ROADMAPS.md`,
+  `.github/community/01-dnssec-feature-summary.md`: statuses updated.
+
+### Why
+Roadmap 07 / ADR-0001 (Accepted): signing an existing zone previously meant
+delete-and-recreate, the DS was only obtainable on the BIND host by hand,
+and nothing exposed signing state or key rollover timing (which bindy
+ADR-0006 depends on).
+
+### Verification
+`make regression` green (fmt-check, clippy and the full test suite for both
+feature builds, deploy-validate). Full lifecycle validated live against BIND 9.18.50
+(2026-09-27): PATCH-enable signed the zone with no query loss; `GET /ds`
+digest byte-identical to `dnssec-dsfromkey -2`; naive removal refused 409;
+insecure + checkds unsigned the zone; removal then accepted. No new crate
+dependencies (local base64 decoder documented in `src/dnssec.rs`).
+
+### Impact
+- [ ] Breaking change (zone-status response gains an optional `dnssec`
+      field; existing fields unchanged)
+- [ ] Requires cluster rollout (new optional `BIND_KEY_DIR` env + RO
+      key-directory mount to enable the DS endpoint)
+- [ ] Config change only
+- [ ] Documentation only
+
+## [2026-09-27 18:50] - ADR-0001: DNSSEC lifecycle transitions on live zones (roadmap 07)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `docs/adr/0001-dnssec-lifecycle-transitions.md` (new, status Proposed):
+  answers roadmap 07's three design questions against the BIND 9.18 ARM /
+  DNSSEC guide **and** a live BIND 9.18.50 instance (podman, zone managed via
+  `rndc addzone` exactly as bindcar does):
+  1. **Enable** = `rndc modzone` (adds `dnssec-policy` + `inline-signing yes`)
+     **plus `rndc reconfig`** — verified that modzone alone persists the
+     policy to the NZD without applying it, and that per-zone `reload` and
+     `rndc sign` do not activate it either. No freeze/thaw. No query loss
+     observed through any transition. `RndcClient` gains `reconfig()`.
+  2. **Disable** is a guarded two-phase transition through the built-in
+     `dnssec-policy "insecure"` (the officially documented reversion path);
+     PATCH gets merge semantics (absent field = no change) and a request that
+     would drop the directive from a still-signed zone is refused with a
+     specific error — verified live that omitting the directive abruptly
+     unsigns the zone (DNSKEY/RRSIG gone immediately) at the next reconfig.
+     DS-withdrawal confirmation exposed as
+     `POST /api/v1/zones/{name}/dnssec/checkds`.
+  3. **DS retrieval** is a sub-resource (`GET /api/v1/zones/{name}/ds`),
+     computed in-process from the public `K*.key` files (read-only
+     key-directory mount); the zone-status DNSSEC block (incl. the per-key
+     rollover timing bindy ADR-0006 needs) is parsed from
+     `rndc dnssec -status`, not from `.state` files.
+- `.github/community/07-dnssec-lifecycle.md`: status ⛔ → 🔶 (ADR drafted),
+  ADR task checked off with a pointer; remaining tasks stay blocked until the
+  ADR is Accepted.
+- `ROADMAPS.md`: row 07 updated to match.
+
+### Why
+Roadmap 07 requires the ADR before any code, and requires its central
+question (is enabling DNSSEC via `rndc modzone` safe on a live zone?)
+answered against documentation and a live instance rather than assumed. The
+live run surfaced two facts the design must encode: modzone stores but does
+not apply a dnssec-policy, and omitting the directive unsigns a zone with no
+grace period.
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [ ] Config change only
+- [x] Documentation only
+
 ## [2026-09-27 16:05] - Roadmap 07: record the key-state/rollover-timing gap and its bindy consumer
 
 **Author:** Erick Bourgeois

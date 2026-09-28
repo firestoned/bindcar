@@ -271,6 +271,68 @@ impl RndcExecutor {
         let command = format!("showzone {}", zone_name);
         self.execute(&command).await
     }
+
+    /// Reload the server configuration (`rndc reconfig`).
+    ///
+    /// Loads new or changed configuration without re-transferring or
+    /// bouncing unaffected zones. Required after [`Self::modzone`] stores a
+    /// `dnssec-policy`: verified on BIND 9.18.50 (ADR-0001), modzone
+    /// persists the policy to the NZD without applying it to the running
+    /// zone — only a reconfig (or full reload) activates it.
+    ///
+    /// # Errors
+    /// Returns an error if the RNDC command fails.
+    pub async fn reconfig(&self) -> Result<String> {
+        self.execute("reconfig").await
+    }
+
+    /// Get a zone's DNSSEC signing state (`rndc dnssec -status <zone>`).
+    ///
+    /// The raw output is parsed with [`crate::dnssec::parse_dnssec_status`].
+    /// A zone without a policy returns the literal text
+    /// `Zone does not have dnssec-policy` rather than an error.
+    ///
+    /// # Arguments
+    /// * `zone_name` - Name of the zone (e.g., "example.com")
+    ///
+    /// # Errors
+    /// Returns an error for an invalid zone name or a failed RNDC command.
+    pub async fn dnssec_status(&self, zone_name: &str) -> Result<String> {
+        validate_rndc_zone_name(zone_name)?;
+        let command = format!("dnssec -status {}", zone_name);
+        self.execute(&command).await
+    }
+
+    /// Report a DS state change at the parent zone to named
+    /// (`rndc dnssec -checkds -key <tag> <published|withdrawn> <zone>`).
+    ///
+    /// Used when no parental agents are configured: named will not advance
+    /// a key's DS-dependent state transitions (including the graceful
+    /// unsigning managed by the built-in `insecure` policy) until it is told
+    /// the DS was published or withdrawn at the parent.
+    ///
+    /// # Arguments
+    /// * `zone_name` - Name of the zone (e.g., "example.com")
+    /// * `key_tag` - Key tag of the DNSKEY whose DS changed at the parent
+    /// * `state` - Whether the DS is now published or withdrawn
+    ///
+    /// # Errors
+    /// Returns an error for an invalid zone name or a failed RNDC command.
+    pub async fn dnssec_checkds(
+        &self,
+        zone_name: &str,
+        key_tag: u16,
+        state: crate::dnssec::CheckdsState,
+    ) -> Result<String> {
+        validate_rndc_zone_name(zone_name)?;
+        let command = format!(
+            "dnssec -checkds -key {} {} {}",
+            key_tag,
+            state.as_str(),
+            zone_name
+        );
+        self.execute(&command).await
+    }
 }
 
 impl Clone for RndcExecutor {

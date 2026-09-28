@@ -33,6 +33,7 @@ fn test_app_state_clone() {
         rndc: rndc.clone(),
         nsupdate: nsupdate.clone(),
         zone_dir: "/test/dir".to_string(),
+        key_dir: None,
     };
 
     let cloned = state.clone();

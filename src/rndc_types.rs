@@ -307,6 +307,11 @@ pub struct ZoneConfig {
     pub ixfr_from_differences: Option<bool>,
 
     // DNSSEC options
+    /// `dnssec-policy` name. Typed (not a `raw_options` entry) per ADR-0001:
+    /// the showzone → modzone round-trip must never drop it by accident —
+    /// verified on BIND 9.18.50, re-issuing a zone config without the
+    /// directive abruptly unsigns the zone at the next reconfig.
+    pub dnssec_policy: Option<String>,
     pub inline_signing: Option<bool>,
     pub auto_dnssec: Option<AutoDnssecMode>,
     pub key_directory: Option<String>,
@@ -370,6 +375,7 @@ impl ZoneConfig {
             update_policy: None,
             journal: None,
             ixfr_from_differences: None,
+            dnssec_policy: None,
             inline_signing: None,
             auto_dnssec: None,
             key_directory: None,
@@ -550,6 +556,9 @@ impl ZoneConfig {
         }
 
         // DNSSEC options
+        if let Some(ref policy) = self.dnssec_policy {
+            parts.push(format!(r#"dnssec-policy "{}""#, policy));
+        }
         if let Some(val) = self.inline_signing {
             parts.push(format!("inline-signing {}", if val { "yes" } else { "no" }));
         }

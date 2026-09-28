@@ -313,7 +313,9 @@ make tls-transport-test
 
 It asserts a real TLS handshake, that plaintext is refused on a TLS port, that
 mTLS rejects both a missing and an untrusted client certificate, and that every
-misconfiguration above exits non-zero. It is also part of `make ci-e2e`.
+misconfiguration above exits non-zero. In CI it runs as its own `e2e-tls`
+suite job in the e2e workflow matrix; locally it is also part of the serial
+`make ci-e2e` gate.
 
 ## See also
 

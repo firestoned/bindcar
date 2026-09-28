@@ -17,11 +17,14 @@ python = "^3.10"
 mkdocs = "^1.5.3"
 mkdocs-material = "^9.5.0"
 
-# MkDocs plugins
+# MkDocs plugins — ONLY plugins actually enabled in mkdocs.yml belong here.
+# 2026-09-28: mkdocs-minify-plugin, mkdocs-redirects and mkdocs-macros-plugin
+# were removed as unused. mkdocs-redirects in particular must NOT return at
+# ^1.2.1: its 1.2.3 release (2026-03) was taken over by the "ProperDocs"
+# mkdocs fork and hard-depends on `properdocs`, which hijacks all mkdocs.*
+# imports via a sys.meta_path hook. If redirects are ever needed, pin exactly
+# 1.2.2 and audit anything newer first.
 mkdocs-git-revision-date-localized-plugin = "^1.2.4"
-mkdocs-minify-plugin = "^0.8.0"
-mkdocs-redirects = "^1.2.1"
-mkdocs-macros-plugin = "^1.0.5"
 
 # Markdown extensions
 pymdown-extensions = "^11.0.1"

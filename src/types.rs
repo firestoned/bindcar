@@ -23,6 +23,10 @@ pub struct AppState {
     pub nsupdate: Arc<NsupdateExecutor>,
     /// Zone file directory
     pub zone_dir: String,
+    /// DNSSEC key directory (`BIND_KEY_DIR`), canonicalized at startup.
+    /// `None` when not configured; only the DS endpoint requires it
+    /// (ADR-0001) — everything else works without it.
+    pub key_dir: Option<String>,
 }
 
 /// Error response
@@ -61,6 +65,24 @@ pub enum ApiError {
 
     #[error("Invalid record: {0}")]
     InvalidRecord(String),
+
+    /// A DNSSEC transition that would take the zone dark for validating
+    /// resolvers (ADR-0001), e.g. removing `dnssec-policy` while DNSKEY
+    /// records are still served. 409: the request conflicts with the zone's
+    /// current signing state, not with its syntax.
+    #[error("Unsafe DNSSEC transition: {0}")]
+    UnsafeDnssecTransition(String),
+
+    /// The requested DNSSEC material does not exist for this zone (e.g. DS
+    /// records of an unsigned zone). 404: the sub-resource is absent.
+    #[error("DNSSEC material not available: {0}")]
+    DsNotAvailable(String),
+
+    /// The deployment lacks a prerequisite for this endpoint (e.g. the DS
+    /// endpoint without a `BIND_KEY_DIR` mount, ADR-0001). 501: the server
+    /// cannot fulfil the request until it is reconfigured.
+    #[error("Not configured on this server: {0}")]
+    NotConfigured(String),
 }
 
 /// Generic, non-revealing message returned to clients for any 5xx error.
@@ -84,6 +106,9 @@ impl IntoResponse for ApiError {
             ApiError::ZoneAlreadyExists(_) => (StatusCode::CONFLICT, self.to_string()),
             ApiError::DynamicUpdatesNotEnabled(_) => (StatusCode::BAD_REQUEST, self.to_string()),
             ApiError::InvalidRecord(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            ApiError::UnsafeDnssecTransition(_) => (StatusCode::CONFLICT, self.to_string()),
+            ApiError::DsNotAvailable(_) => (StatusCode::NOT_FOUND, self.to_string()),
+            ApiError::NotConfigured(_) => (StatusCode::NOT_IMPLEMENTED, self.to_string()),
             ApiError::ZoneFileError(_)
             | ApiError::RndcError(_)
             | ApiError::InternalError(_)

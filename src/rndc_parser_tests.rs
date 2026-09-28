@@ -940,4 +940,50 @@ mod tests {
         assert!(serialized.contains("option1"));
         assert!(serialized.contains("option5"));
     }
+
+    // ========== DNSSEC policy (ADR-0001, roadmap 07) ==========
+
+    #[test]
+    fn test_parse_showzone_promotes_dnssec_policy_to_typed_field() {
+        let output = r#"zone "live.test" { type master; file "/bindtest/zones/live.test.zone"; inline-signing yes; dnssec-policy "test-policy"; };"#;
+        let config = parse_showzone(output).unwrap();
+        assert_eq!(config.dnssec_policy.as_deref(), Some("test-policy"));
+        assert_eq!(config.inline_signing, Some(true));
+        // Promoted fields must NOT also sit in raw_options, or
+        // to_rndc_block would emit the directive twice.
+        assert!(!config.raw_options.contains_key("dnssec-policy"));
+        assert!(!config.raw_options.contains_key("inline-signing"));
+    }
+
+    #[test]
+    fn test_parse_showzone_inline_signing_no() {
+        let output = r#"zone "z.test" { type master; file "/z"; inline-signing no; };"#;
+        let config = parse_showzone(output).unwrap();
+        assert_eq!(config.inline_signing, Some(false));
+    }
+
+    #[test]
+    fn test_dnssec_policy_round_trip() {
+        let output = r#"zone "live.test" { type master; file "/bindtest/zones/live.test.zone"; inline-signing yes; dnssec-policy "test-policy"; };"#;
+        let config = parse_showzone(output).unwrap();
+        let block = config.to_rndc_block();
+        assert_eq!(block.matches("dnssec-policy").count(), 1);
+        assert!(block.contains(r#"dnssec-policy "test-policy""#));
+        assert_eq!(block.matches("inline-signing").count(), 1);
+        assert!(block.contains("inline-signing yes"));
+
+        // Re-parsing the emitted block must preserve the policy (the
+        // round-trip a PATCH performs: showzone -> parse -> to_rndc_block).
+        let reparsed = parse_showzone(&format!(r#"zone "live.test" {}"#, block)).unwrap();
+        assert_eq!(reparsed.dnssec_policy.as_deref(), Some("test-policy"));
+        assert_eq!(reparsed.inline_signing, Some(true));
+    }
+
+    #[test]
+    fn test_zone_without_dnssec_policy_has_none() {
+        let output = r#"zone "plain.test" { type master; file "/p"; };"#;
+        let config = parse_showzone(output).unwrap();
+        assert_eq!(config.dnssec_policy, None);
+        assert_eq!(config.inline_signing, None);
+    }
 }
