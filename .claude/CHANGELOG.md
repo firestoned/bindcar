@@ -1,5 +1,32 @@
 # Changelog
 
+## [2026-09-28 21:45] - deps: utoipa 5 → 6 + utoipa-swagger-ui 9 → 10 (lockstep majors, supersedes dependabot #135/#136)
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `Cargo.toml` / `Cargo.lock`: `utoipa` 5.5.0 → 6.0.0 and
+  `utoipa-swagger-ui` 9.0.2 → 10.0.1, bumped **together** — dependabot's
+  one-sided PRs (#135, #136) each failed CI because the two crates are a
+  lockstep pair (swagger-ui 10 requires utoipa 6). No source changes were
+  needed. Dependency tree effect: drops `rust-embed`/`arbitrary`, adds
+  `typed-path`.
+
+### Why
+Clears the two red dependabot majors. Verified: `make regression` green
+(fmt-check, clippy both features, 417 tests), plus a runtime smoke test —
+Swagger UI at `/api/v1/docs` serves (HTTP 200) and `/api/v1/openapi.json`
+parses with 12 paths. Note: utoipa 6 emits **OpenAPI 3.1.0** (was 3.0.x);
+the published `docs/site/openapi.json` will change spec version on the next
+docs build. bindy consumes the typed Rust API, not the spec, so no consumer
+action expected.
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [x] Config change only (dependency bump; OpenAPI spec version 3.0 → 3.1)
+- [ ] Documentation only
+
 ## [2026-09-28 12:00] - Docs CI: commit the lockfile, drop unused plugins carrying the ProperDocs mkdocs hijack
 
 **Author:** Erick Bourgeois
