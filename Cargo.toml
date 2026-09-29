@@ -51,7 +51,7 @@ thiserror = "2.0"
 
 # OpenAPI / Swagger
 utoipa = { version = "5", features = ["axum_extras"], optional = true }
-utoipa-swagger-ui = { version = "9", features = ["axum"], optional = true }
+utoipa-swagger-ui = { version = "10", features = ["axum"], optional = true }
 
 # Metrics
 prometheus = "0.14"
