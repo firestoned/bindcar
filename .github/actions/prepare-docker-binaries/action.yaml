@@ -7,9 +7,16 @@ description: 'Downloads artifacts and prepares binaries for multi-arch Docker bu
 runs:
   using: composite
   steps:
-    - name: Download all binary artifacts
+    - name: Download binary artifacts
       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
       with:
+        # Only the two binaries this action consumes. An unfiltered download
+        # pulls EVERY artifact in the run — including docker buildx
+        # `*.dockerbuild` telemetry uploaded by a sibling image job — and one
+        # broken/corrupt blob among them fails the whole step (PR #137,
+        # 2026-09-29: "Artifact download failed after 5 retries" on a 90KB
+        # telemetry artifact this job never needed).
+        pattern: bindcar-linux-*
         path: ./artifacts
 
     - name: Prepare binaries for Docker build
