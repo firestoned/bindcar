@@ -11,18 +11,24 @@
 > algorithm-agile against algorithm numbers and mnemonics that do not exist
 > yet.
 
-> **Status:** 🔶 Phases 1-4 implemented 2026-10-04 (same day, on
-> `pqc-impl`), pending merge; phase 5 is standing watch items.
+> **Status:** ✅ Shipped 2026-10-04 (PR #141, merged same day the roadmap
+> landed). The stop condition is met; phase 5 remains as standing watch
+> items with the revisit triggers below.
 > [ADR-0002](../../docs/adr/0002-pqc-hybrid-key-exchange-provider.md)
-> (Proposed) settled the provider migration; the hybrid negotiation was
+> (Accepted) settled the provider migration; the hybrid negotiation was
 > verified three ways: unit handshake tests
 > (`src/tls_test.rs`, client restricted to `X25519MLKEM768`), the e2e TLS
 > suite stage 8 against the real binary with OpenSSL 3.5.7 ("X25519MLKEM768
 > hybrid key exchange negotiated"), and classical/TLS 1.2 fallback asserted
 > unchanged. Full `make regression` green (426 tests with
-> `k8s-token-review`). Outstanding for CI to confirm: the musl cross-build
-> in `docker/Dockerfile.chef` (cmake added for aws-lc-sys) and the
-> published-image builds.
+> `k8s-token-review`). PR #141's CI confirmed the rest: musl e2e image
+> (`docker/Dockerfile.chef` with cmake for aws-lc-sys), Linux x86_64 and
+> ARM64 release binaries, Chainguard and distroless images, kind e2e and
+> the full E2E gate all green with aws-lc-rs.
+>
+> Not yet released: the TSIG `hmac-md5`/`hmac-sha1` rejection is a
+> **breaking change** sitting on `main` unreleased; the next release's
+> notes and bindy's consumer upgrade guide (bindy board) must call it out.
 >
 > Inventory as originally verified 2026-10-04, before this work: rustls
 > 0.23.45 pinned to the `ring` provider (`Cargo.toml`), RNDC restricted to
@@ -112,7 +118,7 @@ bindcar's provider aligned with what kube installs).
 
 - [x] ADR:
       [ADR-0002](../../docs/adr/0002-pqc-hybrid-key-exchange-provider.md)
-      (Proposed, pending Erick's acceptance). Resolved:
+      (Accepted 2026-10-04). Resolved:
   - [x] kube 4.x coexistence: `tls::ensure_crypto_provider()` installs
         aws-lc-rs process-wide, idempotently, from `main()`,
         `build_server_config()` and `build_kube_client()`; the `ring` pin
@@ -121,8 +127,8 @@ bindcar's provider aligned with what kube installs).
         can install it too.
   - [x] Build impact: `cmake` added to the `docker/Dockerfile.chef` builder
         stage for aws-lc-sys; glibc build, clippy and tests verified on
-        slate. The musl cross-build and published images are CI's to
-        confirm on the PR (e2e.yaml `build` job).
+        slate. PR #141's CI confirmed the musl e2e image, the x86_64 and
+        ARM64 release binaries and both published images.
   - [x] `make check-no-default-features` green on slate.
 - [x] TDD: `src/tls_test.rs` handshake tests over an in-memory pipe:
       hybrid-only client negotiates `X25519MLKEM768`, classical-only client
@@ -186,17 +192,21 @@ mangles an unknown DNSSEC algorithm identifier.
 ### Phase 5: Watch items (no bindcar code)
 
 Explicitly out of scope until upstreams move; listed so the audit trail
-shows they were considered, not forgotten.
+shows they were considered, not forgotten. These are standing watch items,
+not tasks: they stay open by design and do not block the roadmap's ✅.
 
-- [ ] mTLS / server certificates with ML-DSA: wait for the LAMPS X.509
-      profiles and real CA issuance; bindcar already treats certificates as
-      opaque PEM, so this should be provider support only.
-- [ ] Kubernetes TokenReview JWT signing: the cluster's key, the cluster's
-      migration.
-- [ ] Sigstore/Cosign and GPG PQC: follow upstream; release workflow
-      re-verified when they switch.
-- [ ] Revisit this roadmap when NIST IR 8547 finalizes or BIND ships a PQC
-      signing algorithm, whichever is first.
+- **mTLS / server certificates with ML-DSA**: wait for the LAMPS X.509
+  profiles and real CA issuance; bindcar already treats certificates as
+  opaque PEM, so this should be provider support only.
+- **Kubernetes TokenReview JWT signing**: the cluster's key, the cluster's
+  migration.
+- **Sigstore/Cosign and GPG PQC**: follow upstream; release workflow
+  re-verified when they switch.
+- **Revisit triggers**: NIST IR 8547 finalizing, BIND shipping a PQC
+  signing algorithm (check release notes at each BIND 9.2x minor the e2e
+  pins), or kube migrating its own rustls provider. Whichever lands first,
+  re-open this roadmap's phase 5 and re-verify the
+  [crypto inventory](../../docs/src/advanced/crypto-inventory.md).
 
 ## Sequencing and effort
 

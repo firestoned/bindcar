@@ -4,8 +4,9 @@ SPDX-License-Identifier: MIT
 -->
 # 0002: Post-quantum hybrid key exchange via the aws-lc-rs rustls provider
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
+- **Proposed:** 2026-10-04
 - **Deciders:** Erick Bourgeois
 - **Related:** Execution plan:
   [roadmap 09](../../.github/community/09-post-quantum-cryptography-readiness.md)
@@ -14,6 +15,10 @@ SPDX-License-Identifier: MIT
   transport) and [roadmap 06](../../.github/community/06-tls-certificate-reload.md)
   (hot-reload). Documentation:
   `docs/src/advanced/crypto-inventory.md`, `docs/src/advanced/tls.md`.
+  Implemented 2026-10-04, same day (PR #141); CI confirmed the musl e2e
+  image, both release binaries and both published images build with
+  aws-lc-rs, and the e2e TLS suite's stage 8 asserts the hybrid
+  negotiation.
 
 ## Context
 
