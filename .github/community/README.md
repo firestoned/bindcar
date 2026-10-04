@@ -45,12 +45,15 @@ carries no meaning for the numbering.
 |---|---|---|
 | 05 | [`05-api-transport-tls.md`](05-api-transport-tls.md) | TLS and mutual TLS for the REST API transport |
 | 06 | [`06-tls-certificate-reload.md`](06-tls-certificate-reload.md) | Pick up a renewed certificate without restarting the process (shipped) |
+| 09 | [`09-post-quantum-cryptography-readiness.md`](09-post-quantum-cryptography-readiness.md) | Crypto inventory and PQC migration plan: hybrid ML-KEM for the API TLS, symmetric hygiene, DNSSEC algorithm agility |
 
 ## Previously reserved numbers
 
 `05` was held outside this repository while it described an unremediated
 transport-security weakness in shipped code — this repo is public. TLS shipped
-on 2026-09-18 and the document was migrated in. Nothing is reserved now.
+on 2026-09-18 and the document was migrated in. `08` is reserved the same way
+today: held externally until its finding is remediated (see the "Tracked
+privately" section of [`ROADMAPS.md`](../../ROADMAPS.md)).
 
 Keep the rule it came from: **never** add a document here describing an
 unremediated security weakness in shipped code. Hold it externally and reserve
@@ -87,7 +90,7 @@ have drifted. Trust the status block; re-verify the body.
 
 ## Adding a roadmap
 
-1. Take the next free number (`08` today).
+1. Take the next free number (`10` today; `08` is reserved, see above).
 2. Filename: `NN-lowercase-hyphenated-title.md`.
 3. Open with a `> **Status:**` block so a reader knows where the work stands
    before reading the analysis.

@@ -1,5 +1,37 @@
 # Changelog
 
+## [2026-10-04 12:00] - Roadmap 09: post-quantum cryptography readiness
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `.github/community/09-post-quantum-cryptography-readiness.md`: new roadmap.
+  Cryptographic inventory verified against `v0.8.2` (9 surfaces), then 5
+  phases: publish the inventory in docs, hybrid `X25519MLKEM768` key exchange
+  for the API TLS (requires a `ring` to `aws-lc-rs` rustls provider
+  migration, ADR first), drop `hmac-md5`/`hmac-sha1` from
+  `ALLOWED_TSIG_ALGORITHMS` to match RNDC's SHA-2-only policy, DNSSEC
+  algorithm-agility tests, and upstream watch items (ML-DSA certificates,
+  TokenReview JWTs, Sigstore).
+- `.github/community/README.md`: indexed roadmap 09; recorded that `08` is
+  reserved externally and the next free number is `10`.
+- `ROADMAPS.md`: added the 09 row (⛔); corrected the stale "Previously
+  tracked privately" section (it still claimed the next number was `06` and
+  nothing was reserved).
+
+### Why
+NIST IR 8547 sets 2030/2035 deprecation dates for classical public-key
+cryptography, and the regulated-banking context needs an auditable crypto
+inventory and transition plan. The API TLS key exchange is the only surface
+exposed to harvest-now-decrypt-later today; everything else follows its
+upstream ecosystem.
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [ ] Config change only
+- [x] Documentation only
+
 ## [2026-09-28 21:45] - deps: utoipa 5 → 6 + utoipa-swagger-ui 9 → 10 (lockstep majors, supersedes dependabot #135/#136)
 
 **Author:** Erick Bourgeois
