@@ -1,5 +1,37 @@
 # Changelog
 
+## [2026-10-04 18:30] - Zone commands answer 404 for a zone that does not exist
+
+**Author:** Erick Bourgeois
+
+### Fixed
+- `src/zones.rs`: `DELETE /api/v1/zones/{name}` and the `reload`, `freeze`,
+  `thaw`, `notify` and `retransfer` actions returned 500 `RndcError` when rndc
+  reported the zone "not found". They now return 404 `ZoneNotFound`, as the
+  status and checkds endpoints already did and as
+  `docs/src/reference/api-status-codes.md` documented. One helper,
+  `zone_command_error`, does the mapping for every zone command (replacing
+  five copies of the inline check); OpenAPI responses list the 404.
+- `docs/src/reference/api-status-codes.md`: `retransfer` added to the 404
+  list and the POST table.
+
+### Why
+Callers treat 500 as a retryable server fault. bindy's zone deletion retried
+`freeze`/`delete` of an absent zone for about two minutes per call, which
+stalled its reconcile for minutes and turned its integration tests red
+(bindy bug-192). bindy now also checks zone status before deleting, so it
+works against older bindcar releases too.
+
+### Tests
+- `src/zones_test.rs`: rndc "not found" maps to `ZoneNotFound`; other rndc
+  failures stay `RndcError`; `ZoneNotFound` is served as 404.
+
+### Impact
+- [ ] Breaking change (clients that treated 500 on a missing zone as "gone" keep working; 404 is the documented answer)
+- [ ] Requires cluster rollout
+- [ ] Config change only
+- [ ] Documentation only
+
 ## [2026-10-04 17:30] - Roadmap 09 closed: ADR-0002 accepted, CI confirmation recorded
 
 **Author:** Erick Bourgeois
