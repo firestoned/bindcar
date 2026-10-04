@@ -134,6 +134,7 @@ Complete HTTP status code reference for all bindcar API endpoints.
 - POST /api/v1/zones/{name}/freeze - Zone does not exist
 - POST /api/v1/zones/{name}/thaw - Zone does not exist
 - POST /api/v1/zones/{name}/notify - Zone does not exist
+- POST /api/v1/zones/{name}/retransfer - Zone does not exist
 - Unknown API endpoint
 
 **Response Body**: JSON error
@@ -390,6 +391,7 @@ graph TD
 | /api/v1/zones/{name}/freeze | 200 OK | 401, 404, 429, 500, 503 |
 | /api/v1/zones/{name}/thaw | 200 OK | 401, 404, 429, 500, 503 |
 | /api/v1/zones/{name}/notify | 200 OK | 401, 404, 429, 500, 503 |
+| /api/v1/zones/{name}/retransfer | 200 OK | 401, 404, 429, 500, 503 |
 
 ### GET Endpoints
 
