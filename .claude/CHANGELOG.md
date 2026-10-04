@@ -1,5 +1,34 @@
 # Changelog
 
+## [2026-10-04 17:30] - Roadmap 09 closed: ADR-0002 accepted, CI confirmation recorded
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `docs/adr/0002-pqc-hybrid-key-exchange-provider.md`: Proposed → Accepted
+  (implementation merged as PR #141 the same day); Related section records
+  what CI confirmed (musl e2e image, x86_64/ARM64 release binaries,
+  Chainguard + distroless images, e2e stage 8 hybrid negotiation).
+- `.github/community/09-post-quantum-cryptography-readiness.md`: status ✅
+  Shipped 2026-10-04 (stop condition met); phase 2's CI-pending note
+  resolved; phase 5 rewritten as standing watch items with explicit
+  revisit triggers (NIST IR 8547 final, BIND PQC signing, kube provider
+  migration) so the open items no longer read as unfinished tasks.
+- `ROADMAPS.md`: roadmap 09 row ⛔/🔶 → ✅ with the release reminder that
+  the TSIG `hmac-md5`/`hmac-sha1` rejection is a breaking change still
+  unreleased on `main`.
+
+### Why
+PR #141 merged with every check green, which was the one outstanding
+verification (aws-lc-rs under the musl cross-build and published images).
+This entry closes the roadmap's audit trail.
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [ ] Config change only
+- [x] Documentation only
+
 ## [2026-10-04 16:00] - Roadmap 09 phases 1-4: PQC hybrid key exchange, TSIG SHA-2 only, DNSSEC algorithm agility, crypto inventory
 
 **Author:** Erick Bourgeois

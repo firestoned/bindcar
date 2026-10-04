@@ -1735,3 +1735,40 @@ mod dnssec_responses {
         assert!(!json.contains("dnssec"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// zone_command_error: rndc's "not found" is a 404, not a 500
+//
+// delete/reload/freeze/thaw/notify/retransfer on a zone that is not loaded
+// returned 500 RndcError, which callers (bindy) retry as a server fault. A
+// zone-deletion retry loop then spent ~130s per endpoint on a zone that was
+// simply not there. Status and checkds already answered 404; now every zone
+// command does.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_zone_command_error_maps_rndc_not_found_to_zone_not_found() {
+    let err = anyhow::anyhow!(
+        "rndc: 'delzone' failed: not found\nno matching zone 'gone.example.com' in any view"
+    );
+    match zone_command_error("gone.example.com", &err) {
+        ApiError::ZoneNotFound(zone) => assert_eq!(zone, "gone.example.com"),
+        other => panic!("expected ZoneNotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_zone_command_error_keeps_other_failures_as_rndc_errors() {
+    let err = anyhow::anyhow!("rndc: connect failed: 127.0.0.1#953: connection refused");
+    assert!(matches!(
+        zone_command_error("example.com", &err),
+        ApiError::RndcError(_)
+    ));
+}
+
+#[test]
+fn test_zone_not_found_is_served_as_404() {
+    use axum::response::IntoResponse;
+    let response = ApiError::ZoneNotFound("gone.example.com".to_string()).into_response();
+    assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+}
