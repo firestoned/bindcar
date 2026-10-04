@@ -51,6 +51,7 @@ Statuses were verified against `v0.8.0` on 2026-09-19.
 |---|---|---|---|
 | [05](.github/community/05-api-transport-tls.md) | TLS for the HTTP API transport | ✅ | Shipped 2026-09-18. `--tls-cert`/`--tls-key` (rustls, TLS 1.2+1.3) and `--tls-client-ca` for mTLS; plaintext remains the default and warns on non-loopback. Misconfiguration exits 1 rather than downgrading. 13 unit tests + `make tls-transport-test` |
 | [06](.github/community/06-tls-certificate-reload.md) | TLS certificate hot-reload | ✅ | Shipped 2026-09-18. `TlsReloader` swaps the live config on a content-hash change; `BIND_TLS_RELOAD_INTERVAL` (default 60s, `0` disables) plus `SIGHUP`. A failed reload keeps the previous certificate serving. 7 unit tests + 8 e2e assertions |
+| [09](.github/community/09-post-quantum-cryptography-readiness.md) | Post-quantum cryptography readiness | ⛔ | Crypto inventory (done in the doc, verified 2026-10-04) plus 5 phases. The one urgent surface is the API TLS key exchange (harvest-now-decrypt-later): hybrid `X25519MLKEM768` needs a `ring` to `aws-lc-rs` rustls provider migration (ADR required). Also: drop `hmac-md5`/`hmac-sha1` from TSIG, prove DNSSEC algorithm agility, watch items for certs/JWT/Sigstore |
 
 ## Consumer upgrade guides
 
@@ -59,12 +60,14 @@ They describe what the *bindy operator* must change to consume a bindcar
 release, so they live in bindy's own board as **53**–**56**; **56** covers
 v0.7.2 → v0.7.4 and is the current one.
 
-## Previously tracked privately
+## Tracked privately
 
 Roadmap **05** was held outside this repository while it described an
 unremediated transport-security weakness in shipped code — `firestoned/bindcar`
 is public. TLS shipped on 2026-09-18, so the document was migrated in and is
-indexed above. No numbers are reserved now; the next new roadmap takes **06**.
+indexed above. Number **08** is reserved the same way today: its document is
+held externally until the finding it describes is remediated. The next new
+roadmap takes **10**.
 
 ## Keeping this current
 
