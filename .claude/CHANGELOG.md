@@ -1,5 +1,25 @@
 # Changelog
 
+## [2026-10-04 19:00] - release: sync Cargo.lock to 0.9.0
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `Cargo.lock`: bindcar 0.8.2 → 0.9.0, syncing the lock with the
+  `Cargo.toml` bump (d8d0736). Prevents a repeat of the v0.8.2
+  tag/version-divergence regression.
+
+### Why
+Release prep for v0.9.0: the release carries the breaking SHA-2-only TSIG
+change and the PQC hybrid key exchange (roadmap 09, ADR-0002), plus the
+zone-command 404 fix and the utoipa 6 / OpenAPI 3.1 bump.
+
+### Impact
+- [ ] Breaking change
+- [ ] Requires cluster rollout
+- [x] Config change only
+- [ ] Documentation only
+
 ## [2026-10-04 18:30] - Zone commands answer 404 for a zone that does not exist
 
 **Author:** Erick Bourgeois
