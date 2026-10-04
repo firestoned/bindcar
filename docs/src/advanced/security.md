@@ -37,8 +37,16 @@ See [TLS Transport](./tls.md).
 - Zone transfer restrictions
 - Query access controls
 
+## Cryptography
+
+Every place bindcar uses cryptography, the algorithms involved, and the
+post-quantum migration status of each surface are catalogued in the
+[Cryptographic Inventory](./crypto-inventory.md). Re-verify that page when a
+release touches a crypto dependency or any file it names.
+
 ## Next Steps
 
 - [TLS Transport](./tls.md) - Serving the API over TLS and mutual TLS
+- [Cryptographic Inventory](./crypto-inventory.md) - Algorithms in use and PQC readiness
 - [Authentication & Authorization](./auth.md) - Detailed auth configuration
 - [Access Control](./access-control.md) - Access control patterns

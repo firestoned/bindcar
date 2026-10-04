@@ -116,13 +116,16 @@ This should match the key name in your zone's `allow-update` directive.
 NSUPDATE_ALGORITHM=HMAC-SHA256
 ```
 
-Valid values (same as RNDC):
-- `md5` (or `hmac-md5` or `HMAC-MD5`)
-- `sha1` (or `hmac-sha1` or `HMAC-SHA1`)
+Valid values (SHA-2 family only, same as RNDC):
 - `sha224` (or `hmac-sha224` or `HMAC-SHA224`)
 - `sha256` (or `hmac-sha256` or `HMAC-SHA256`)
 - `sha384` (or `hmac-sha384` or `HMAC-SHA384`)
 - `sha512` (or `hmac-sha512` or `HMAC-SHA512`)
+
+> **Security note:** the deprecated `hmac-md5` and `hmac-sha1` algorithms are
+> **rejected** for TSIG, matching the RNDC policy above. Regenerate legacy
+> keys with `tsig-keygen -a hmac-sha256` (256-bit secret; see the
+> [Cryptographic Inventory](../advanced/crypto-inventory.md)).
 
 ### NSUPDATE_SECRET
 

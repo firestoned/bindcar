@@ -54,6 +54,25 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 /// serves, so a client negotiating either lands on a protocol bindcar speaks.
 const ALPN_PROTOCOLS: [&[u8]; 2] = [b"h2", b"http/1.1"];
 
+/// Install the process-wide rustls crypto provider (aws-lc-rs).
+///
+/// ADR-0002: bindcar's own TLS listener and kube's client stack may enable
+/// different rustls provider features; with more than one provider feature
+/// enabled, rustls has no compile-time default and the first
+/// `ServerConfig::builder()` panics with "no process-level CryptoProvider".
+/// Installing explicitly makes the provider deterministic: aws-lc-rs, which
+/// carries the `X25519MLKEM768` hybrid post-quantum key exchange.
+///
+/// Idempotent: an already-installed provider is left in place, so this is
+/// safe to call from `main()`, from [`build_server_config`] and from tests
+/// in any order.
+#[cfg(any(feature = "tls", feature = "k8s-token-review"))]
+pub fn ensure_crypto_provider() {
+    // The Err carries the provider that was already installed; that is the
+    // desired end state, not a failure.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 /// Errors raised while resolving or loading the TLS transport configuration.
 ///
 /// Every variant is fatal at startup — bindcar refuses to bind rather than
@@ -272,6 +291,10 @@ pub(crate) fn build_client_verifier(
 /// [`TlsError::ClientCaRead`] or [`TlsError::ClientCaInvalid`] depending on which
 /// piece of material failed to load. All are fatal at startup.
 pub fn build_server_config(settings: &TlsSettings) -> Result<ServerConfig, TlsError> {
+    // Deterministic provider before the builder consults the process default
+    // (ADR-0002); idempotent when main() already installed it.
+    ensure_crypto_provider();
+
     let certs = CertificateDer::pem_file_iter(&settings.cert_path)
         .map_err(|e| TlsError::CertRead {
             path: settings.cert_path.clone(),

@@ -87,11 +87,15 @@ sha2 = "0.11"
 # crates. `hyper`/`hyper-util` are gated for tidiness only — axum pulls hyper
 # regardless, so no graph saving comes from them.
 #
-# `ring` is pinned as the crypto provider to match the provider kube's
-# `rustls-tls` feature already installs, so enabling `k8s-token-review` cannot
-# produce two providers and the "no process-level CryptoProvider" panic.
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"], optional = true }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"], optional = true }
+# `aws-lc-rs` is the crypto provider: it carries the X25519MLKEM768 hybrid
+# post-quantum key exchange (ADR-0002, roadmap 09), which `ring` does not
+# implement, and `prefer-post-quantum` orders it first. Whatever provider
+# features kube's `rustls-tls` enables alongside this, the process default is
+# installed explicitly at startup (`tls::ensure_crypto_provider()`), so two
+# enabled provider features can no longer cause the "no process-level
+# CryptoProvider" panic the old `ring` pin guarded against.
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "prefer-post-quantum", "std", "tls12", "logging"], optional = true }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs", "tls12", "logging"], optional = true }
 rustls-pki-types = { version = "1", features = ["std"], optional = true }
 hyper = { version = "1", features = ["server", "http1", "http2"], optional = true }
 hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "tokio", "service"], optional = true }
@@ -136,7 +140,10 @@ tls = [
 # (`cargo build --release --features k8s-token-review`) needs no
 # K8S_OPENAPI_ENABLED_VERSION env var — the version travels with the feature,
 # on host cargo and in the aarch64 cross container alike.
-k8s-token-review = ["server", "kube", "k8s-openapi", "k8s-openapi/v1_32"]
+# `dep:rustls` rides along so TokenReview-only builds (no `tls` feature) can
+# still install the process-wide crypto provider before kube builds its TLS
+# stack (ADR-0002).
+k8s-token-review = ["server", "kube", "k8s-openapi", "k8s-openapi/v1_32", "dep:rustls"]
 
 [dev-dependencies]
 # Testing

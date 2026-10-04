@@ -84,9 +84,8 @@ export RNDC_ALGORITHM="sha256"
 export RNDC_SECRET="dGVzdC1zZWNyZXQtaGVyZQ=="
 ```
 
-Supported algorithms (with or without `hmac-` prefix):
-- `md5` / `hmac-md5`
-- `sha1` / `hmac-sha1`
+Supported algorithms (SHA-2 family only, with or without `hmac-` prefix;
+`md5` and `sha1` are rejected):
 - `sha224` / `hmac-sha224`
 - `sha256` / `hmac-sha256`
 - `sha384` / `hmac-sha384`

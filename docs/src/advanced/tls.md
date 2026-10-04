@@ -300,8 +300,34 @@ kubelet, a debug port-forward, or a caller outside the mesh.
 - **TLS versions:** 1.2 and 1.3, via [rustls](https://github.com/rustls/rustls).
   SSLv3, TLS 1.0 and TLS 1.1 are not implemented and cannot be enabled.
 - **ALPN:** advertises `h2` then `http/1.1`; HTTP/2 and HTTP/1.1 are both served.
-- **Crypto provider:** `ring`, pinned to match the provider used by the
-  Kubernetes client under the `k8s-token-review` feature.
+- **Crypto provider:** `aws-lc-rs`, installed process-wide at startup so the
+  Kubernetes client under the `k8s-token-review` feature uses the same
+  provider (ADR-0002).
+
+## Post-quantum key exchange
+
+The listener offers the hybrid post-quantum key agreement `X25519MLKEM768`
+(X25519 combined with FIPS 203 ML-KEM-768) as its most preferred TLS 1.3
+group. No flag is needed and none exists: a hybrid group is at least as
+strong as its classical half, so there is no reason to turn it off.
+
+- A PQC-capable client (Chrome, Firefox, Go 1.24+, OpenSSL 3.5+, rustls with
+  `aws-lc-rs`) negotiates `X25519MLKEM768`. The session's confidentiality
+  then does not depend on classical elliptic-curve assumptions, which
+  defeats harvest-now-decrypt-later recording of API traffic.
+- A classical-only client negotiates exactly what it negotiates today
+  (X25519 or another classical group); nothing breaks.
+- TLS 1.2 has no hybrid groups and is unchanged.
+
+Verify with an ML-KEM-capable OpenSSL:
+
+```bash
+openssl s_client -connect <host>:8443 -groups X25519MLKEM768 </dev/null \
+  | grep 'Negotiated TLS1.3 group'
+```
+
+See the [Cryptographic Inventory](./crypto-inventory.md) for the full PQC
+picture across bindcar's surfaces.
 
 ## Testing
 
