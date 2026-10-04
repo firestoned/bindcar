@@ -27,15 +27,11 @@ use crate::metrics;
 /// Maximum length of a TSIG key name (matches the DNS name length limit).
 const MAX_TSIG_KEY_NAME_LEN: usize = 253;
 
-/// HMAC algorithms accepted in a TSIG key file.
-const ALLOWED_TSIG_ALGORITHMS: &[&str] = &[
-    "hmac-md5",
-    "hmac-sha1",
-    "hmac-sha224",
-    "hmac-sha256",
-    "hmac-sha384",
-    "hmac-sha512",
-];
+/// HMAC algorithms accepted in a TSIG key file (SHA-2 family only).
+/// `hmac-md5` and `hmac-sha1` are rejected, matching the policy the RNDC
+/// control channel enforces (`ACCEPTED_RNDC_ALGORITHMS` in `rndc.rs`).
+const ALLOWED_TSIG_ALGORITHMS: &[&str] =
+    &["hmac-sha224", "hmac-sha256", "hmac-sha384", "hmac-sha512"];
 
 /// nsupdate command executor
 ///
@@ -450,8 +446,9 @@ pub(crate) fn build_nsupdate_args(use_tcp: bool, keyfile: Option<&Path>) -> Vec<
 /// All three fields are validated before interpolation since they land in a
 /// quoted BIND configuration literal:
 /// - `key_name` — safe identifier set (`[A-Za-z0-9._-]`, max 253 chars)
-/// - `algorithm` — normalized to lowercase, `hmac-` prefix added if missing,
-///   then checked against the known HMAC algorithm list
+/// - `algorithm`: normalized to lowercase, `hmac-` prefix added if missing,
+///   then checked against the SHA-2-only allowlist (`hmac-md5` and
+///   `hmac-sha1` are rejected)
 /// - `secret` — base64 character set only
 ///
 /// # Errors

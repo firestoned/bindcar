@@ -11,13 +11,25 @@
 > algorithm-agile against algorithm numbers and mnemonics that do not exist
 > yet.
 
-> **Status:** ⛔ Not started. Created 2026-10-04 against `v0.8.2`
-> (branch `deps/utoipa-6`). The inventory in this document was verified
-> against the tree on that date: rustls 0.23.45 pinned to the `ring`
-> provider (`Cargo.toml`), RNDC restricted to SHA-2 HMAC
-> (`src/rndc.rs`, `ACCEPTED_RNDC_ALGORITHMS`), TSIG still accepting
-> `hmac-md5`/`hmac-sha1` (`src/nsupdate.rs`, `ALLOWED_TSIG_ALGORITHMS`),
-> DS computation fixed to SHA-256 digest type 2 (`src/dnssec.rs`).
+> **Status:** 🔶 Phases 1-4 implemented 2026-10-04 (same day, on
+> `pqc-impl`), pending merge; phase 5 is standing watch items.
+> [ADR-0002](../../docs/adr/0002-pqc-hybrid-key-exchange-provider.md)
+> (Proposed) settled the provider migration; the hybrid negotiation was
+> verified three ways: unit handshake tests
+> (`src/tls_test.rs`, client restricted to `X25519MLKEM768`), the e2e TLS
+> suite stage 8 against the real binary with OpenSSL 3.5.7 ("X25519MLKEM768
+> hybrid key exchange negotiated"), and classical/TLS 1.2 fallback asserted
+> unchanged. Full `make regression` green (426 tests with
+> `k8s-token-review`). Outstanding for CI to confirm: the musl cross-build
+> in `docker/Dockerfile.chef` (cmake added for aws-lc-sys) and the
+> published-image builds.
+>
+> Inventory as originally verified 2026-10-04, before this work: rustls
+> 0.23.45 pinned to the `ring` provider (`Cargo.toml`), RNDC restricted to
+> SHA-2 HMAC (`src/rndc.rs`, `ACCEPTED_RNDC_ALGORITHMS`), TSIG still
+> accepting `hmac-md5`/`hmac-sha1` (`src/nsupdate.rs`,
+> `ALLOWED_TSIG_ALGORITHMS`), DS computation fixed to SHA-256 digest type 2
+> (`src/dnssec.rs`).
 
 ---
 
@@ -75,13 +87,14 @@ The threat model splits bindcar's surfaces into two very different buckets:
 Make the inventory above a living document that audits can cite, instead of
 a snapshot buried in a roadmap.
 
-- [ ] Add `docs/src/security/crypto-inventory.md`: the table above, plus the
-      harvest-now-decrypt-later rationale and the external timeline anchors
-      (FIPS 203/204/205, NIST IR 8547 2030/2035 dates).
-- [ ] Link it from the docs nav and from the threat-model page.
-- [ ] Add a line item to the release checklist: re-verify the inventory when
-      a release touches `Cargo.toml` crypto dependencies or any file in
-      column "Where".
+- [x] Add the inventory page: landed as
+      `docs/src/advanced/crypto-inventory.md`, since the security docs live
+      under `advanced/`, not a `security/` directory.
+- [x] Link it from the docs nav and from the security overview page
+      (`docs/src/advanced/security.md`; the repo has no separate
+      threat-model page).
+- [x] Re-verify rule: the repo has no release checklist file, so the rule
+      lives in the page's own "Keeping this current" section.
 
 **Definition of done:** `make docs` builds the page; the table cites file
 paths that exist in the tree.
@@ -97,29 +110,31 @@ migration. That is architecturally significant: **it needs an ADR before
 code** (the `Cargo.toml` comment pinning `ring` exists precisely to keep
 bindcar's provider aligned with what kube installs).
 
-- [ ] ADR: migrate the rustls crypto provider from `ring` to `aws-lc-rs`.
-      Must resolve:
-  - [ ] kube 4.x coexistence: install the provider explicitly at startup
-        via `CryptoProvider::install_default()` instead of relying on
-        feature-resolved defaults, so kube's TLS stack and ours cannot
-        diverge (the failure mode the current `ring` pin guards against).
-  - [ ] Build impact: aws-lc-rs compiles C (needs `cc`, sometimes `cmake`);
-        verify the musl static binary (`make e2e-image` path) and the
-        Chainguard/distroless images still build on slate and in CI.
-  - [ ] `--no-default-features` and feature-matrix builds stay green
-        (`make check-no-default-features`, roadmap 02 guard).
-- [ ] TDD: tests first, asserting (a) a client offering `X25519MLKEM768`
-      negotiates it, (b) a classical-only client still completes the
-      handshake with X25519, (c) TLS 1.2 behavior is unchanged.
-- [ ] Implement: provider swap + enable the hybrid group (rustls
-      `prefer-post-quantum` ordering).
-- [ ] Extend `make tls-transport-test` and the e2e TLS suite with a PQC
-      negotiation assertion (openssl 3.5+ or a rustls test client, since the
-      system curl may not offer the group).
-- [ ] Verify `TlsReloader` (roadmap 06) is provider-agnostic: hot-reload
-      still swaps configs under the new provider.
-- [ ] Docs: `docs/src/` TLS page gains a "post-quantum" section: what is
-      negotiated, with which clients, and that no flag is needed.
+- [x] ADR:
+      [ADR-0002](../../docs/adr/0002-pqc-hybrid-key-exchange-provider.md)
+      (Proposed, pending Erick's acceptance). Resolved:
+  - [x] kube 4.x coexistence: `tls::ensure_crypto_provider()` installs
+        aws-lc-rs process-wide, idempotently, from `main()`,
+        `build_server_config()` and `build_kube_client()`; the `ring` pin
+        comment in `Cargo.toml` is replaced by this mechanism, and
+        `k8s-token-review` gained `dep:rustls` so TokenReview-only builds
+        can install it too.
+  - [x] Build impact: `cmake` added to the `docker/Dockerfile.chef` builder
+        stage for aws-lc-sys; glibc build, clippy and tests verified on
+        slate. The musl cross-build and published images are CI's to
+        confirm on the PR (e2e.yaml `build` job).
+  - [x] `make check-no-default-features` green on slate.
+- [x] TDD: `src/tls_test.rs` handshake tests over an in-memory pipe:
+      hybrid-only client negotiates `X25519MLKEM768`, classical-only client
+      falls back to X25519, TLS 1.2 handshake unchanged.
+- [x] Implement: provider swap + `prefer-post-quantum` in `Cargo.toml`.
+- [x] e2e: `integration-test/tls-transport.sh` stage 8 asserts the hybrid
+      negotiation when the host OpenSSL has ML-KEM (verified green against
+      OpenSSL 3.5.7 on slate) and records a skip on older OpenSSLs.
+- [x] `TlsReloader` verified under the new provider: full hot-reload e2e
+      stage green on slate.
+- [x] Docs: `docs/src/advanced/tls.md` "Post-quantum key exchange" section;
+      protocol details now name aws-lc-rs.
 
 **Definition of done:** an `X25519MLKEM768`-capable client provably
 negotiates the hybrid group against a bindcar built from `main`; classical
@@ -129,15 +144,16 @@ clients are unaffected; all images build.
 
 No quantum urgency, but the inventory exposed drift and these are cheap.
 
-- [ ] TDD + implement: drop `hmac-md5` and `hmac-sha1` from
-      `ALLOWED_TSIG_ALGORITHMS` in `src/nsupdate.rs`, matching the SHA-2-only
-      policy `src/rndc.rs` already enforces. **Breaking change** for anyone
-      with a legacy TSIG key: call it out in the changelog and release
-      notes, and have bindy's consumer upgrade guide (bindy board) cover it.
-- [ ] Document the secret-size floor in the docs: RNDC and TSIG secrets
-      should be 256-bit, which is what `rndc-confgen` and `tsig-keygen`
-      already emit by default. Decide in review whether to log a startup
-      warning for shorter secrets (observability only, no hard failure).
+- [x] TDD + implement: `hmac-md5` and `hmac-sha1` dropped from
+      `ALLOWED_TSIG_ALGORITHMS` in `src/nsupdate.rs`, matching the
+      SHA-2-only policy `src/rndc.rs` already enforces. **Breaking change**
+      for anyone with a legacy TSIG key: called out in the changelog;
+      release notes and the bindy consumer upgrade guide delta (bindy's
+      board) go with the release that ships it.
+- [x] Secret-size floor documented (`docs/src/advanced/crypto-inventory.md`
+      plus the env-vars and rndc-integration pages). Open for review:
+      whether to also log a startup warning for short secrets
+      (observability only, no hard failure); not implemented.
 
 **Definition of done:** an `hmac-sha1` TSIG key file is rejected with a
 clear error; docs state the floor.
@@ -150,18 +166,19 @@ enough to break UDP response-size assumptions, and the IETF dnsop work
 signs; bindcar must merely *not break* when BIND one day reports an
 algorithm it has never seen.
 
-- [ ] TDD: add tests feeding unknown algorithm numbers (e.g. a hypothetical
-      `248`) and unknown mnemonics (e.g. `ML-DSA-44`) through:
-  - [ ] `src/dnssec.rs` DNSKEY parsing and DS computation (the SHA-256
-        digest is algorithm-independent and must pass through any `u8`),
-  - [ ] the `rndc dnssec -status` key parser (mnemonic is a free string,
-        must round-trip unrecognized values),
-  - [ ] the zone-status `dnssec` block serialization.
-- [ ] Fix anything those tests flush out; expectation is pass-through, not
-      an allowlist.
-- [ ] Add a tracking note (this file's status block) for: IETF dnsop PQC
-      drafts, BIND release notes. Review at each BIND 9.2x minor bindcar
-      pins in e2e.
+- [x] TDD: `src/dnssec_test.rs` algorithm-agility section feeds algorithm
+      number `248` and mnemonic `ML-DSA-44` through:
+  - [x] `src/dnssec.rs` DNSKEY parsing and DS computation (the SHA-256
+        digest is algorithm-independent and passes through any `u8`),
+  - [x] the `rndc dnssec -status` key parser (mnemonic round-trips as an
+        opaque string),
+  - [x] the zone-status `dnssec` block serialization (serde, no allowlist).
+- [x] Nothing to fix: pass-through held everywhere. (Only the synthetic
+      test fixture needed real state-block lines; `signed` derives from the
+      `- dnskey:` state, see buglog bug-091.)
+- [x] Tracking note: review IETF dnsop PQC drafts and BIND release notes at
+      each BIND 9.2x minor bindcar pins in e2e; revisit per phase 5's last
+      item.
 
 **Definition of done:** the tests above pass; no code path rejects or
 mangles an unknown DNSSEC algorithm identifier.

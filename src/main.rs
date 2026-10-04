@@ -289,6 +289,12 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.debug);
 
+    // ADR-0002: install the process-wide rustls crypto provider (aws-lc-rs,
+    // hybrid post-quantum key exchange) before anything builds a TLS stack:
+    // our listener or kube's client.
+    #[cfg(any(feature = "tls", feature = "k8s-token-review"))]
+    bindcar::tls::ensure_crypto_provider();
+
     // The insecure-auth override may come from the CLI flag or an env var (the
     // latter is convenient for container deployments without changing args).
     let insecure_override = cli.i_know_this_is_insecure

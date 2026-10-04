@@ -217,6 +217,7 @@ nav:
           - TLS Transport: advanced/tls.md
           - Access Control: advanced/access-control.md
           - DNSSEC: advanced/dnssec.md
+          - Cryptographic Inventory: advanced/crypto-inventory.md
       - Performance:
           - Overview: advanced/performance.md
           - Tuning: advanced/tuning.md

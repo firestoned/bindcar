@@ -11,7 +11,8 @@
 # own runner, which is why they run concurrently:
 #
 #   e2e-tls    TLS/mTLS transport against the real binary: handshake, client
-#              CA verification, hot-reload, fail-closed misconfiguration
+#              CA verification, hot-reload, fail-closed misconfiguration,
+#              hybrid PQC key exchange when the runner's OpenSSL has ML-KEM
 #              (integration-test/tls-transport.sh; no docker, kind or BIND9)
 #   e2e-drone  bindcar binary in drone mode against a dockerized external
 #              BIND9 (integration-test/drone-external-bind9.sh)
@@ -40,6 +41,12 @@ on:
       # Only observable against a real handshake / a real BIND9 / a real API
       # server, so changes to these must run the gate.
       - 'src/tls.rs'
+      # The TLS stack (crypto provider, hybrid PQC key exchange, ADR-0002)
+      # is wired through the dependency graph and process startup, so
+      # dependency and entrypoint changes must run the gate too.
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'src/main.rs'
       - 'src/dnssec.rs'
       - 'src/nsupdate.rs'
       - 'deploy/rbac.yaml'

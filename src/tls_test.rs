@@ -487,3 +487,173 @@ fn test_reload_interval_zero_disables_reloading() {
     assert!(TlsReloader::reloading_enabled(1));
     assert!(TlsReloader::reloading_enabled(DEFAULT_RELOAD_INTERVAL_SECS));
 }
+
+// ---------------------------------------------------------------------------
+// Post-quantum hybrid key exchange (ADR-0002, roadmap 09 phase 2)
+//
+// These tests handshake a real rustls client against build_server_config's
+// output over an in-memory pipe. They assert the *key exchange*, not PKI:
+// certificate verification is bypassed deliberately so a throwaway test cert
+// cannot turn a key-exchange regression into a flaky verifier failure.
+// ---------------------------------------------------------------------------
+
+use crate::tls::{ensure_crypto_provider, TlsSettings};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::{aws_lc_rs, CryptoProvider, SupportedKxGroup};
+use rustls::{ClientConfig, NamedGroup, ProtocolVersion, SignatureScheme};
+use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
+use std::sync::Arc;
+
+/// Accepts any server certificate; signature checks still run with the real
+/// provider algorithms. Test-only: the subject under test is key exchange.
+#[derive(Debug)]
+struct AcceptAnyServerCert;
+
+impl ServerCertVerifier for AcceptAnyServerCert {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &aws_lc_rs::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &aws_lc_rs::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        aws_lc_rs::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+/// Build a client restricted to `groups` and `versions`.
+fn restricted_client_config(
+    groups: Vec<&'static dyn SupportedKxGroup>,
+    versions: &[&'static rustls::SupportedProtocolVersion],
+) -> ClientConfig {
+    ensure_crypto_provider();
+    let provider = CryptoProvider {
+        kx_groups: groups,
+        ..aws_lc_rs::default_provider()
+    };
+    ClientConfig::builder_with_provider(Arc::new(provider))
+        .with_protocol_versions(versions)
+        .expect("protocol versions")
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(AcceptAnyServerCert))
+        .with_no_client_auth()
+}
+
+/// Handshake `client_config` against the server config built from the test
+/// certificate, over an in-memory duplex pipe. Returns the client-side
+/// stream with the completed connection state.
+async fn handshake(
+    client_config: ClientConfig,
+) -> tokio_rustls::client::TlsStream<tokio::io::DuplexStream> {
+    const PIPE_CAPACITY_BYTES: usize = 16 * 1024;
+
+    let cert = pem_file(TEST_CERT_PEM);
+    let key = pem_file(TEST_KEY_PEM);
+    let settings = TlsSettings {
+        cert_path: path_of(&cert),
+        key_path: path_of(&key),
+        client_ca_path: None,
+    };
+    let server_config = build_server_config(&settings).expect("server config");
+
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+    let connector = tokio_rustls::TlsConnector::from(Arc::new(client_config));
+    let (client_io, server_io) = tokio::io::duplex(PIPE_CAPACITY_BYTES);
+
+    let server = tokio::spawn(async move { acceptor.accept(server_io).await });
+    let server_name = ServerName::try_from("localhost").expect("server name");
+    let client = connector
+        .connect(server_name, client_io)
+        .await
+        .expect("client handshake");
+    server
+        .await
+        .expect("server task")
+        .expect("server handshake");
+    client
+}
+
+/// A PQC-capable client must negotiate the hybrid group. This is the
+/// harvest-now-decrypt-later remediation: roadmap 09's stop condition.
+#[tokio::test]
+async fn test_pqc_client_negotiates_hybrid_key_exchange() {
+    let config = restricted_client_config(
+        vec![aws_lc_rs::kx_group::X25519MLKEM768],
+        rustls::DEFAULT_VERSIONS,
+    );
+    let stream = handshake(config).await;
+    let (_, conn) = stream.get_ref();
+    assert_eq!(
+        conn.negotiated_key_exchange_group().map(|g| g.name()),
+        Some(NamedGroup::X25519MLKEM768),
+        "server must accept the hybrid PQC group"
+    );
+}
+
+/// A classical-only client must still complete the handshake on X25519:
+/// enabling the hybrid group is not allowed to break any existing client.
+#[tokio::test]
+async fn test_classical_client_falls_back_to_x25519() {
+    let config =
+        restricted_client_config(vec![aws_lc_rs::kx_group::X25519], rustls::DEFAULT_VERSIONS);
+    let stream = handshake(config).await;
+    let (_, conn) = stream.get_ref();
+    assert_eq!(
+        conn.negotiated_key_exchange_group().map(|g| g.name()),
+        Some(NamedGroup::X25519),
+        "classical clients must be unaffected"
+    );
+}
+
+/// TLS 1.2 remains supported and unchanged (the hybrid group is TLS 1.3
+/// only, so a 1.2 client lands on classical ECDHE).
+#[tokio::test]
+async fn test_tls12_client_handshake_is_unchanged() {
+    let config = restricted_client_config(
+        aws_lc_rs::DEFAULT_KX_GROUPS.to_vec(),
+        &[&rustls::version::TLS12],
+    );
+    let stream = handshake(config).await;
+    let (_, conn) = stream.get_ref();
+    assert_eq!(conn.protocol_version(), Some(ProtocolVersion::TLSv1_2));
+    assert_ne!(
+        conn.negotiated_key_exchange_group().map(|g| g.name()),
+        Some(NamedGroup::X25519MLKEM768),
+        "the hybrid group must not be offered below TLS 1.3"
+    );
+}

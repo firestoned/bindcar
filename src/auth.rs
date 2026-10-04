@@ -488,6 +488,10 @@ async fn cached_kube_client() -> Result<Client, String> {
 /// 2. `KUBECONFIG` env / `~/.kube/config` / in-cluster SA mount (via `try_default`)
 #[cfg(feature = "k8s-token-review")]
 async fn build_kube_client() -> Result<Client, String> {
+    // ADR-0002: kube's rustls stack consults the process default provider;
+    // make it deterministic even when a library consumer bypassed main().
+    crate::tls::ensure_crypto_provider();
+
     match detect_kube_auth_mode() {
         KubeAuthMode::Explicit {
             server,

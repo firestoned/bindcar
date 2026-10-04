@@ -191,4 +191,27 @@ mod tsig_keyfile_tests {
         assert!(build_tsig_key_file_content("k", "sha256", "abc\"; };").is_err());
         assert!(build_tsig_key_file_content("k", "sha256", "").is_err());
     }
+
+    #[test]
+    fn test_key_file_content_rejects_deprecated_hmac_algorithms() {
+        // MD5 and SHA-1 are classically broken and rejected in every input
+        // spelling, matching the SHA-2-only policy the RNDC channel enforces.
+        for alg in ["hmac-md5", "md5", "HMAC-MD5", "hmac-sha1", "sha1", "SHA1"] {
+            let err = build_tsig_key_file_content("k", alg, "YWJj").unwrap_err();
+            assert!(
+                err.to_string().contains("Unsupported TSIG algorithm"),
+                "{alg} must be rejected as unsupported, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_key_file_content_accepts_sha2_family() {
+        for alg in ["sha224", "sha256", "sha384", "sha512"] {
+            assert!(
+                build_tsig_key_file_content("k", alg, "YWJj").is_ok(),
+                "{alg} must be accepted"
+            );
+        }
+    }
 }

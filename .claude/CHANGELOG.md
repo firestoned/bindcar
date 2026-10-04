@@ -1,5 +1,67 @@
 # Changelog
 
+## [2026-10-04 16:00] - Roadmap 09 phases 1-4: PQC hybrid key exchange, TSIG SHA-2 only, DNSSEC algorithm agility, crypto inventory
+
+**Author:** Erick Bourgeois
+
+### Changed
+- `Cargo.toml` / `Cargo.lock`: rustls crypto provider switched from `ring`
+  to `aws-lc-rs` with `prefer-post-quantum` (ADR-0002), so the TLS 1.3
+  listener prefers the hybrid `X25519MLKEM768` key agreement (FIPS 203
+  ML-KEM-768 + X25519). `tokio-rustls` mirrors the features;
+  `k8s-token-review` gained `dep:rustls` so TokenReview-only builds can
+  install the provider.
+- `src/tls.rs`: new `ensure_crypto_provider()` installs the aws-lc-rs
+  provider process-wide (idempotent), called from `main()`,
+  `build_server_config()` and `build_kube_client()`; replaces the old
+  "pin ring to match kube" invariant.
+- `src/main.rs`, `src/auth.rs`: provider installation at startup / before
+  kube client construction.
+- `src/nsupdate.rs`: **BREAKING** - `hmac-md5` and `hmac-sha1` removed from
+  `ALLOWED_TSIG_ALGORITHMS` (SHA-2 only, matching the RNDC policy).
+  Legacy TSIG keys must be regenerated (`tsig-keygen -a hmac-sha256`).
+- `src/tls_test.rs`: PQC handshake tests over an in-memory pipe
+  (hybrid-only client negotiates `X25519MLKEM768`; classical-only falls
+  back to X25519; TLS 1.2 unchanged).
+- `src/nsupdate_test.rs`: rejection tests for the deprecated algorithms,
+  acceptance test for the SHA-2 family.
+- `src/dnssec_test.rs`: algorithm-agility tests (algorithm number 248,
+  mnemonic `ML-DSA-44`) proving pass-through in DNSKEY/DS parsing, the
+  `rndc dnssec -status` parser and status serialization; no source changes
+  were needed.
+- `integration-test/tls-transport.sh`: new stage 8 asserts the hybrid
+  negotiation with an ML-KEM-capable OpenSSL (skips with a notice
+  otherwise); stages renumbered to /8.
+- `.github/workflows/e2e.yaml`: PR triggers extended with `Cargo.toml`,
+  `Cargo.lock` and `src/main.rs` so provider/dependency changes run the
+  full standalone e2e gate; suite description notes the PQC assertion.
+- `docker/Dockerfile.chef`: `cmake` added to the builder stage
+  (aws-lc-sys build dependency).
+- `docs/adr/0002-pqc-hybrid-key-exchange-provider.md`: new ADR (Proposed).
+- `docs/src/advanced/crypto-inventory.md` (new), `docs/mkdocs.yml`,
+  `docs/src/advanced/security.md`: published cryptographic inventory.
+- `docs/src/advanced/tls.md`: "Post-quantum key exchange" section;
+  provider note updated.
+- `docs/src/operations/env-vars.md`,
+  `docs/src/developer-guide/rndc-integration.md`: SHA-2-only algorithm
+  lists (the rndc-integration page wrongly listed md5/sha1 as supported).
+- `.github/community/09-post-quantum-cryptography-readiness.md`,
+  `ROADMAPS.md`: phases 1-4 checked off, status 🔶 pending merge.
+
+### Why
+Roadmap 09: the API TLS key exchange was the one surface exposed to
+harvest-now-decrypt-later. Verified: `make regression` green on slate (426
+tests incl. `k8s-token-review`; clippy -D warnings both feature sets;
+`check-no-default-features` green), full TLS e2e suite green with OpenSSL
+3.5.7 negotiating `X25519MLKEM768` against the real binary, hot-reload
+unaffected. CI must still confirm the musl image builds (cmake added).
+
+### Impact
+- [x] Breaking change (legacy `hmac-md5`/`hmac-sha1` TSIG keys rejected)
+- [ ] Requires cluster rollout
+- [ ] Config change only
+- [ ] Documentation only
+
 ## [2026-10-04 12:00] - Roadmap 09: post-quantum cryptography readiness
 
 **Author:** Erick Bourgeois

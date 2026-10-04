@@ -306,3 +306,84 @@ fn test_ksk_tags_empty_for_unsigned_zone() {
     let status = parse_dnssec_status(STATUS_UNSIGNED);
     assert!(status.ksk_tags().is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Algorithm agility (roadmap 09 phase 4): bindcar must pass through DNSSEC
+// algorithms it has never seen. When BIND one day reports a post-quantum
+// algorithm, nothing here may reject or mangle it.
+// ---------------------------------------------------------------------------
+
+/// A DNSSEC algorithm number no IANA registry entry uses today, standing in
+/// for a future post-quantum assignment.
+const FUTURE_ALGORITHM_NUMBER: u8 = 248;
+
+/// A mnemonic BIND does not emit today, standing in for a future
+/// post-quantum signing algorithm.
+const FUTURE_ALGORITHM_MNEMONIC: &str = "ML-DSA-44";
+
+#[test]
+fn test_parse_dnskey_rr_unknown_algorithm_number_passes_through() {
+    let rr = format!(
+        "dskey.example.com. 86400 IN DNSKEY 256 3 {FUTURE_ALGORITHM_NUMBER} {RFC4509_DNSKEY_B64}"
+    );
+    let key = parse_dnskey_rr(&rr).expect("unknown algorithm number must parse");
+    assert_eq!(key.algorithm, FUTURE_ALGORITHM_NUMBER);
+}
+
+#[test]
+fn test_ds_computation_is_algorithm_agnostic() {
+    // The SHA-256 digest covers the DNSKEY RDATA including the algorithm
+    // byte, so an unknown algorithm must compute (not error) and must yield
+    // a different digest than the same key material under algorithm 5.
+    let rr = format!(
+        "dskey.example.com. 86400 IN DNSKEY 256 3 {FUTURE_ALGORITHM_NUMBER} {RFC4509_DNSKEY_B64}"
+    );
+    let key = parse_dnskey_rr(&rr).expect("parse");
+    let ds = key.ds_record().expect("DS must compute for any algorithm");
+    assert_eq!(ds.algorithm, FUTURE_ALGORITHM_NUMBER);
+    assert_eq!(ds.digest_type, DS_DIGEST_TYPE_SHA256);
+    assert_eq!(ds.digest.len(), 64, "SHA-256 digest is 32 bytes of hex");
+    assert_ne!(
+        ds.digest, "D4B7D520E7BB5F0F67674A0CCEB1E3E0614B93C4F9E99B8383F6A1E4469DA50A",
+        "algorithm byte must participate in the digest"
+    );
+}
+
+#[test]
+fn test_parse_status_unknown_algorithm_mnemonic_round_trips() {
+    let status_output = format!(
+        "dnssec-policy: pqc-policy\ncurrent time:  Sun Sep 27 22:07:11 2026\n\n\
+         key: 12345 ({FUTURE_ALGORITHM_MNEMONIC}), CSK\n\
+         \x20 published:      yes - since Sun Sep 27 22:07:06 2026\n\
+         \x20 key signing:    yes - since Sun Sep 27 22:07:06 2026\n\
+         \x20 zone signing:   yes - since Sun Sep 27 22:07:06 2026\n\n\
+         \x20 No rollover scheduled\n\
+         \x20 - goal:           omnipresent\n\
+         \x20 - dnskey:         omnipresent\n\
+         \x20 - ds:             hidden\n\
+         \x20 - zone rrsig:     omnipresent\n\
+         \x20 - key rrsig:      omnipresent\n"
+    );
+    let status = parse_dnssec_status(&status_output);
+    assert_eq!(status.keys.len(), 1);
+    assert_eq!(status.keys[0].tag, 12345);
+    assert_eq!(status.keys[0].algorithm, FUTURE_ALGORITHM_MNEMONIC);
+    assert!(status.signed);
+}
+
+#[test]
+fn test_zone_status_dnssec_block_serializes_unknown_algorithm() {
+    // The typed `dnssec` block on the zone-status response serializes the
+    // mnemonic as an opaque string: no allowlist, no normalization.
+    let status_output = format!(
+        "dnssec-policy: pqc-policy\ncurrent time:  Sun Sep 27 22:07:11 2026\n\n\
+         key: 12345 ({FUTURE_ALGORITHM_MNEMONIC}), CSK\n\
+         \x20 published:      yes - since Sun Sep 27 22:07:06 2026\n"
+    );
+    let status = parse_dnssec_status(&status_output);
+    let json = serde_json::to_value(&status).expect("serialize");
+    assert_eq!(
+        json["keys"][0]["algorithm"],
+        serde_json::json!(FUTURE_ALGORITHM_MNEMONIC)
+    );
+}

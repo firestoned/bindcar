@@ -98,8 +98,8 @@ log "workspace: $TEST_ROOT"
 mkdir -p "${TEST_ROOT}/zones"
 RNDC_SECRET="$(openssl rand -base64 32)"
 
-# --- [1/7] Fixtures ---------------------------------------------------------
-log "[1/7] generating certificate fixtures"
+# --- [1/8] Fixtures ---------------------------------------------------------
+log "[1/8] generating certificate fixtures"
 
 # Extensions are stated EXPLICITLY rather than inherited from the platform's
 # openssl.cnf. The defaults differ between distributions and OpenSSL versions:
@@ -195,8 +195,8 @@ if [[ ! -x "$BINDCAR_BIN" ]]; then
     (cd "$REPO_ROOT" && cargo build) || { fail "cargo build failed"; exit 1; }
 fi
 
-# --- [2/7] Plaintext still works (backward compatibility) -------------------
-log "[2/7] plaintext listener (no TLS configured)"
+# --- [2/8] Plaintext still works (backward compatibility) -------------------
+log "[2/8] plaintext listener (no TLS configured)"
 PORT=$((PORT_BASE))
 start_bindcar "$PORT" "${TEST_ROOT}/plain.log"
 
@@ -213,8 +213,8 @@ else
 fi
 stop_bindcar
 
-# --- [3/7] TLS listener -----------------------------------------------------
-log "[3/7] TLS listener"
+# --- [3/8] TLS listener -----------------------------------------------------
+log "[3/8] TLS listener"
 PORT=$((PORT_BASE + 1))
 start_bindcar "$PORT" "${TEST_ROOT}/tls.log" \
     BIND_TLS_CERT="${TEST_ROOT}/server.pem" \
@@ -253,8 +253,8 @@ else
 fi
 stop_bindcar
 
-# --- [4/7] Mutual TLS -------------------------------------------------------
-log "[4/7] mutual TLS"
+# --- [4/8] Mutual TLS -------------------------------------------------------
+log "[4/8] mutual TLS"
 PORT=$((PORT_BASE + 2))
 start_bindcar "$PORT" "${TEST_ROOT}/mtls.log" \
     BIND_TLS_CERT="${TEST_ROOT}/server.pem" \
@@ -300,8 +300,8 @@ else
 fi
 stop_bindcar
 
-# --- [5/7] Fail-closed on half-configured TLS -------------------------------
-log "[5/7] fail-closed misconfiguration"
+# --- [5/8] Fail-closed on half-configured TLS -------------------------------
+log "[5/8] fail-closed misconfiguration"
 
 # Certificate without key: must exit non-zero rather than serve plaintext.
 set +e
@@ -343,8 +343,8 @@ else
     fail "client CA without a key pair was silently ignored"
 fi
 
-# --- [6/7] Unreadable material ----------------------------------------------
-log "[6/7] unreadable TLS material"
+# --- [6/8] Unreadable material ----------------------------------------------
+log "[6/8] unreadable TLS material"
 set +e
 env BIND_ZONE_DIR="${TEST_ROOT}/zones" API_PORT=$((PORT_BASE + 5)) \
     DISABLE_AUTH=true BINDCAR_ALLOW_INSECURE_AUTH=true \
@@ -362,8 +362,8 @@ else
     fail "missing certificate file did not prevent startup"
 fi
 
-# --- [7/7] Certificate hot-reload (roadmap 06) ------------------------------
-log "[7/7] certificate hot-reload"
+# --- [7/8] Certificate hot-reload (roadmap 06) ------------------------------
+log "[7/8] certificate hot-reload"
 
 RELOAD_INTERVAL=2
 # Work on copies so the originals stay available for later comparison.
@@ -459,6 +459,36 @@ if wait_for_api https "$PORT"; then
     fi
 else
     fail "listener with reloading disabled did not come up"
+fi
+stop_bindcar
+
+# --- [8/8] Post-quantum hybrid key exchange (ADR-0002, roadmap 09) ----------
+log "[8/8] post-quantum hybrid key exchange"
+
+PORT=$((PORT_BASE + 8))
+start_bindcar "$PORT" "${TEST_ROOT}/pqc.log" \
+    BIND_TLS_CERT="${TEST_ROOT}/server.pem" \
+    BIND_TLS_KEY="${TEST_ROOT}/server-key.pem"
+
+if wait_for_api https "$PORT"; then
+    pass "PQC-stage listener is up"
+else
+    fail "PQC-stage listener did not come up"
+fi
+
+# The negotiation assertion needs an ML-KEM-capable OpenSSL (3.5+). Older
+# OpenSSLs skip with a notice rather than fail: the unit tests in
+# src/tls_test.rs assert the negotiation unconditionally, so this stage only
+# adds coverage against the real binary when the tooling allows.
+if openssl list -kem-algorithms 2>/dev/null | grep -qi 'ML-KEM-768'; then
+    PQC_OUT="$(echo | openssl s_client -connect "127.0.0.1:${PORT}" -groups X25519MLKEM768 2>/dev/null || true)"
+    if grep -q 'X25519MLKEM768' <<<"$PQC_OUT"; then
+        pass "X25519MLKEM768 hybrid key exchange negotiated"
+    else
+        fail "OpenSSL supports ML-KEM but X25519MLKEM768 was not negotiated"
+    fi
+else
+    log "  openssl $(openssl version 2>/dev/null | awk '{print $2}') has no ML-KEM support; negotiation assertion skipped (covered by unit tests)"
 fi
 stop_bindcar
 
