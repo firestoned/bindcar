@@ -36,7 +36,7 @@
 # symlink (COPYing a real `/lib` dir onto it fails). The digest
 # is pinned for reproducibility (A11); resolve with
 #   docker buildx imagetools inspect cgr.dev/chainguard/wolfi-base:latest --raw | sha256sum
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:bef0f4d47edc72a93d1537eae54eb53db2b2cc352c028128ff0f16c5b5a3c1e4 AS nsupdate
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:9c2092b053779e14c82fb50f77b37bcc38b7d2c83972352d5813280f9d035b03 AS nsupdate
 RUN apk add --no-cache bind-tools \
  && mkdir -p /staging/usr/bin \
  && cp -L /usr/bin/nsupdate /staging/usr/bin/ \
@@ -59,7 +59,7 @@ RUN apk add --no-cache bind-tools \
 # NOTE: Chainguard rebuilds :latest daily for CVE fixes; pinning freezes those
 # until the digest is bumped, so Dependabot's docker ecosystem must track it.
 # Re-resolve with: docker buildx imagetools inspect <image> --raw | sha256sum
-FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:05353305142a1ae7c1e27d2cdd09df1650874db3e4c004b3cb2f6dd794e7320f
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:82edc253a57efee78d0fb504e11a93b7c74687b1b736110ad3a2a4f3edf632ab
 
 ARG TARGETARCH
 ARG VERSION=0.1.0
