@@ -28,7 +28,7 @@
 # symlink (COPYing a real `/lib` dir onto it fails). The digest
 # is pinned for reproducibility (A11); resolve with
 #   docker buildx imagetools inspect debian:13-slim --raw | sha256sum
-FROM debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS nsupdate
+FROM debian:13-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS nsupdate
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends bind9-dnsutils \
  && mkdir -p /staging/usr/bin \
@@ -53,7 +53,7 @@ RUN apt-get update -qq \
 #     https://gcr.io/v2/distroless/cc-debian13/manifests/nonroot
 # Refresh with the get-multiarch-digest skill; Dependabot's docker ecosystem
 # keeps it current once pinned.
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:3ee00291cf386ec52a552e6a858d555debd74776eb4bfa53fa3df2cd6677515e
 
 ARG TARGETARCH
 ARG VERSION=0.1.0
